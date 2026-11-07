@@ -1,0 +1,8 @@
+{
+  "name": "skyrim-toolkit-opencode-host-test",
+  "private": true,
+  "description": "The pinned OpenCode host for tests/test_opencode_host.py (CI only; installed with npm ci, never shipped).",
+  "dependencies": {
+    "opencode-ai": "1.19.5"
+  }
+}

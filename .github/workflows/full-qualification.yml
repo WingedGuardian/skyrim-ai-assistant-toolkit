@@ -142,8 +142,9 @@ jobs:
         timeout-minutes: 15
         run: |
           set -euo pipefail
-          npm install --prefix "$RUNNER_TEMP/opencode" --no-audit --no-fund opencode-ai@1.19.5
-          bin="$(find "$RUNNER_TEMP/opencode/node_modules" -type f | grep -E 'opencode-(linux|windows)-x64/bin/opencode(\.exe)?$' | head -1)"
+          # tests/opencode-host/package-lock.json pins opencode-ai and its platform binaries by integrity hash.
+          npm ci --prefix tests/opencode-host --ignore-scripts --no-audit --no-fund
+          bin="$(find tests/opencode-host/node_modules -type f | grep -E 'opencode-(linux|windows)-x64/bin/opencode(\.exe)?$' | head -1)"
           test -n "$bin"
           if command -v cygpath >/dev/null; then bin="$(cygpath -w "$bin")"; fi
           "$bin" --version
