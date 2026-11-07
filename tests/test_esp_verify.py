@@ -15,10 +15,12 @@ WRAPPER = (REPO / "tools" / "esp-verify-wrapper.sh").as_posix()
 # refs = a record that references Skyrim.esm.
 FAKE = """#!/bin/bash
 while [ "$#" -gt 0 ]; do
-  case "$1" in -o) out="$2"; shift 2;; *) shift;; esac
+  case "$1" in -o) out="$2"; shift 2;; -i) in="$2"; shift 2;; *) shift;; esac
 done
+[ -n "${FAKE_SPRIGGIT_ARGS:-}" ] && printf '%s\\n%s\\n' "$in" "$out" > "$FAKE_SPRIGGIT_ARGS"
 case "${FAKE_SPRIGGIT_MODE:-none}" in
   none) ;;
+  crash) echo "[ERR] Unhandled exception. System.IO.DirectoryNotFoundException: Could not find a part of the path"; exit 3 ;;
   noref) printf 'EditorID: Lonely\\n' > "$out/Lonely - 000800_Mod.esp.yaml" ;;
   refs) printf 'Keyword: 013794:Skyrim.esm\\n' > "$out/Thing - 000800_Mod.esp.yaml" ;;
   refs-twice) printf 'Keyword: 013794:Skyrim.esm\\nKeyword: 013794:Skyrim.esm\\n' > "$out/Thing - 000800_Mod.esp.yaml" ;;
@@ -31,16 +33,18 @@ exit 0
 """
 
 
-def _run(tmp_path, mode, *args, after_plugin=()):
+def _run(tmp_path, mode, *args, after_plugin=(), folder=None, extra_env=None):
     fake = tmp_path / "fake-spriggit"
     if not fake.exists():
         fake.write_text(FAKE, newline="\n")
         fake.chmod(0o755)
-    plugin = tmp_path / "Mod.esp"
+    home = tmp_path / folder if folder else tmp_path
+    home.mkdir(parents=True, exist_ok=True)
+    plugin = home / "Mod.esp"
     plugin.write_bytes(b"TES4")
     import os
     env = dict(os.environ, SPRIGGIT=fake.as_posix(), ESP_VERIFY_SNAPDIR=(tmp_path / "snaps").as_posix(),
-               FAKE_SPRIGGIT_MODE=mode)
+               FAKE_SPRIGGIT_MODE=mode, **(extra_env or {}))
     return subprocess.run([BASH, WRAPPER, args[0], *args[1:], plugin.as_posix(), *after_plugin],
                           capture_output=True, text=True, env=env, timeout=120)
 
@@ -190,3 +194,28 @@ def test_one_of_two_identical_references_going_missing_is_a_drop(tmp_path):
     assert _run(tmp_path, "refs-twice", "snapshot").returncode == 0
     r = _run(tmp_path, "refs", "verify")
     assert r.returncode != 0 and "REFERENCE DROPPED" in r.stdout, r.stdout + r.stderr
+
+
+# Issue #22: MSYS converts a POSIX path for a native program by itself, but SKIPS an argument containing `[` or `]`,
+# so the native Spriggit got `/g/.../[NoDelete] Mod/Mod.esp` and .NET read it relative to the current drive. The
+# wrapper must hand Spriggit a native path itself. The fake is a bash script (MSYS converts nothing for it), so it
+# sees exactly what a native Spriggit would.
+def test_a_bracketed_plugin_folder_reaches_spriggit_as_a_native_path(tmp_path):
+    import os
+    import re
+    args = tmp_path / "args.txt"
+    r = _run(tmp_path, "refs", "snapshot", folder="mods/[NoDelete] Some Mod",
+             extra_env={"FAKE_SPRIGGIT_ARGS": args.as_posix()})
+    assert r.returncode == 0, r.stdout + r.stderr
+    plugin_arg, out_arg = args.read_text().splitlines()
+    assert plugin_arg.endswith("/[NoDelete] Some Mod/Mod.esp"), plugin_arg
+    if os.name == "nt":
+        for arg in (plugin_arg, out_arg):
+            assert re.match(r"^[A-Za-z]:/", arg), "Spriggit got a POSIX path it cannot resolve: " + arg
+
+
+def test_a_failing_serializer_shows_its_own_error(tmp_path):
+    """Issue #22's second half: Spriggit's output went to /dev/null, so a path error looked like a corrupt plugin."""
+    r = _run(tmp_path, "crash", "snapshot")
+    assert r.returncode != 0, r.stdout + r.stderr
+    assert "DirectoryNotFoundException" in r.stderr and "spriggit serialize failed" in r.stderr, r.stderr

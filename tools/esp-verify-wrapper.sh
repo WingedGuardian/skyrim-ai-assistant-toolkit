@@ -76,16 +76,28 @@ fi
 # build_inventory <plugin-path> <output-inv-file>
 #   Emits one TSV line per cross-reference:  <EditorID>\t<FORMID:Master>
 #   sorted, so two inventories diff cleanly with comm.
+# native_path <path>: the path as the native (.NET) Spriggit must receive it. MSYS converts a POSIX path for a native
+# program by itself, but SKIPS any argument containing `[` or `]` (issue #22: a Wabbajack `[NoDelete] Mod` folder),
+# and .NET then reads `/g/...` as relative to the current drive. So convert explicitly; without cygpath (Linux) the
+# path is already native.
+CYGPATH="$(command -v cygpath 2>/dev/null || true)"
+native_path() { if [ -n "$CYGPATH" ]; then "$CYGPATH" -m "$1"; else printf '%s' "$1"; fi; }
+
 build_inventory() {
   local plugin="$1" out="$2" tmp
   [ -f "$plugin" ] || die "plugin not found: $plugin"
   plugin="$(cd "$(dirname "$plugin")" && pwd)/$(basename "$plugin")"   # the local tool runs from the toolkit root
   tmp="$(mktemp -d)"
-  if ! "$SPRIGGIT" serialize -i "$plugin" -o "$tmp" \
-        -g "$GAME_RELEASE" -p "$PKG" -v "$PKGVER" -u >/dev/null 2>&1; then
+  local log; log="$(mktemp)"
+  if ! "$SPRIGGIT" serialize -i "$(native_path "$plugin")" -o "$(native_path "$tmp")" \
+        -g "$GAME_RELEASE" -p "$PKG" -v "$PKGVER" -u >"$log" 2>&1; then
     rm -rf "$tmp"
+    echo "esp-verify: the end of spriggit's output:" >&2
+    tail -n 25 "$log" >&2
+    rm -f "$log"
     die "spriggit serialize failed for $plugin"
   fi
+  rm -f "$log"
   # A serializer that exits 0 yet wrote no YAML (missing runtime, wrong package version) would
   # otherwise yield an empty inventory, and empty-vs-empty reads as "no changes": a PASS from a
   # check that looked at nothing.
