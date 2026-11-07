@@ -34,7 +34,8 @@ KEEP_ENV = ("PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP",
 def host_binary():
     binary = os.environ.get("TOOLKIT_OPENCODE_BIN", "")
     if binary and Path(binary).is_file():
-        return binary
+        # Absolute: the host runs with the throwaway kit as its working folder (CI passes a repo-relative path).
+        return str(Path(binary).resolve())
     if os.environ.get("TOOLKIT_REQUIRE_OPENCODE_HOST") == "1":
         pytest.fail("TOOLKIT_OPENCODE_BIN must name the opencode executable for host qualification")
     pytest.skip("no OpenCode host (set TOOLKIT_OPENCODE_BIN); real-host enforcement was not tested")
