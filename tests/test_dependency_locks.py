@@ -109,14 +109,19 @@ def test_ci_workflow_parses_and_runs_harness_modules_on_both_legs():
     shard_rows = [row for row in behavior["strategy"]["matrix"]["include"] if row.get("part") == "mutations"]
     assert shard_rows, "the mutation gate must run as include: rows (test_workflows checks their shape)"
     assert harness[0]["env"]["SUITE"] == ("${{ matrix.part == 'mutations' && 'tests/test_mutations.py' "
-                                          "|| 'tests/ --ignore=tests/test_mutations.py' }}")
+                                          "|| 'tests/ --ignore=tests/test_mutations.py "
+                                          "--ignore=tests/test_opencode_host.py' }}")
     assert "-rfEs" in command, "failures, errors and skips must all be named: " + command
     assert str(harness[0].get("env", {}).get("TOOLKIT_REQUIRE_HARNESS")) == "1", harness[0]
     # ...and nothing else runs plain pytest over tests/, which would skip those modules unseen.
     plain = [step for step in behavior["steps"] if "-m pytest" in str(step.get("run", ""))
              and "run_harness_tests" not in str(step.get("run", ""))
              and "pip install" not in str(step.get("run", ""))]
-    assert not plain, plain
+    # The one exception: the real-host OpenCode test (tests/test_opencode_host.py), which the suite ignores, runs plain
+    # because its host fetches a provider package at startup; it names that ONE file and nothing else under tests/.
+    host = [step for step in plain if "pytest tests/test_opencode_host.py " in step["run"] + " "
+            and len([w for w in step["run"].split() if w.startswith("tests/test_")]) == 1]
+    assert len(host) <= 1 and [step for step in plain if step not in host] == [], plain
 
 
 def test_the_lock_never_pins_a_pygments_with_the_known_advisory():
