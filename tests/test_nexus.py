@@ -287,3 +287,27 @@ def test_bad_usage_and_the_dropped_commands_are_exit_2(kit, args):
     r = run(kit, *args)
     assert r.returncode == 2, r.stdout + r.stderr
     assert calls(kit) == []
+
+
+# Issue #21: the preview host now also serves a flat manifest (version 1, a `files` list of file_path/file_size).
+# Reading only the `children` tree printed "LISTED: 0 file(s)" for a 49-file archive.
+FLAT = {"version": 1, "files": [{"file_path": "docs/BUILDING.md", "file_size": 3342, "file_hashes": {}},
+                                {"file_path": "SKSE\Plugins\Thing.dll", "file_size": 512, "file_hashes": {}}]}
+
+
+@pytest.mark.parametrize("tree, expect", [
+    (FLAT, ["LISTED: 2 file(s)", "/docs/BUILDING.md  3342", "/SKSE/Plugins/Thing.dll  512"]),
+    ({"version": 1, "files": []}, ["LISTED: 0 file(s)"]),
+    ({"children": []}, ["LISTED: 0 file(s)"]),
+    ({"version": 2, "entries": [{"path": "x"}]}, ["UNSUPPORTED PREVIEW FORMAT (top-level: entries, version)"]),
+    ({"version": 1, "files": [{"name": "x"}]}, ["UNSUPPORTED PREVIEW FORMAT"]),
+], ids=["flat", "flat-empty", "tree-empty", "unknown-schema", "flat-row-without-path"])
+def test_contents_reads_both_preview_schemas_and_never_calls_an_unknown_one_empty(monkeypatch, capsys, tree, expect):
+    monkeypatch.setattr(nr, "fetch", lambda url: ("LISTED", tree))
+    monkeypatch.setenv("FILES", fx("files.json"))
+    assert nr.main(["contents"]) == 0
+    out = capsys.readouterr().out
+    for e in expect:
+        assert e in out, out
+    if "UNSUPPORTED" in expect[0]:
+        assert "LISTED" not in out, out

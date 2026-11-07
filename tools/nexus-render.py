@@ -221,6 +221,28 @@ def walk(node, prefix=""):
             yield path, c.get("size") or ""
 
 
+def manifest_entries(tree):
+    """[(path, size)] for either preview schema, or None when the structure is not one this tool knows.
+
+    Two schemas are published: the older directory tree (`children` with `name`/`type`/`size`) and the current flat
+    manifest (`version` 1 plus a `files` list of `file_path`/`file_size`). Issue #21: reading only the tree made a
+    flat manifest of 49 files print "LISTED: 0 file(s)". An empty list in a known schema is a real empty archive; an
+    unknown structure is never reported as one."""
+    if not isinstance(tree, dict):
+        return None
+    if isinstance(tree.get("files"), list):
+        rows = []
+        for f in tree["files"]:
+            path = f.get("file_path") if isinstance(f, dict) else None
+            if not isinstance(path, str) or not path.strip():
+                return None
+            rows.append(("/" + path.replace("\\", "/").lstrip("/"), f.get("file_size") or ""))
+        return rows
+    if isinstance(tree.get("children"), list):
+        return list(walk(tree))
+    return None
+
+
 def cmd_contents(version):
     files = [f for f in (load_env("FILES").get("files") or []) if isinstance(f, dict)]
     keep = [f for f in files if f.get("category_name") in ("MAIN", "OPTIONAL", "UPDATE")
@@ -237,7 +259,12 @@ def cmd_contents(version):
         if tree is None:
             print("     {}".format(status))
             continue
-        entries = list(walk(tree))
+        entries = manifest_entries(tree)
+        if entries is None:
+            keys = ", ".join(sorted(tree)[:8]) if isinstance(tree, dict) else type(tree).__name__
+            print("     UNSUPPORTED PREVIEW FORMAT (top-level: {}) -- not 'empty'; open the link: {}".format(
+                keys, f.get("content_preview_link")))
+            continue
         print("     {}: {} file(s)".format(status, len(entries)))
         for path, size in entries[:400]:
             print("     {}  {}".format(path, size))
