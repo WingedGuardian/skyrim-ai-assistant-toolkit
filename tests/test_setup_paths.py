@@ -9,10 +9,11 @@ afterwards -- it never looks at a single path setup.sh wrote.
 from __future__ import annotations
 
 import re
+import sys
 
 import pytest
 
-from conftest import claude_md, game_root_win, hook_python_lines, key_path, run_setup, write_mo2_ini
+from conftest import REPO, claude_md, game_root_win, hook_python_lines, key_path, run_setup, write_mo2_ini
 
 
 # ---------------------------------------------------------------- stock/Vortex
@@ -103,6 +104,38 @@ def test_wabbajack_instance_one_folder_above_the_game_is_detected(tmp_path):
     assert "Mod Organizer 2" in line, f"Wabbajack instance not detected: {line!r}"
     text = claude_md(game).replace("\\", "/")
     assert "MyList/mods" in text and "profiles/Main" in text, text
+
+
+def test_every_profile_with_local_saves_is_declared(tmp_path):
+    """Issue #23, second half: with LocalSaves=true MO2 keeps each profile's saves in <profile>/saves, and setup
+    declared only the SELECTED profile (and only when it had its own INIs), so the list's other profiles' saves got
+    no backup. Each such profile is now one SKYRIM_PROFILE_SAVES line; a profile without local saves is not."""
+    from conftest import make_game, make_mo2_tree
+
+    lst = tmp_path / "MyList"
+    game = make_game(lst, name="Stock Game", exe="SkyrimSE.exe")
+    make_mo2_tree(lst, "Main")
+    profiles = lst / "profiles"
+    (profiles / "Main" / "saves").mkdir()
+    (profiles / "Other").mkdir()
+    (profiles / "Other" / "settings.ini").write_text("[General]\nLocalSaves=true\n", encoding="utf-8")
+    (profiles / "Plain").mkdir()
+    (profiles / "Plain" / "settings.ini").write_text("[General]\nLocalSaves=false\n", encoding="utf-8")
+    root = game_root_win(game)
+    write_mo2_ini(lst / "ModOrganizer.ini", root, "Main", root.rsplit("/", 1)[0], byte_array=True)
+    r = run_setup(game)
+    assert r.returncode == 0, r.stdout + r.stderr
+    lines = [l for l in (game / "skyrim-paths.env").read_text(encoding="utf-8").splitlines()
+             if l.startswith("SKYRIM_PROFILE_SAVES=")]
+    named = sorted(l.rstrip("'").replace("\\", "/").rsplit("/", 1)[-1] for l in lines)
+    assert named == ["Main", "Other"], lines
+    # The guard reads the same file: Other's saves folder is a save location now.
+    sys.path.insert(0, str(REPO / "tools"))
+    from skyguard import paths, writes
+    env = paths.read_install(game.as_posix(), {})
+    roots = paths.roots(game.as_posix(), game.as_posix(), env)
+    assert writes.is_save((profiles / "Other" / "saves" / "a.ess").as_posix().lower(), roots)
+    assert not writes.is_save((profiles / "Plain" / "saves" / "a.ess").as_posix().lower(), roots)
 
 
 def test_portable_mo2_instance_path_is_normalized(portable_mo2):

@@ -307,6 +307,20 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
     ),
     pytest.param(
         "setup.sh",
+        '            PROFILE_SAVES+=("$pd")',
+        "            :",
+        "tests/test_setup_paths.py::test_every_profile_with_local_saves_is_declared",
+        id="profile-saves-detected",
+    ),
+    pytest.param(
+        "tools/skyguard/paths.py",
+        'CONFIG_KEYS = ("SKYRIM_CONFIG_DIR", "SKYRIM_DOCUMENTS_DIR", "SKYRIM_PROFILE_SAVES")',
+        'CONFIG_KEYS = ("SKYRIM_CONFIG_DIR", "SKYRIM_DOCUMENTS_DIR")',
+        "tests/test_setup_paths.py::test_every_profile_with_local_saves_is_declared",
+        id="profile-saves-protected",
+    ),
+    pytest.param(
+        "setup.sh",
         "LOCALAPPDATA_DIR=$(printf '%s' " + '"$LOCALAPPDATA_DIR"' + " | tr '" + BS + "134' '/')",
         "",
         "tests/test_setup_paths.py::test_paths_are_not_backslash_corrupted",

@@ -534,6 +534,7 @@ LOADORDER_DIR="$LOCALAPPDATA_DIR/$SKYRIM_FOLDER"
 # user's mods, and the profile -- not Documents -- is where the INIs and load order live. Getting
 # this wrong means every path we write into CLAUDE.md points somewhere real but nearly empty.
 MO2_INSTANCE=""; MO2_MODS=""; MO2_PROFILE=""; MO2_PROFILE_DIR=""; MO2_OVERWRITE=""
+PROFILE_SAVES=()   # every MO2 profile folder that keeps its own saves (LocalSaves), selected or not (#23)
 
 ini_get() { # $1=file $2=section $3=key  -> value, QSettings-unescaped, forward-slashed
     awk -v sec="[$2]" -v key="$3" '
@@ -607,6 +608,16 @@ if MO2_INI="$(find_mo2_instance)"; then
     if [ -f "$MO2_PROFILE_DIR/SkyrimPrefs.ini" ] || [ -f "$MO2_PROFILE_DIR/skyrimprefs.ini" ]; then
         CONFIG_DIR="$MO2_PROFILE_DIR"
     fi
+    # Profile-local saves (#23): with LocalSaves=true in a profile's settings.ini, MO2 keeps that profile's saves in
+    # <profile>/saves. Every such profile is declared, not only the selected one, so the guard backs up and protects
+    # the saves of the list's other profiles too. A saves/ folder alone also counts: it holds saves either way.
+    for pd in "$MO2_PROFILES"/*/; do
+        pd="${pd%/}"
+        [ -d "$pd" ] || continue
+        if [ "$(ini_get "$pd/settings.ini" General LocalSaves | tr 'A-Z' 'a-z')" = true ] || [ -d "$pd/saves" ]; then
+            PROFILE_SAVES+=("$pd")
+        fi
+    done
 fi
 
 # --- Paths a 3.x CLAUDE.md held (tools/migrate-3x.py wrote them as data) ---
@@ -925,6 +936,9 @@ _keep SKYRIM_MO2_OVERWRITE MO2_OVERWRITE
     # protect them if it is told where they are. Empty ('') on a non-MO2 install: declares nothing.
     printf 'SKYRIM_MO2_MODS=%s\n' "$(sq "$MO2_MODS")"
     printf 'SKYRIM_MO2_OVERWRITE=%s\n' "$(sq "$MO2_OVERWRITE")"
+    # One line per MO2 profile that keeps its own saves (none on a stock install). Its own key: a shell sourcing this
+    # file keeps only the last line of a repeated key, so SKYRIM_CONFIG_DIR stays one value.
+    for pd in "${PROFILE_SAVES[@]+"${PROFILE_SAVES[@]}"}"; do printf 'SKYRIM_PROFILE_SAVES=%s\n' "$(sq "$pd")"; done
     # What setup found, so a re-run can tell a path edited by hand from one it wrote itself.
     printf '%s' "$DETECTED_LINES"
     # The interpreter the hooks were configured with ('' when no Python was found).
