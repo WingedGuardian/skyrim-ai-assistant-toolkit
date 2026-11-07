@@ -130,4 +130,5 @@ def test_the_shipped_guard_refuses_in_a_real_opencode_host(tmp_path):
     assert len(final) == 3, record
     shown = json.dumps(final, indent=1)
     assert "Blocked: plugin and archive files" in final[0], shown
-    assert "Saves" in final[1] and "control" not in final[1], shown
+    assert final[1].startswith("Blocked:") and "Saves" in final[1], shown
+    assert not final[2].startswith("Blocked:"), shown
