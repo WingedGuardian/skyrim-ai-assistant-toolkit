@@ -553,8 +553,10 @@ find_mo2_instance() {
     # Global instances live one folder deep under %LOCALAPPDATA%\ModOrganizer\<InstanceName>\.
     # A portable instance keeps its ini in the MO2 install folder -- point MO2_INSTANCE_INI at it.
     # Also probe the game root's siblings: a Nolvus/Wabbajack-style install parks the portable MO2
-    # next to the game folder (<instance>/MO2/ModOrganizer.ini beside <instance>/STOCK GAME/).
-    for ini in "${MO2_INSTANCE_INI:-}" "$LOCALAPPDATA_DIR/ModOrganizer"/*/ModOrganizer.ini \
+    # next to the game folder (<instance>/MO2/ModOrganizer.ini beside <instance>/STOCK GAME/). And probe the game
+    # root's PARENT: a Wabbajack list keeps its portable MO2 at the list root, one folder above `Stock Game` (#23).
+    # The gamePath comparison below still ties every candidate to this game folder.
+    for ini in "${MO2_INSTANCE_INI:-}" "$LOCALAPPDATA_DIR/ModOrganizer"/*/ModOrganizer.ini "$GAME_DIR"/../ModOrganizer.ini \
                "$GAME_DIR"/../*/ModOrganizer.ini; do
         [ -f "$ini" ] || continue
         gp="$(ini_get "$ini" General gamePath)"

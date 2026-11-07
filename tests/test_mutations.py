@@ -300,6 +300,13 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
     ),
     pytest.param(
         "setup.sh",
+        ' "$GAME_DIR"/../ModOrganizer.ini \\',
+        " \\",
+        "tests/test_setup_paths.py::test_wabbajack_instance_one_folder_above_the_game_is_detected",
+        id="wabbajack-parent-probe",
+    ),
+    pytest.param(
+        "setup.sh",
         "LOCALAPPDATA_DIR=$(printf '%s' " + '"$LOCALAPPDATA_DIR"' + " | tr '" + BS + "134' '/')",
         "",
         "tests/test_setup_paths.py::test_paths_are_not_backslash_corrupted",

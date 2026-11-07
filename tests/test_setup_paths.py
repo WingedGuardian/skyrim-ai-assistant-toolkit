@@ -86,6 +86,25 @@ def test_portable_mo2_instance_is_detected(portable_mo2):
     assert "MODS/mods" in text.replace("\\", "/"), "mods path not written"
 
 
+def test_wabbajack_instance_one_folder_above_the_game_is_detected(tmp_path):
+    """Issue #23: a Wabbajack list keeps its portable MO2 at the list root, with the game in `Stock Game` below it.
+    Setup probed only %LOCALAPPDATA% and the game's siblings, reported no mod manager, and left mods/ and overwrite/
+    (outside the game folder) out of the install-delete rule."""
+    from conftest import make_game, make_mo2_tree
+
+    lst = tmp_path / "MyList"
+    game = make_game(lst, name="Stock Game", exe="SkyrimSE.exe")
+    make_mo2_tree(lst, "Main")
+    root = game_root_win(game)
+    write_mo2_ini(lst / "ModOrganizer.ini", root, "Main", root.rsplit("/", 1)[0], byte_array=True)
+    r = run_setup(game)
+    assert r.returncode == 0, r.stdout + r.stderr
+    line = key_path(game, "Mod manager")
+    assert "Mod Organizer 2" in line, f"Wabbajack instance not detected: {line!r}"
+    text = claude_md(game).replace("\\", "/")
+    assert "MyList/mods" in text and "profiles/Main" in text, text
+
+
 def test_portable_mo2_instance_path_is_normalized(portable_mo2):
     """Regression, v3.5.4: the sibling probe resolves through `..`, which wrote
     a correct-but-unreadable `STOCK GAME/../MO2` into CLAUDE.md."""
