@@ -143,7 +143,8 @@ def test_the_tripwires_bracket_the_suite_on_every_leg():
     m = data["jobs"]["behavior"]["strategy"]["matrix"]
     assert m["part"] == ["suite"] and {e["part"] for e in m["include"]} == {"mutations"}
     assert steps[suite]["env"]["SUITE"] == ("${{ matrix.part == 'mutations' && 'tests/test_mutations.py' "
-                                            "|| 'tests/ --ignore=tests/test_mutations.py' }}")
+                                            "|| 'tests/ --ignore=tests/test_mutations.py "
+                                            "--ignore=tests/test_opencode_host.py' }}")
     assert steps[suite]["env"]["SKYGUARD_MUTATION_SHARD"] == (
         "${{ matrix.part == 'mutations' && format('{0}/{1}', matrix.shard, matrix.shards) || '' }}")
     assert steps[log]["env"]["PART"] == "${{ matrix.part == 'mutations' && '--part mutations' || '' }}"

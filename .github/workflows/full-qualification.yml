@@ -133,13 +133,29 @@ jobs:
           TOOLKIT_REQUIRE_HARNESS: "1"
         run: python -B tests/run_harness_tests.py tests/test_skyguard_timing.py tests/test_python_fallback.py tests/test_hook_deadline.py -q -rfEs
 
+      # Real-host OpenCode qualification (tests/test_opencode_host.py): the shipped skyguard.js inside a pinned
+      # OpenCode, driven by a loopback scripted model. Outside the contained launcher, because the host installs its
+      # provider package from npm at startup; the suite ignores the file. Newest Python leg of each OS only. It fails,
+      # rather than skips, when the host is missing.
+      - name: OpenCode real-host guard (1.19.5)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' && matrix.part == 'suite' && matrix.python == '3.13' }}
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/opencode" --no-audit --no-fund opencode-ai@1.19.5
+          bin="$(find "$RUNNER_TEMP/opencode/node_modules" -type f | grep -E 'opencode-(linux|windows)-x64/bin/opencode(\.exe)?$' | head -1)"
+          test -n "$bin"
+          if command -v cygpath >/dev/null; then bin="$(cygpath -w "$bin")"; fi
+          "$bin" --version
+          TOOLKIT_OPENCODE_BIN="$bin" TOOLKIT_REQUIRE_OPENCODE_HOST=1 python -B -m pytest tests/test_opencode_host.py -v -rfEs
+
       - name: Behavioral suite (contained harness)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         timeout-minutes: 270
         env:
           TOOLKIT_REQUIRE_HARNESS: "1"
           TOOLKIT_REQUIRE_NODE_DEPS: "1"
-          SUITE: ${{ matrix.part == 'mutations' && 'tests/test_mutations.py' || 'tests/ --ignore=tests/test_mutations.py' }}
+          SUITE: ${{ matrix.part == 'mutations' && 'tests/test_mutations.py' || 'tests/ --ignore=tests/test_mutations.py --ignore=tests/test_opencode_host.py' }}
           # a mutation shard runs its slice of the gate (tests/conftest.py); a suite leg leaves this empty
           SKYGUARD_MUTATION_SHARD: ${{ matrix.part == 'mutations' && format('{0}/{1}', matrix.shard, matrix.shards) || '' }}
         run: |
