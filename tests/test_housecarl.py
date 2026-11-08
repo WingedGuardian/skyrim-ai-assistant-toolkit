@@ -988,8 +988,10 @@ def _fake_preserve(seen, restore=True, ok=True):
     return run
 
 
-def test_a_dropped_master_is_restored_before_publication(install, monkeypatch):
+def test_a_dropped_master_is_restored_before_publication(install, monkeypatch, tmp_path):
     seen = []
+    (tmp_path / "temp").mkdir()
+    monkeypatch.setattr(gateway.tempfile, "tempdir", str(tmp_path / "temp"))   # never the real %TEMP%
     monkeypatch.setattr(gateway, "Backend", _master_dropping_backend())
     monkeypatch.setattr(gateway, "independent_check", lambda *a, **k: {"records": {}, "errors": [], "complete": True})
     monkeypatch.setattr(gateway.subprocess, "run", _fake_preserve(seen))
@@ -1003,8 +1005,10 @@ def test_a_dropped_master_is_restored_before_publication(install, monkeypatch):
     assert json.loads(receipts[0].read_text(encoding="utf-8"))["retained_header"]["added_masters"] == ["Skyrim.esm"]
 
 
-def test_a_failed_restore_publishes_nothing_and_removes_its_links(install, monkeypatch):
+def test_a_failed_restore_publishes_nothing_and_removes_its_links(install, monkeypatch, tmp_path):
     seen = []
+    (tmp_path / "temp").mkdir()
+    monkeypatch.setattr(gateway.tempfile, "tempdir", str(tmp_path / "temp"))   # never the real %TEMP%
     target = Path(install["data_dir"]) / "Sword.esp"
     original = target.read_bytes()
     monkeypatch.setattr(gateway, "Backend", _master_dropping_backend())
