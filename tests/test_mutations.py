@@ -334,6 +334,13 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
         id="postmortem-this-session",
     ),
     pytest.param(
+        "tools/missing-textures.py",
+        "        incomplete = incomplete or bool(data.get('read_incomplete') or data.get('bsa_failures'))",
+        "        incomplete = False",
+        "tests/test_missing_textures.py::test_an_incomplete_archive_read_is_could_not_check",
+        id="missing-textures-incomplete",
+    ),
+    pytest.param(
         "tools/skyguard/paths.py",
         'CONFIG_KEYS = ("SKYRIM_CONFIG_DIR", "SKYRIM_DOCUMENTS_DIR", "SKYRIM_PROFILE_SAVES")',
         'CONFIG_KEYS = ("SKYRIM_CONFIG_DIR", "SKYRIM_DOCUMENTS_DIR")',

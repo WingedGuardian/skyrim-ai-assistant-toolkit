@@ -86,6 +86,7 @@ CORE_REQUIRED = (
     "tools/skse-load-status.py",
     "tools/plugin-check.py",          # v4.1.0: load-order check for the agent
     "tools/postmortem.py",            # v4.1.0: last-session report (crash, Papyrus, SKSE)
+    "tools/missing-textures.py",      # v4.1.0: textures meshes name that nothing provides (House Carl)
     "tools/archive-triage.py",
     "tools/mirror-launch-logs.py",
     "tools/housekeep.py",
