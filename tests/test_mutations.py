@@ -327,6 +327,13 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
         id="plugin-check-mo2-folders",
     ),
     pytest.param(
+        "tools/postmortem.py",
+        "                 'this_session': bool(opened and when >= opened)}",
+        "                 'this_session': True}",
+        "tests/test_postmortem.py::test_a_dump_from_before_the_session_is_marked_older",
+        id="postmortem-this-session",
+    ),
+    pytest.param(
         "tools/skyguard/paths.py",
         'CONFIG_KEYS = ("SKYRIM_CONFIG_DIR", "SKYRIM_DOCUMENTS_DIR", "SKYRIM_PROFILE_SAVES")',
         'CONFIG_KEYS = ("SKYRIM_CONFIG_DIR", "SKYRIM_DOCUMENTS_DIR")',

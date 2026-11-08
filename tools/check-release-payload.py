@@ -85,6 +85,7 @@ CORE_REQUIRED = (
     "tools/skyrim_paths.py",
     "tools/skse-load-status.py",
     "tools/plugin-check.py",          # v4.1.0: load-order check for the agent
+    "tools/postmortem.py",            # v4.1.0: last-session report (crash, Papyrus, SKSE)
     "tools/archive-triage.py",
     "tools/mirror-launch-logs.py",
     "tools/housekeep.py",
