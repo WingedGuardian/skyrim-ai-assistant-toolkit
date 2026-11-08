@@ -941,7 +941,98 @@ def test_an_edit_that_changes_the_header_is_never_published(install, monkeypatch
 
     monkeypatch.setattr(gateway, "Backend", FakeBackend)
     monkeypatch.setattr(gateway, "independent_check", lambda *a, **k: {"records": {}, "errors": [], "complete": True})
-    with pytest.raises(Refusal, match="header flags and masters"):
+    # A restore that reports success but leaves the master out: the check after it still refuses.
+    monkeypatch.setattr(gateway, "retain_header", lambda *a, **k: {"complete": True})
+    with pytest.raises(Refusal, match="header flags"):
         asyncio.run(gateway.Gateway(install).call("housecarl_apply", {
             "in_place": "Sword.esp", "ops": [{"formid": "000800:Sword.esp", "field_path": "Name", "value": "new"}]}))
     assert target.read_bytes() == original
+
+
+def _master_dropping_backend():
+    from types import SimpleNamespace
+
+    class FakeBackend:
+        def __init__(self, config, snapshot, work):
+            self.work = work
+
+        async def __aenter__(self):
+            (self.work / "profile").mkdir()
+            (self.work / "profile/modlist.txt").write_text("")
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
+
+        async def call(self, _name, _args):
+            plugin(self.work / "mods/Target/Sword.esp", flags=0, masters=[])   # the lean collector dropped Skyrim.esm
+            return SimpleNamespace(content=[SimpleNamespace(type="text", text=json.dumps({"ok": True, "verify_ran": True}))])
+    return FakeBackend
+
+
+def _fake_preserve(seen, restore=True, ok=True):
+    """Stands in for node + tools/housecarl-preserve.js; records what the linked view held while it ran."""
+    def run(argv, **_kw):
+        from types import SimpleNamespace
+        assert Path(argv[1]).name == "housecarl-preserve.js"
+        spec = json.loads(Path(argv[2]).read_text(encoding="utf-8"))
+        data = Path(spec["game"]) / "Data"
+        seen.append({"data": data, "links": os.stat(data / "Skyrim.esm").st_nlink,
+                     "detached": os.stat(data / "Sword.esp").st_nlink})
+        if not ok:
+            return SimpleNamespace(stdout="", stderr="Error: Header readback mismatch")
+        if restore:
+            plugin(Path(spec["candidate"]), flags=0, masters=["Skyrim.esm"])
+        Path(argv[3]).write_text(json.dumps({"complete": True, "added_masters": ["Skyrim.esm"]}), encoding="utf-8")
+        return SimpleNamespace(stdout="RESULT: OK", stderr="")
+    return run
+
+
+def test_a_dropped_master_is_restored_before_publication(install, monkeypatch):
+    seen = []
+    monkeypatch.setattr(gateway, "Backend", _master_dropping_backend())
+    monkeypatch.setattr(gateway, "independent_check", lambda *a, **k: {"records": {}, "errors": [], "complete": True})
+    monkeypatch.setattr(gateway.subprocess, "run", _fake_preserve(seen))
+    asyncio.run(gateway.Gateway(install).call("housecarl_apply", {
+        "in_place": "Sword.esp", "ops": [{"formid": "000800:Sword.esp", "field_path": "Name", "value": "new"}]}))
+    target = Path(install["data_dir"]) / "Sword.esp"
+    assert order.plugin_header(target)["masters"] == ["Skyrim.esm"]
+    assert seen[0]["links"] >= 2 and seen[0]["detached"] == 1      # masters linked, the candidate a detached copy
+    assert not seen[0]["data"].parent.exists()                     # the linked view is gone after the call
+    receipts = list((Path(install["state_dir"]) / "transactions").glob("*/receipt.json"))
+    assert json.loads(receipts[0].read_text(encoding="utf-8"))["retained_header"]["added_masters"] == ["Skyrim.esm"]
+
+
+def test_a_failed_restore_publishes_nothing_and_removes_its_links(install, monkeypatch):
+    seen = []
+    target = Path(install["data_dir"]) / "Sword.esp"
+    original = target.read_bytes()
+    monkeypatch.setattr(gateway, "Backend", _master_dropping_backend())
+    monkeypatch.setattr(gateway, "independent_check", lambda *a, **k: {"records": {}, "errors": [], "complete": True})
+    monkeypatch.setattr(gateway.subprocess, "run", _fake_preserve(seen, ok=False))
+    with pytest.raises(Refusal, match="Restoring the original's masters failed"):
+        asyncio.run(gateway.Gateway(install).call("housecarl_apply", {
+            "in_place": "Sword.esp", "ops": [{"formid": "000800:Sword.esp", "field_path": "Name", "value": "new"}]}))
+    assert target.read_bytes() == original
+    assert not seen[0]["data"].exists()                            # links removed even though the step failed
+
+
+def test_restore_refuses_a_flag_change_before_running_xedit(install, monkeypatch, tmp_path):
+    candidate = tmp_path / "cand" / "Sword.esp"
+    candidate.parent.mkdir()
+    plugin(candidate, flags=0x200, masters=[])
+    monkeypatch.setattr(gateway.subprocess, "run", lambda *a, **k: pytest.fail("xEdit must not run"))
+    with pytest.raises(Refusal, match="changed the original's header flags"):
+        gateway.retain_header(install, candidate, order.capture(install), Path(install["data_dir"]) / "Sword.esp")
+
+
+def test_verifier_controls_on_synthetic_plugins(tmp_path):
+    import shutil
+    import subprocess
+    if not shutil.which("node"):
+        pytest.skip("Node not installed")
+    here = Path(__file__).resolve().parent
+    result = subprocess.run(["node", str(here / "housecarl-verify-controls.js"), str(here.parent / "tools"), str(tmp_path)],
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "Passed 12 verifier controls" in result.stdout

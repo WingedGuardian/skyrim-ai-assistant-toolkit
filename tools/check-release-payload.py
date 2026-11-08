@@ -124,6 +124,7 @@ CORE_REQUIRED = (
     ".opencode/hooks/skyguard_adapter.py",
     ".opencode/SKYRIM-OPENCODE.md",
     "tools/housecarl.py",
+    "tools/housecarl-preserve.js",
     "tools/housecarl-verify.js",
     "tools/housecarl-requirements.lock",
     "tools/housecarl-requirements.txt",

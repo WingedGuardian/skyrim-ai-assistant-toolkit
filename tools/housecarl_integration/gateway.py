@@ -222,55 +222,103 @@ def _scratch_parent(config, masters):
         ", ".join(sorted(drives))))
 
 
-def independent_check(config, candidate, snapshot, before=None, allowed=None):
-    """xEdit parses every candidate record; preserves untouched records by canonical JSON."""
-    verifier = Path(config["root"]) / "tools/housecarl-verify.js"
-    masters = _masters_of(candidate, snapshot.paths)
-    parent = _scratch_parent(config, masters)
-    parent.mkdir(parents=True, exist_ok=True)
-    work = Path(tempfile.mkdtemp(prefix="hc-xedit-", dir=str(parent)))
-    try:                                  # housekeep's temp sweep retires a leftover only with this declaration
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-        import housekeep_backups
-        housekeep_backups.mark_disposable_temp(work, Path(config["root"]))
-    except Exception:
-        pass                              # without it the sweep only keeps the folder
+def _with_linked_masters(work, masters, candidate, step):
+    """Run `step` with `work`/Data holding a hard link to every master and a detached copy of the candidate.
+
+    USER EXCEPTION to the "never hard-link staged inputs" rule (2026-11-02 for the read-only xEdit check; extended
+    2026-11-07 to the header restore): xEdit needs the candidate and every master in one folder. Conditions: the links
+    last this one call and are gone before it returns, also when the step fails or times out; masters are never copied;
+    every master is compared afterwards (House Carl's backups cover the plugin being edited, not the masters); and the
+    only file xEdit may save is the detached candidate or a file outside this folder. A linked view is the real file
+    under a second name."""
     data = work / "Data"
     data.mkdir(parents=True)
-    out = work / "inspection.json"
-    # USER EXCEPTION, 2026-11-02, this check only: the "never hard-link staged inputs" rule is waived here because xEdit
-    # needs the candidate and every master in one folder. Conditions: the verifier is read-only (tools/housecarl-verify.js
-    # never saves), the links last this one call, and masters are never copied. A linked view is the real file under a
-    # second name, so it is gone before this call returns, also when the check fails or times out, and every master is
-    # compared afterwards: House Carl's backups cover the plugin being edited, not the masters.
     before_stats = {}
     try:
         for name, original in masters.items():
             info = os.stat(original)
             if not info.st_mode & stat.S_IWRITE:
                 # Its link could not be removed without changing the attribute the real file shares.
-                raise Refusal("Master {} is read-only, so the read-only check cannot link it safely. Clear that "
+                raise Refusal("Master {} is read-only, so the xEdit step cannot link it safely. Clear that "
                               "attribute, or lift the toolkit's file lock, and retry.".format(name))
             try:
                 os.link(original, data / name)
             except OSError as exc:
-                raise Refusal("Cannot link master {} for the read-only check ({}). If the toolkit's file lock is on, "
+                raise Refusal("Cannot link master {} for the xEdit step ({}). If the toolkit's file lock is on, "
                               "lift it and retry; masters are never copied.".format(name, exc)) from exc
             before_stats[name] = (original, info.st_size, info.st_mtime_ns)
         shutil.copyfile(candidate, data / candidate.name)
-        env = os.environ.copy()
-        env["HOUSECARL_XELIB_ROOT"] = config.get("xelib_root", config["root"])
-        result = subprocess.run([config.get("node", "node"), str(verifier), str(work), candidate.name, str(out)],
-                                env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+        return step()
     finally:
         shutil.rmtree(data, ignore_errors=True)
         if data.exists():
-            raise Refusal("The read-only check could not remove its links in {}: remove that folder.".format(data))
+            raise Refusal("The xEdit step could not remove its links in {}: remove that folder.".format(data))
         for name, (original, size, mtime) in before_stats.items():
             info = os.stat(original)
             if (info.st_size, info.st_mtime_ns) != (size, mtime):
-                raise Refusal("Master {} changed during the read-only check. It is not backed up here: restore it from "
+                raise Refusal("Master {} changed during the xEdit step. It is not backed up here: restore it from "
                               "your mod manager or Steam.".format(name))
+
+
+def _scratch(config, masters, prefix):
+    parent = _scratch_parent(config, masters)
+    parent.mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(prefix=prefix, dir=str(parent)))
+    try:                                  # housekeep's temp sweep retires a leftover only with this declaration
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        import housekeep_backups
+        housekeep_backups.mark_disposable_temp(work, Path(config["root"]))
+    except Exception:
+        pass                              # without it the sweep only keeps the folder
+    return parent, work
+
+
+def retain_header(config, candidate, snapshot, original):
+    """Put back the masters, flags and HEDR version of `original` that the backend's writer dropped from `candidate`
+    (its lean master collector drops e.g. an injected-keyword provider: install repair b1c79507, 2026-10-28).
+    xEdit adds the masters and saves `candidate` in place; record content must be unchanged by that. Returns the
+    restore report, or None when nothing was missing. The record/reference gate still runs afterwards."""
+    required, written = plugin_header(original), plugin_header(candidate)
+    if written["flags"] != required["flags"]:
+        raise Refusal("The edited plugin changed the original's header flags; nothing published.")
+    missing = {m.casefold() for m in required["masters"]} - {m.casefold() for m in written["masters"]}
+    if not missing:
+        return None
+    masters = _masters_of(original, snapshot.paths)
+    masters.update(_masters_of(candidate, snapshot.paths))
+    parent, work = _scratch(config, masters, "hc-header-")
+    spec = {"original": str(original), "candidate": str(candidate), "game": str(work), "order": snapshot.names}
+    request, report = work / "request.json", work / "report.json"
+    json_write(request, spec)
+    env = os.environ.copy()
+    env["HOUSECARL_XELIB_ROOT"] = config.get("xelib_root", config["root"])
+    helper = Path(config["root"]) / "tools/housecarl-preserve.js"
+    result = _with_linked_masters(work, masters, candidate, lambda: subprocess.run(
+        [config.get("node", "node"), str(helper), str(request), str(report)],
+        env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120))
+    if "RESULT: OK" not in result.stdout or not report.is_file():
+        raise Refusal("Restoring the original's masters failed; nothing published: " +
+                      (result.stderr + result.stdout).replace("\0", "")[-1400:] + "; retained " + str(work))
+    obj = json.loads(report.read_text(encoding="utf-8"))
+    if obj.get("complete") is not True:
+        raise Refusal("The master restore did not confirm its readback; nothing published.")
+    if work.resolve().parent != parent.resolve() or not work.name.startswith("hc-header-"):
+        raise Refusal("Unexpected header scratch location; retained for inspection.")
+    shutil.rmtree(work)
+    return obj
+
+
+def independent_check(config, candidate, snapshot, before=None, allowed=None):
+    """xEdit parses every candidate record; preserves untouched records by canonical JSON."""
+    verifier = Path(config["root"]) / "tools/housecarl-verify.js"
+    masters = _masters_of(candidate, snapshot.paths)
+    parent, work = _scratch(config, masters, "hc-xedit-")
+    out = work / "inspection.json"
+    env = os.environ.copy()
+    env["HOUSECARL_XELIB_ROOT"] = config.get("xelib_root", config["root"])
+    result = _with_linked_masters(work, masters, candidate, lambda: subprocess.run(
+        [config.get("node", "node"), str(verifier), str(work), candidate.name, str(out)],
+        env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120))
     # The installed xelib has a documented native teardown exit-code problem. Require both markers and data.
     if "RESULT: OK" not in result.stdout or not out.is_file():
         detail = (result.stderr + result.stdout).replace("\0", "")
@@ -456,9 +504,13 @@ class Gateway:
             raise Refusal("Expected exactly one candidate plugin; nothing was published.")
         candidate = candidates[0]
         written = plugin_header(candidate)
+        retained_header = None
         if original is not None:
             # An edit of an existing plugin must keep its header: the backend dropping a master or changing the
             # ESM/ESL flags would reach the user's file (install repair b1c79507, 2026-10-28, found on a real edit).
+            # Dropped masters are put back; the check below then holds whatever the restore did.
+            retained_header = retain_header(config, candidate, snap, original)
+            written = plugin_header(candidate)
             required = plugin_header(original)
             if written["flags"] != required["flags"] or not {m.casefold() for m in required["masters"]} <= {
                     m.casefold() for m in written["masters"]}:
@@ -475,7 +527,8 @@ class Gateway:
                    "target": str(target), "before_sha256": digest, "backup": preservation,
                    "candidate_sha256": sha(candidate), "validation": verified,
                    "context": context(config, snap), "backend_result": result,
-                   "private_forward_target_detached_from_read_provider": detached_forward}
+                   "private_forward_target_detached_from_read_provider": detached_forward,
+                   "retained_header": retained_header}
         receipt_path = work / "receipt.json"
         json_write(receipt_path, receipt)
         try:
