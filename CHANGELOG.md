@@ -9,6 +9,7 @@
 - Setup finds a Wabbajack list's portable Mod Organizer 2 one folder above the game (`Stock Game`). Before, setup reported no mod manager there, so the list's `mods` and `overwrite` folders were outside the install-delete rule and the config folder pointed at Documents instead of the profile. Setup also declares every MO2 profile that keeps its own saves (`LocalSaves=true`), one `SKYRIM_PROFILE_SAVES` line each, so the guard backs up and protects the saves of a list's other profiles, not only the selected one. Re-run setup after updating. Reported by screamline (#23).
 - `esp-verify-wrapper.sh` works on a plugin in a folder whose name contains `[` or `]` (Wabbajack's `[NoDelete]` folders) under Git Bash, and a failed Spriggit run now shows Spriggit's own error. Reported by screamline (#22).
 - `nexus.sh contents` reads Nexus's current flat preview manifest instead of reporting 0 files, and reports a preview format it does not know as unsupported, never as an empty archive (#21).
+- OpenCode: the shipped guard plugin is now tested inside a real OpenCode 1.19.5 host on Windows and Linux CI, driven by a scripted local model. A write over a plugin and a recursive delete of the Saves folder are refused and the model is told why; an ordinary write runs. Other OpenCode versions, Desktop and V2 remain untested.
 
 ## v4.0.0 — 2026-11-05
 

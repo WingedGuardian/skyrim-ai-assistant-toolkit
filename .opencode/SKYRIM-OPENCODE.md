@@ -3,8 +3,12 @@
 Generated from `agent/targets/opencode/SKYRIM-OPENCODE.md`.
 
 This CLI plugin follows the OpenCode V1 1.18.34 source contract. Fixtures exercise
-its transport; blocking inside a running host remains unqualified. Desktop and V2
-are unsupported. A skipped or failed plugin load provides no enforcement.
+its transport. Blocking inside a running host is measured on OpenCode 1.19.5 CLI
+(`opencode run`, Windows and Linux CI, `tests/test_opencode_host.py`): with a
+scripted local model, a write over a plugin and an `rm -rf` of the Saves folder
+are refused and the model is told why, while an ordinary write runs. Other
+OpenCode versions are not measured. Desktop and V2 are unsupported. A skipped or
+failed plugin load provides no enforcement.
 
 The session system prompt contains `Skyrim GUARDS LIVE (opencode plugin v1)` when
 the plugin loads. That banner proves loading only. Known mutations use the same

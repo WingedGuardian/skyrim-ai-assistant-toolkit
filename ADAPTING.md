@@ -87,10 +87,11 @@ registered personal restrictions; their refusal or failure must be resolved
 before an approval proposal can authorize anything. Unknown hosts or sessions
 without a qualified approval reader cannot approve a bulk change.
 
-The generated `.opencode/plugins/skyguard.js` follows the OpenCode V1 1.18.34 source contract (running-host enforcement unmeasured)
+The generated `.opencode/plugins/skyguard.js` follows the OpenCode V1 1.18.34 source contract
 and imports the same pinned process transport as X4. Its Node
-fixtures qualify translation and failure handling only; running-host blocking,
-Desktop and V2 remain unqualified. See `.opencode/SKYRIM-OPENCODE.md`. Existing
+fixtures qualify translation and failure handling; running-host blocking is measured on
+OpenCode 1.19.5 CLI only (`tests/test_opencode_host.py`, a real host with a scripted local model, both
+CI systems). Other versions, Desktop and V2 remain unqualified. See `.opencode/SKYRIM-OPENCODE.md`. Existing
 Claude/Codex entrypoints remain available during the dispatcher transition.
 
 ## 0. The only status words you may use
