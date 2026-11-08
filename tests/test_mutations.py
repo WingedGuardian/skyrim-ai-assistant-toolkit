@@ -313,6 +313,20 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
         id="profile-saves-detected",
     ),
     pytest.param(
+        "tools/plugin-check.py",
+        "            elif j > i:",
+        "            elif False:",
+        "tests/test_plugin_check.py::test_each_finding_kind",
+        id="plugin-check-master-order",
+    ),
+    pytest.param(
+        "tools/plugin-check.py",
+        "    for folder in folders:\n        hit = folder / name",
+        "    for folder in []:\n        hit = folder / name",
+        "tests/test_plugin_check.py::test_a_plugin_in_an_enabled_mo2_folder_is_on_disk",
+        id="plugin-check-mo2-folders",
+    ),
+    pytest.param(
         "tools/skyguard/paths.py",
         'CONFIG_KEYS = ("SKYRIM_CONFIG_DIR", "SKYRIM_DOCUMENTS_DIR", "SKYRIM_PROFILE_SAVES")',
         'CONFIG_KEYS = ("SKYRIM_CONFIG_DIR", "SKYRIM_DOCUMENTS_DIR")',

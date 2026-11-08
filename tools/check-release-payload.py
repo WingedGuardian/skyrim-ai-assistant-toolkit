@@ -84,6 +84,7 @@ CORE_REQUIRED = (
     # Bundled diagnostics README lists as "no install beyond Python 3", and the path discovery they import.
     "tools/skyrim_paths.py",
     "tools/skse-load-status.py",
+    "tools/plugin-check.py",          # v4.1.0: load-order check for the agent
     "tools/archive-triage.py",
     "tools/mirror-launch-logs.py",
     "tools/housekeep.py",
