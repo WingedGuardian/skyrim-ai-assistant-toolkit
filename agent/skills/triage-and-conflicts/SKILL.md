@@ -102,6 +102,21 @@ and always names the file it read and how old it is: the log describes the **las
 DLLs on disk now. Rows must sum to the plugins checked; a mismatch prints `ACCOUNTING MISMATCH` and
 exits 1. Override the folder with `$SKSE_LOG_DIR`.
 
+## postmortem, plugin-check, missing-textures — for the agent, read-only (v4.1.0)
+
+```bash
+python tools/postmortem.py [--json]                 # the last session: crash (this session or older), Papyrus, SKSE
+python tools/plugin-check.py [--json]               # missing/unreadable plugins, masters missing, inactive, out of order
+python tools/missing-textures.py MESH... | --under 'meshes/armor/**/*.nif'   # needs the House Carl gateway
+```
+
+`postmortem` is the first look after a crash or a bad session: it combines the three tools above for the newest
+logs. `plugin-check` is a check before acting on plugins, not a player warning (Wrye Bash and the mod manager already
+show missing masters). `missing-textures` asks House Carl which texture-set paths the meshes embed and whether a
+loose file or active BSA provides each; an incomplete archive read exits 2, never "none missing". On an install whose
+House Carl integration predates the v4.1.0 issue-#11 fix, base BSAs can be left out without that flag: re-run setup
+first. All three exit 0 nothing found, 1 findings, 2 could not check.
+
 ## mirror-launch-logs — keep the logs the next launch would overwrite
 
 ```bash
