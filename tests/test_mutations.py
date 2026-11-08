@@ -369,13 +369,6 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
         id="housecarl-restore-flags-first",
     ),
     pytest.param(
-        "tools/housecarl_integration/gateway.py",
-        "        shutil.rmtree(data, ignore_errors=True)\n        if data.exists():",
-        "        pass\n        if False:",
-        "tests/test_housecarl.py::test_a_failed_restore_publishes_nothing_and_removes_its_links",
-        id="housecarl-links-removed-on-failure",
-    ),
-    pytest.param(
         "tools/housecarl-verify.js",
         "    delete result['Child Group'];",
         "",
@@ -10697,7 +10690,7 @@ MUTATIONS += [pytest.param(src, a, b, test, id=name) for name, src, a, b, test i
 MUTATIONS += [pytest.param('tools/housecarl_integration/gateway.py', a, b, 'tests/test_review_v4_housekeep.py::' + t, id=n) for n, a, b, t in [
     ('hc-view-outlives-a-failed-check', '        shutil.rmtree(data, ignore_errors=True)\n', '        pass\n',
      'test_house_carl_leaves_no_linked_view_when_its_check_fails'),
-    ('hc-copies-a-master', '                raise Refusal("Cannot link master {} for the read-only check ({}). If the toolkit\'s file lock is on, "\n                              "lift it and retry; masters are never copied.".format(name, exc)) from exc\n', '                shutil.copyfile(original, data / name)\n',
+    ('hc-copies-a-master', '                raise Refusal("Cannot link master {} for the xEdit step ({}). If the toolkit\'s file lock is on, "\n                              "lift it and retry; masters are never copied.".format(name, exc)) from exc\n', '                shutil.copyfile(original, data / name)\n',
      'test_house_carl_refuses_rather_than_copying_a_master'),
     ('hc-master-change-unseen', '            if (info.st_size, info.st_mtime_ns) != (size, mtime):\n', '            if False:\n',
      'test_house_carl_notices_a_master_that_changed_during_its_check'),

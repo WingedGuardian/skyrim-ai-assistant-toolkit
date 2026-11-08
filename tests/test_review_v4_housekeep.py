@@ -300,5 +300,5 @@ def test_house_carl_notices_a_master_that_changed_during_its_check(tmp_path, mon
         master.write_bytes(b"changed through the link")
         return SimpleNamespace(stdout="", stderr="", returncode=1)
     gw, go = _check(tmp_path, monkeypatch, run=run)
-    with pytest.raises(gw.Refusal, match="changed during the read-only check"):
+    with pytest.raises(gw.Refusal, match="changed during the xEdit step"):
         go()
