@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -359,6 +360,7 @@ class Gateway:
         if a.get("in_place") and a.get("into"):
             raise Refusal("Choose one write lane.")
         original, preservation, baseline, digest = None, None, None, None
+        detached_forward = False
         writer_snap = copy.deepcopy(snap)
         if target_name:
             target_name = plain_plugin(target_name)
@@ -386,13 +388,45 @@ class Gateway:
             a.pop("into", None)
             a["in_place"] = original.name
             a["acknowledge"] = True
+            # A forward INTO an already-active plugin: that plugin is also one of the read providers, so enabling a
+            # writable Target copy over it made the backend's Windows replacement of its own read source fail
+            # (install repair 2026-10-29, 762f1773, verified on the real backend against a 709-plugin order).
+            detached_forward = name == "housecarl_forward" and any(
+                n.casefold() == original.name.casefold() for n in snap.names)
+            if detached_forward:
+                a.pop("in_place")
+                a.pop("acknowledge")
+                a["into"] = original.name
         if name not in {"housecarl_copy", "housecarl_create_plugin"}:
             a["format"] = "json"
         if name in {"housecarl_apply", "housecarl_create", "housecarl_forward"}:
             a["readback"] = True
-        # Backend will create the profile; add Target as its highest priority mod afterwards.
+        # Ordinary edits enable Target as the highest-priority mod. A detached forward keeps the captured read
+        # providers and writes into a private working folder the backend itself creates and owns.
         async with Backend(config, writer_snap, work) as backend:
-            if original:
+            if detached_forward:
+                init_name = "ToolkitTransaction" + ident[:12]
+                await backend.call("housecarl_create_plugin", {"patch": init_name})
+                placeholders = list((work / "mods").rglob(init_name + ".esp"))
+                if len(placeholders) != 1:
+                    raise Refusal("Private writer initialization was ambiguous; nothing published.")
+                placeholder = placeholders[0]
+                with placeholder.open("rb") as stream:
+                    raw_header = stream.read(24)
+                if len(raw_header) != 24 or raw_header[:4] != b"TES4" \
+                        or placeholder.stat().st_size != 24 + struct.unpack_from("<I", raw_header, 4)[0] \
+                        or plugin_header(placeholder)["masters"]:
+                    raise Refusal("Private writer initializer was not empty; nothing published.")
+                meta = placeholder.parent / "meta.ini"
+                meta_text = meta.read_text(encoding="utf-8-sig")
+                old_plugin = "plugin=" + placeholder.name
+                if "generated=true" not in meta_text or meta_text.count(old_plugin) != 1:
+                    raise Refusal("Private writer ownership metadata was incomplete.")
+                placeholder.unlink()
+                staged.replace(placeholder.parent / original.name)
+                meta.write_text(meta_text.replace(old_plugin, "plugin=" + original.name), encoding="utf-8")
+                a["into"] = placeholder.parent.name
+            elif original:
                 modlist = work / "profile/modlist.txt"
                 modlist.write_text("+Target\n" + modlist.read_text(encoding="utf-8"), encoding="utf-8")
             raw_result = await backend.call(name, a)
@@ -433,7 +467,8 @@ class Gateway:
         receipt = {"id": ident, "state": "prepared", "tool": name, "arguments": arguments,
                    "target": str(target), "before_sha256": digest, "backup": preservation,
                    "candidate_sha256": sha(candidate), "validation": verified,
-                   "context": context(config, snap), "backend_result": result}
+                   "context": context(config, snap), "backend_result": result,
+                   "private_forward_target_detached_from_read_provider": detached_forward}
         receipt_path = work / "receipt.json"
         json_write(receipt_path, receipt)
         try:

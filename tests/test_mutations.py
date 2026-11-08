@@ -341,6 +341,13 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
         id="missing-textures-incomplete",
     ),
     pytest.param(
+        "tools/housecarl_integration/gateway.py",
+        '            detached_forward = name == "housecarl_forward" and any(',
+        '            detached_forward = False and any(',
+        "tests/test_housecarl.py::test_a_forward_into_an_active_plugin_writes_through_a_private_folder",
+        id="housecarl-detached-forward",
+    ),
+    pytest.param(
         "tools/skyguard/paths.py",
         'CONFIG_KEYS = ("SKYRIM_CONFIG_DIR", "SKYRIM_DOCUMENTS_DIR", "SKYRIM_PROFILE_SAVES")',
         'CONFIG_KEYS = ("SKYRIM_CONFIG_DIR", "SKYRIM_DOCUMENTS_DIR")',

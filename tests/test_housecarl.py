@@ -810,3 +810,104 @@ def test_the_backend_receives_the_frozen_file_not_the_gateway_key(install, monke
     assert gateway.FROZEN_FORMIDS not in args
     frozen = Path(args["formids"][0][1:])
     assert frozen.parent == Path(install["state_dir"]) / "inputs" and frozen.read_text(encoding="utf-8") == _ARTIFACT
+
+
+# Install repair 2026-10-29 (762f1773), ported: a forward INTO an already-active plugin must not enable a writable
+# Target copy over its own read provider. The backend creates and owns a private working folder; the detached copy is
+# imported there and the forward goes through the ordinary `into` lane.
+def _detached_forward_backend(seen, placeholder_body=b"", meta_extra=""):
+    from types import SimpleNamespace
+
+    class FakeBackend:
+        def __init__(self, config, snapshot, work):
+            self.work = work
+
+        async def __aenter__(self):
+            (self.work / "profile").mkdir(parents=True, exist_ok=True)
+            (self.work / "profile/modlist.txt").write_text("+Other\n", encoding="utf-8")
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
+
+        async def call(self, name, args):
+            seen.append((name, dict(args)))
+            if name == "housecarl_create_plugin":
+                folder = self.work / "mods" / ("Owned " + args["patch"])
+                folder.mkdir(parents=True)
+                body = placeholder_body
+                (folder / (args["patch"] + ".esp")).write_bytes(
+                    b"TES4" + struct.pack("<II", len(body), 0) + b"\0" * 12 + body)
+                (folder / "meta.ini").write_text("[General]\ngenerated=true\nplugin=%s.esp\n%s" % (args["patch"], meta_extra),
+                                                 encoding="utf-8")
+                return SimpleNamespace(content=[SimpleNamespace(type="text", text="created")])
+            return SimpleNamespace(content=[SimpleNamespace(type="text", text=json.dumps({"ok": True}))])
+    return FakeBackend
+
+
+def test_a_forward_into_an_active_plugin_writes_through_a_private_folder(install, monkeypatch):
+    seen = []
+    monkeypatch.setattr(gateway, "Backend", _detached_forward_backend(seen))
+    monkeypatch.setattr(gateway, "independent_check", lambda *a, **k: {})
+    out = asyncio.run(gateway.Gateway(install).call("housecarl_forward", {
+        "into": "Sword.esp", "source": "LateMaster.esp", "formids": ["000800:LateMaster.esp"], "dry_run": True}))
+    assert out["dry_run"] is True
+    (init, init_args), (fwd, fwd_args) = seen
+    assert init == "housecarl_create_plugin" and init_args["patch"].startswith("ToolkitTransaction")
+    assert fwd == "housecarl_forward" and fwd_args["into"] == "Owned " + init_args["patch"]
+    assert "in_place" not in fwd_args and "acknowledge" not in fwd_args
+    work = next((Path(install["state_dir"]) / "transactions").iterdir())
+    assert (work / "mods" / fwd_args["into"] / "Sword.esp").is_file()                     # the detached copy, imported
+    assert "plugin=Sword.esp" in (work / "mods" / fwd_args["into"] / "meta.ini").read_text(encoding="utf-8")
+    assert "+Target" not in (work / "profile/modlist.txt").read_text(encoding="utf-8")   # never a read provider
+
+
+def test_other_writes_into_an_active_plugin_keep_the_target_lane(install, monkeypatch):
+    seen = []
+    monkeypatch.setattr(gateway, "Backend", _detached_forward_backend(seen))
+    monkeypatch.setattr(gateway, "independent_check", lambda *a, **k: {})
+    asyncio.run(gateway.Gateway(install).call("housecarl_apply", {
+        "in_place": "Sword.esp", "ops": [{"formid": "000800:Sword.esp", "set": {}}], "dry_run": True}))
+    (name, args), = seen
+    assert name == "housecarl_apply" and args["in_place"] == "Sword.esp"
+    work = next((Path(install["state_dir"]) / "transactions").iterdir())
+    assert (work / "profile/modlist.txt").read_text(encoding="utf-8").startswith("+Target\n")
+
+
+@pytest.mark.parametrize("body, meta, why", [
+    (b"MAST" + struct.pack("<H", 11) + b"Skyrim.esm\0", "", "not empty"),          # the initializer has a master
+    (b"", "plugin=ToolkitTransactionX.esp\n", None),     # a line naming another plugin is not this one's: no effect
+])
+def test_an_unexpected_private_folder_publishes_nothing(install, monkeypatch, body, meta, why):
+    seen = []
+    monkeypatch.setattr(gateway, "Backend", _detached_forward_backend(seen, body, meta))
+    monkeypatch.setattr(gateway, "independent_check", lambda *a, **k: {})
+    run = lambda: asyncio.run(gateway.Gateway(install).call("housecarl_forward", {
+        "into": "Sword.esp", "source": "LateMaster.esp", "formids": ["000800:LateMaster.esp"], "dry_run": True}))
+    if why:
+        with pytest.raises(Refusal, match=why):
+            run()
+        assert len(seen) == 1                                    # the forward itself never ran
+    else:
+        run()                                                    # an unrelated extra metadata line changes nothing
+        assert [n for n, _ in seen] == ["housecarl_create_plugin", "housecarl_forward"]
+
+
+def test_a_private_folder_without_ownership_metadata_publishes_nothing(install, monkeypatch):
+    seen = []
+    backend = _detached_forward_backend(seen)
+    original_call = backend.call
+
+    async def call(self, name, args):
+        out = await original_call(self, name, args)
+        if name == "housecarl_create_plugin":
+            meta = next((self.work / "mods").rglob("meta.ini"))
+            meta.write_text("[General]\nplugin=%s.esp\n" % args["patch"], encoding="utf-8")    # generated=true gone
+        return out
+    backend.call = call
+    monkeypatch.setattr(gateway, "Backend", backend)
+    monkeypatch.setattr(gateway, "independent_check", lambda *a, **k: {})
+    with pytest.raises(Refusal, match="ownership metadata"):
+        asyncio.run(gateway.Gateway(install).call("housecarl_forward", {
+            "into": "Sword.esp", "source": "LateMaster.esp", "formids": ["000800:LateMaster.esp"], "dry_run": True}))
+    assert len(seen) == 1
