@@ -348,6 +348,13 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
         id="housecarl-detached-forward",
     ),
     pytest.param(
+        "tools/housecarl_integration/gateway.py",
+        '            if written["flags"] != required["flags"] or not {m.casefold() for m in required["masters"]} <= {',
+        '            if False and not {m.casefold() for m in required["masters"]} <= {',
+        "tests/test_housecarl.py::test_an_edit_that_changes_the_header_is_never_published",
+        id="housecarl-header-retention",
+    ),
+    pytest.param(
         "tools/skyguard/paths.py",
         'CONFIG_KEYS = ("SKYRIM_CONFIG_DIR", "SKYRIM_DOCUMENTS_DIR", "SKYRIM_PROFILE_SAVES")',
         'CONFIG_KEYS = ("SKYRIM_CONFIG_DIR", "SKYRIM_DOCUMENTS_DIR")',

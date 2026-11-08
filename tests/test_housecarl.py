@@ -353,7 +353,8 @@ def test_transaction_failures_never_publish(install, monkeypatch, stage):
             calls.append("writer")
             if stage == "backend":
                 fail()
-            plugin(self.work / "mods/Target/Sword.esp", flags=0x800)
+            # The original's own header, so each stage is refused by ITS check, not by the header-retention check.
+            plugin(self.work / "mods/Target/Sword.esp", flags=0, masters=["Skyrim.esm"])
             if stage == "stale":
                 Path(install["plugins_txt"]).write_text("*Sword.esp\n")
             return SimpleNamespace(content=[SimpleNamespace(type="text", text=json.dumps({"ok": True, "verify_ran": True}))])
@@ -911,3 +912,36 @@ def test_a_private_folder_without_ownership_metadata_publishes_nothing(install, 
         asyncio.run(gateway.Gateway(install).call("housecarl_forward", {
             "into": "Sword.esp", "source": "LateMaster.esp", "formids": ["000800:LateMaster.esp"], "dry_run": True}))
     assert len(seen) == 1
+
+
+# Install repair b1c79507 (2026-10-28), the retention half, ported: an edit of an existing plugin that loses a master or
+# changes the ESM/ESL flags is never published.
+@pytest.mark.parametrize("flags, masters", [(0x200, ["Skyrim.esm"]), (0, []), (1, ["Skyrim.esm"])],
+                         ids=["esl-flag-added", "master-dropped", "esm-flag-added"])
+def test_an_edit_that_changes_the_header_is_never_published(install, monkeypatch, flags, masters):
+    from types import SimpleNamespace
+    target = Path(install["data_dir"]) / "Sword.esp"
+    original = target.read_bytes()
+
+    class FakeBackend:
+        def __init__(self, config, snapshot, work):
+            self.work = work
+
+        async def __aenter__(self):
+            (self.work / "profile").mkdir()
+            (self.work / "profile/modlist.txt").write_text("")
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
+
+        async def call(self, _name, _args):
+            plugin(self.work / "mods/Target/Sword.esp", flags=flags, masters=masters)
+            return SimpleNamespace(content=[SimpleNamespace(type="text", text=json.dumps({"ok": True, "verify_ran": True}))])
+
+    monkeypatch.setattr(gateway, "Backend", FakeBackend)
+    monkeypatch.setattr(gateway, "independent_check", lambda *a, **k: {"records": {}, "errors": [], "complete": True})
+    with pytest.raises(Refusal, match="header flags and masters"):
+        asyncio.run(gateway.Gateway(install).call("housecarl_apply", {
+            "in_place": "Sword.esp", "ops": [{"formid": "000800:Sword.esp", "field_path": "Name", "value": "new"}]}))
+    assert target.read_bytes() == original

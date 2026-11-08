@@ -455,7 +455,14 @@ class Gateway:
         if len(candidates) != 1:
             raise Refusal("Expected exactly one candidate plugin; nothing was published.")
         candidate = candidates[0]
-        plugin_header(candidate)
+        written = plugin_header(candidate)
+        if original is not None:
+            # An edit of an existing plugin must keep its header: the backend dropping a master or changing the
+            # ESM/ESL flags would reach the user's file (install repair b1c79507, 2026-10-28, found on a real edit).
+            required = plugin_header(original)
+            if written["flags"] != required["flags"] or not {m.casefold() for m in required["masters"]} <= {
+                    m.casefold() for m in written["masters"]}:
+                raise Refusal("The edited plugin did not keep the original's header flags and masters; nothing published.")
         allowed = allowed_records(arguments)
         if name == "housecarl_create":
             allowed |= {r["formid"].casefold().lstrip("0") for r in result.get("created", []) if r.get("formid")}
