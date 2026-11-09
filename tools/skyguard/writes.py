@@ -630,40 +630,96 @@ _PY_WRITE_FUNCS = {
 _PY_MODE_AT = {"open": 1, "io.open": 1, "builtins.open": 1, "io.FileIO": 1}    # mode argument; absent = read
 
 
-def python_computed_writes(code: str) -> Tuple[bool, List[str]]:
-    """(does this Python write, move or replace a target it does not spell as a literal?, its string literals).
+class ComputedWrites(NamedTuple):
+    """What python_computed_writes found (#26 round 3).
+    computed: some write/move target is neither a literal nor anchored to one, so it can land anywhere.
+    anchors:  (literal, exact) for targets the guard CAN place: exact = the whole target is that literal (directly, or
+              through a name assigned once), else the target lies below that literal folder (`Path('C:/bk') / p.name`).
+    literals: the string literals that can name where the computed targets land (see _location_literals)."""
+    computed: bool
+    anchors: Tuple[Tuple[str, bool], ...]
+    literals: Tuple[str, ...]
 
-    Read as Python (ast, never run). A target counts when it is not a string literal or a `Path(<literals>)`: a
-    variable, a loop item, `Path(S) / name`, a glob result. Counted: `Path` write_bytes/write_text/touch/
-    symlink_to/hardlink_to and `.open` in a writing mode on a computed path; `.rename(x)` and a one-argument
-    `.replace(x)` (a str.replace takes two) with a computed path on either side; open/io.open/io.FileIO in a
-    writing mode, os.open unless os.O_RDONLY, os.truncate, copies onto a computed destination, links, and moves
-    whose source or destination is computed. A module's `.open(file, mode)` (gzip, tarfile, codecs) reads its
-    mode from the second argument. A mode chosen at run time may write. Not read (known limits): getattr,
-    exec/eval of code strings, __import__, assignment aliases of functions, subprocess-launched copies. Code
-    that cannot be parsed is left to the existing unparsed-code refusal (scan raises on it)."""
+
+def python_computed_writes(code: str) -> ComputedWrites:
+    """Read as Python (ast, never run): every write, link, move or replace and where its target can land.
+
+    Counted: `Path` write_bytes/write_text/touch/symlink_to/hardlink_to and `.open` in a writing mode; `.rename(x)` and
+    a one-argument `.replace(x)` (a str.replace takes two), both sides; open/io.open/io.FileIO in a writing mode,
+    os.open unless os.O_RDONLY, os.truncate, copies onto a destination, links, and moves (source and destination). A
+    module's `.open(file, mode)` (gzip, tarfile, codecs) reads its mode from the second argument; a mode chosen at
+    run time may write. Not read (known limits): getattr, exec/eval of code strings, __import__, assignment aliases
+    of functions, subprocess-launched copies. Unparseable code returns nothing (scan's unparsed-code refusal)."""
     try:
         nodes = python_nodes(code)
     except (SyntaxError, ValueError, RecursionError, MemoryError):
-        return False, []
-    literals = _path_literals(nodes)
+        return ComputedWrites(False, (), ())
     modules, names = {}, {}
     for node in nodes:
         if isinstance(node, ast.Import):
             modules.update({a.asname or a.name: a.name for a in node.names})
         elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
             names.update({a.asname or a.name: node.module + "." + a.name for a in node.names})
+    single = _assigned_once(nodes)
 
-    def fixed(node):
+    def fixed(node, depth=0):
+        """The literal a target is, or None: a string, Path(<literals>), a `/` chain or f-string of literals, or a
+        name assigned exactly once to one of those."""
+        if depth > 8:
+            return None
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            return True
+            return node.value
+        if isinstance(node, ast.Name) and node.id in single:
+            return fixed(single[node.id], depth + 1)
+        if isinstance(node, ast.JoinedStr):
+            parts = [p.value for p in node.values if isinstance(p, ast.Constant) and isinstance(p.value, str)]
+            return "".join(parts) if len(parts) == len(node.values) else None
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            left, right = fixed(node.left, depth + 1), fixed(node.right, depth + 1)
+            return left.rstrip("/\\") + "/" + right if left is not None and right is not None else None
         if isinstance(node, ast.Call) and node.args and not node.keywords:
             f = node.func
             bare = isinstance(f, ast.Name) and (f.id == "Path" or names.get(f.id) == "pathlib.Path")
             dotted = (isinstance(f, ast.Attribute) and f.attr == "Path" and isinstance(f.value, ast.Name)
                       and modules.get(f.value.id, f.value.id) == "pathlib")
-            return (bare or dotted) and all(isinstance(a, ast.Constant) and isinstance(a.value, str) for a in node.args)
-        return False
+            if bare or dotted:
+                parts = [fixed(a, depth + 1) for a in node.args]
+                return "/".join(p.rstrip("/\\") for p in parts) if all(p is not None for p in parts) else None
+        return None
+
+    def anchored(node):
+        """The literal folder a `/` chain starts from (`Path('C:/bk') / p.name` -> 'C:/bk'), or None."""
+        while isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            base = fixed(node.left)
+            if base is not None:
+                return base
+            node = node.left
+        return None
+
+    computed = False
+    anchors: List[Tuple[str, bool]] = []
+
+    def direct(node):
+        """A literal or Path(<literals>): _python_write_targets already reads these, with the full save policy."""
+        if isinstance(node, ast.Constant):
+            return True
+        return (isinstance(node, ast.Call) and isinstance(node.func, (ast.Name, ast.Attribute))
+                and all(isinstance(a, ast.Constant) for a in node.args) and fixed(node) is not None)
+
+    def target(node):
+        nonlocal computed
+        if node is None:
+            return
+        exact = fixed(node)
+        if exact is not None:
+            if not direct(node):
+                anchors.append((exact, True))
+            return
+        base = anchored(node)
+        if base is not None:
+            anchors.append((base, False))
+        else:
+            computed = True
 
     def argument(call, index, keyword):
         if len(call.args) > index:
@@ -694,20 +750,18 @@ def python_computed_writes(code: str) -> Tuple[bool, List[str]]:
         if isinstance(f, ast.Attribute):
             receiver_is_module = isinstance(f.value, ast.Name) and modules.get(f.value.id, f.value.id) in (
                 "io", "builtins", "os", "shutil")
-            if f.attr in _PY_WRITE_METHODS and not receiver_is_module and not fixed(f.value):
-                return True, literals
+            if f.attr in _PY_WRITE_METHODS and not receiver_is_module:
+                target(f.value)
             if f.attr == "open" and not receiver_is_module:
                 if imported(f.value):                     # gzip.open(file, mode): the file is the first argument
-                    target = argument(node, 0, "filename")
-                    if mode_writes(node, 1) and target is not None and not fixed(target):
-                        return True, literals
-                elif mode_writes(node, 0) and not fixed(f.value):   # Path(...).open(mode)
-                    return True, literals
+                    if mode_writes(node, 1):
+                        target(argument(node, 0, "filename"))
+                elif mode_writes(node, 0):                # Path(...).open(mode)
+                    target(f.value)
             moving = f.attr == "rename" or f.attr == "replace" and len(node.args) == 1 and not node.keywords
             if moving and not receiver_is_module and not imported(f.value):
-                other = node.args[0] if node.args else argument(node, 0, "target")
-                if not fixed(f.value) or (other is not None and not fixed(other)):
-                    return True, literals
+                target(f.value)
+                target(node.args[0] if node.args else argument(node, 0, "target"))
         name = ""
         if isinstance(f, ast.Name):
             name = names.get(f.id, f.id)
@@ -720,10 +774,86 @@ def python_computed_writes(code: str) -> Tuple[bool, List[str]]:
         if name == "os.open" and not os_open_writes(node):
             continue
         for index, keyword in _PY_WRITE_FUNCS[name]:
-            target = argument(node, index, keyword)
-            if target is not None and not fixed(target):
-                return True, literals
-    return False, literals
+            target(argument(node, index, keyword))
+    return ComputedWrites(computed, tuple(anchors), tuple(_location_literals(nodes)))
+
+
+def _assigned_once(nodes):
+    """name -> its value, for names bound exactly once in the code, by a plain `name = value`."""
+    count, value = {}, {}
+
+    def bind(t, v=None):
+        if isinstance(t, ast.Name):
+            count[t.id] = count.get(t.id, 0) + 1
+            if v is not None:
+                value[t.id] = v
+        elif isinstance(t, (ast.Tuple, ast.List)):
+            for e in t.elts:
+                bind(e)
+        elif isinstance(t, ast.Starred):
+            bind(t.value)
+
+    for node in nodes:
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                bind(t, node.value if len(node.targets) == 1 else None)
+        elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+            bind(node.target)
+        elif isinstance(node, (ast.For, ast.comprehension)):
+            bind(node.target)
+        elif isinstance(node, ast.withitem) and node.optional_vars is not None:
+            bind(node.optional_vars)
+        elif isinstance(node, ast.NamedExpr):
+            bind(node.target)
+        elif isinstance(node, ast.arg):
+            count[node.arg] = count.get(node.arg, 0) + 1
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            count[node.name] = count.get(node.name, 0) + 1
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for a in node.names:
+                key = (a.asname or a.name).split(".")[0]
+                count[key] = count.get(key, 0) + 1
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            for n in node.names:
+                count[n] = count.get(n, 0) + 2              # bound elsewhere too: never single
+    return {k: v for k, v in value.items() if count.get(k) == 1}
+
+
+# A literal outside a path position names a location only when it is shaped like a path: it starts with a drive, a
+# separator, `~`, `%`, `$`, `{` or `word/`, and holds no shell separators (a command line held as data is text).
+_PATH_SHAPED = re.compile(r"""^(?:[A-Za-z]:[/\\]|[/\\~%${]|\.{1,2}[/\\]|[\w.-]+[/\\])""")
+_SHELLISH = re.compile(r"""[;|`]|&&|\n""")
+# Calls whose arguments are content or swapped-in text, never a location (endswith's are a filter: kept).
+_CONTENT_CALLS = frozenset(("print", "write", "writelines", "write_text", "write_bytes", "dumps", "dump", "log",
+                            "debug", "info", "warning", "error", "exception"))
+
+
+def _location_literals(nodes) -> List[str]:
+    """The literals that can name where a computed target lands (#26 round 3, review: the round-2 list of positions
+    missed helper functions, defaults, argv fallbacks, tuples and `+=`). Path positions (see _path_literals) count as
+    they are; any other literal counts when it is path-shaped. Never: arguments of text methods (but endswith's),
+    content and log calls, multi-line strings, text not shaped like a path, and command lines held as data."""
+    out = list(_path_literals(nodes))
+    skip = set()
+    for node in nodes:
+        if isinstance(node, ast.Call):
+            f = node.func
+            name = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
+            text_method = isinstance(f, ast.Attribute) and name in _TEXT_METHODS
+            if name in ("endswith", "fnmatch", "fnmatchcase", "match_suffix"):
+                for arg in node.args:                     # n.endswith(('.ess', '.skse')): a save filter
+                    out += [c.value for c in ast.walk(arg) if isinstance(c, ast.Constant) and isinstance(c.value, str)]
+            elif text_method or name in _CONTENT_CALLS:
+                for arg in list(node.args) + [k.value for k in node.keywords]:
+                    skip.update(id(c) for c in ast.walk(arg))
+        elif isinstance(node, ast.Compare) and any(isinstance(s, ast.Attribute) and s.attr in ("suffix", "suffixes")
+                                                    for s in [node.left] + list(node.comparators)):
+            out += [c.value for c in ast.walk(node) if isinstance(c, ast.Constant) and isinstance(c.value, str)]
+    for node in nodes:
+        if (isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in skip
+                and len(node.value) < 1024 and not _SHELLISH.search(node.value) and _PATH_SHAPED.match(node.value)):
+            out.append(node.value)
+    return out
 
 
 # Calls whose arguments are paths. str.replace is not one (its arguments are text an edit swaps), nor print/format.
@@ -776,37 +906,19 @@ def _path_literals(nodes) -> List[str]:
 
 
 def _shallow_path_strings(out):
-    """An assigned or iterated value read only in a path's own shapes (#26 pricing: a list of data rows built by an
-    ordinary function was read whole): a literal, an f-string, `+` of those, a list/tuple/set of those, and the
-    arguments of a path call or of `.get(key, default)`. Arguments of any other call are not a location."""
+    """One-token literals ('Saves', '*.ess') in an assigned, looped-over or concatenated value: `SAVES = 'Saves'` then
+    `Path(D) / SAVES`. A path-shaped literal anywhere is read by _location_literals (round 3); this adds the bare
+    tokens that only name saves in these positions. A token with whitespace or shell separators is text."""
     def shallow(node):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if "\n" not in node.value:
+            if not re.search(r"\s", node.value) and not _SHELLISH.search(node.value):
                 out.append(node.value)
-        elif isinstance(node, ast.JoinedStr):
-            for part in node.values:
-                shallow(part)
         elif isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Div)):
             shallow(node.left)
             shallow(node.right)
-        elif isinstance(node, ast.Dict):
-            # User decision 2026-11-09: a save path kept in a dict counts, but only a value shaped like a path (a
-            # separator in it); a label such as 'Saves backup' is text.
-            for value in node.values:
-                if (isinstance(value, ast.Constant) and isinstance(value.value, str) and "\n" not in value.value
-                        and re.search(r"[/\\]", value.value)):
-                    out.append(value.value)
         elif isinstance(node, (ast.List, ast.Tuple, ast.Set)):
             for element in node.elts:
                 shallow(element)
-        elif isinstance(node, ast.Call):
-            f = node.func
-            name = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
-            if name in _PATH_CALLS or name == "get":
-                for arg in list(node.args) + [k.value for k in node.keywords]:
-                    shallow(arg)
-            elif isinstance(f, ast.Attribute) and name in _TEXT_METHODS:
-                shallow(f.value)                          # r'C:/x/Saves'.replace(...): the receiver
     return shallow
 
 
@@ -1409,17 +1521,24 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             # Issue #26: a computed write target in code that names a save, the Saves folder or the settings folder
             # may change saves the guard cannot list or back up: S-SAVE-UNKNOWN, as for any save it cannot place.
             if shellparse._PYTHON.fullmatch(e.program) and not _script_reads_stdin(e, command):
-                computed, strings = python_computed_writes(code)
-                if computed:
-                    base = targets.exec_cwd(e, cwd, env) or ""
-                    for s in strings:
-                        a = targets.resolve_literal(s, base, env) if len(s) < 1024 and "\n" not in s else None
-                        # names_save_location covers any literal naming a save (.ess/.skse) or a Saves component;
-                        # resolving adds a relative literal run from inside the Saves or settings folder (`Path('.')`).
-                        if (is_save_folder(a, roots) or is_settings_folder(a, roots) or
-                                names_save_location(s)):
-                            saves.append((COMPUTED_SAVE, "write"))
-                            break
+                found = python_computed_writes(code)
+                base = targets.exec_cwd(e, cwd, env) or ""
+                actual = targets.physical_cwd(e, cwd, env) or ""
+
+                def names_saves(s):
+                    a = targets.resolve_literal(s, base, env) if len(s) < 1024 and "\n" not in s else None
+                    return is_save_folder(a, roots) or is_settings_folder(a, roots) or names_save_location(s)
+
+                for literal, exact in found.anchors:
+                    a = targets.resolve_literal(literal, base, env) if len(literal) < 1024 else None
+                    if exact and is_save(a, roots):
+                        # a save named through a name assigned once: backed up like any literal save
+                        saves.append((targets.physical(literal, actual, "cmd", env, literal=True) or "", "write"))
+                    elif (not exact and names_saves(literal)) or (exact and (is_save_folder(a, roots) or
+                                                                             _unplaced_save(literal))):
+                        saves.append((COMPUTED_SAVE, "write"))
+                if found.computed and any(names_saves(s) for s in found.literals):
+                    saves.append((COMPUTED_SAVE, "write"))
     for e, word in lit:
         base = cwd if e is None else (targets.exec_cwd(e, cwd, env) or "")
         a = targets.resolve_literal(word, base, env)                    # a literal: nothing in it expands

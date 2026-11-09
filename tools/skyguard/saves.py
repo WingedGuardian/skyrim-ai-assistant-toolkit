@@ -32,10 +32,13 @@ is refused; if shadow mode (guards off) lets it run, it reaches the dispatcher a
 
 KNOWN LIMITS: a save written by a script run from a file (`python fix.py`) is not seen (reading invoked scripts is
 planned for 4.2). Inline Python that writes, moves or replaces a COMPUTED target is refused as S-SAVE-UNKNOWN when
-a literal in a path position (path-call argument, `/` operand, assigned or iterated value) names a save or has a
-`Saves` component, or resolves to the Saves or settings folder (writes.python_computed_writes / _path_literals /
-names_save_location, #26; a dict value counts when it holds a path separator). Not seen: computed targets whose
-path-position literals name none of those, getattr/exec/__import__/function aliases/launched processes, and other interpreters' computed
+any literal shaped like a path names a save or has a `Saves` component, or a path-position or filter literal does
+(`Path(D) / 'Saves'`, `glob('*.ess')`, `n.endswith('.ess')`, `p.suffix == '.ess'`), or a literal resolves to the
+Saves or settings folder (writes.python_computed_writes / _location_literals, #26). Text is not a location: content
+written, logged or swapped in by a text method, multi-line strings and command lines held as data. A target that is a
+literal, a name assigned once to one, or a `/` chain from a literal folder is placed, not computed: a literal save is
+backed up, a write into the Saves folder refused, any other place allowed. Not seen: computed targets in code whose
+literals name no save location, getattr/exec/__import__/function aliases/launched processes, and other interpreters' computed
 paths (literal paths in `python -c` and `node -e` moves and copies are); neither is an archive unpacked
 by a library call (`[IO.Compression.ZipFile]::ExtractToDirectory`, `python -m zipfile -e`); a loop over saves (`for f in ...; do rm "$f"; done`) cannot be counted, so it is never backed up
 and stays whatever the delete rules decide (S-DEL-UNRESOLVED when it names a protected folder).
