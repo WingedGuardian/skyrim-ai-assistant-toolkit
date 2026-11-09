@@ -13,6 +13,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 
 from . import Refusal
@@ -250,14 +251,23 @@ def _with_linked_masters(work, masters, candidate, step):
         shutil.copyfile(candidate, data / candidate.name)
         return step()
     finally:
-        shutil.rmtree(data, ignore_errors=True)
+        for _attempt in range(3):           # an indexer or antivirus can hold a linked file for a moment
+            shutil.rmtree(data, ignore_errors=True)
+            if not data.exists():
+                break
+            time.sleep(0.5)
+        # Compare every master BEFORE reporting leftover links, so a failed removal never hides a change.
+        changed = [name for name, (original, size, mtime) in before_stats.items()
+                   if (os.stat(original).st_size, os.stat(original).st_mtime_ns) != (size, mtime)]
+        problems = []
+        if changed:
+            problems.append("Master(s) {} changed during the xEdit step. They are not backed up here: restore them "
+                            "from your mod manager or Steam.".format(", ".join(changed)))
         if data.exists():
-            raise Refusal("The xEdit step could not remove its links in {}: remove that folder.".format(data))
-        for name, (original, size, mtime) in before_stats.items():
-            info = os.stat(original)
-            if (info.st_size, info.st_mtime_ns) != (size, mtime):
-                raise Refusal("Master {} changed during the xEdit step. It is not backed up here: restore it from "
-                              "your mod manager or Steam.".format(name))
+            problems.append("The xEdit step could not remove its links in {} (every master was compared first{}); "
+                            "remove that folder.".format(data, "" if changed else " and is unchanged"))
+        if problems:
+            raise Refusal(" ".join(problems))
 
 
 def _scratch(config, masters, prefix):
@@ -273,6 +283,95 @@ def _scratch(config, masters, prefix):
     return parent, work
 
 
+def _node(argv, env, work, what):
+    """One bounded xEdit (node) step; a timeout is a refusal with nothing published, never a raw traceback."""
+    try:
+        return subprocess.run(argv, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              timeout=120)
+    except subprocess.TimeoutExpired as exc:
+        raise Refusal("The {} did not finish within 120 s; nothing published; retained {}".format(what, work)) from exc
+
+
+def header_fields(path):
+    """HEDR version and the ONAM overrides of a plugin, ONAM resolved to (master or own file, local id).
+
+    ONAM lists an ESM's overridden temporary references; losing an entry silently breaks those overrides.
+    Resolving through the master list keeps the comparison valid after masters are added or re-sorted."""
+    masters = plugin_header(path)["masters"]  # also validates the TES4 layout
+    with Path(path).open("rb") as stream:
+        raw = stream.read(24)
+        body = stream.read(struct.unpack_from("<I", raw, 4)[0])
+    version, onam, pos, extended = None, b"", 0, None
+    while pos < len(body):
+        sig, length = body[pos:pos + 4], struct.unpack_from("<H", body, pos + 4)[0]
+        pos += 6
+        if sig == b"XXXX":
+            extended = struct.unpack_from("<I", body, pos)[0]
+            pos += 4
+            continue
+        if extended is not None:
+            length, extended = extended, None
+        if sig == b"HEDR":
+            if length < 4:
+                raise Refusal("Malformed HEDR in " + str(path))
+            version = round(struct.unpack_from("<f", body, pos)[0], 4)
+        elif sig == b"ONAM":
+            onam += body[pos:pos + length]
+        pos += length
+    if len(onam) % 4:
+        raise Refusal("Malformed ONAM in " + str(path))
+    own = Path(path).name.casefold()
+    resolved = set()
+    for i in range(0, len(onam), 4):
+        value = struct.unpack_from("<I", onam, i)[0]
+        index = value >> 24
+        if index > len(masters):
+            raise Refusal("ONAM entry with an out-of-range master index in " + str(path))
+        name = masters[index].casefold() if index < len(masters) else own
+        resolved.add((name, value & 0xFFFFFF))
+    return {"version": version, "onam": resolved}
+
+
+def record_keys(path):
+    """Every record in a plugin as (master or own file, local id), from the raw bytes (GRUPs walked)."""
+    masters = [m.casefold() for m in plugin_header(path)["masters"]]
+    own = Path(path).name.casefold()
+    keys = set()
+    with Path(path).open("rb") as stream:
+        data = stream.read()
+    pos = 24 + struct.unpack_from("<I", data, 4)[0]
+    while pos < len(data):
+        if pos + 24 > len(data):
+            raise Refusal("Truncated record header in " + str(path))
+        sig, size = data[pos:pos + 4], struct.unpack_from("<I", data, pos + 4)[0]
+        if sig == b"GRUP":
+            if size < 24:
+                raise Refusal("Invalid group size in " + str(path))
+            pos += 24          # step into the group; its records follow
+            continue
+        value = struct.unpack_from("<I", data, pos + 12)[0]
+        index = value >> 24
+        keys.add((masters[index] if index < len(masters) else own, value & 0xFFFFFF))
+        pos += 24 + size
+    return keys
+
+
+def check_header_kept(original, candidate):
+    """After any restore: the original's flags, masters, HEDR version and still-present ONAM overrides remain."""
+    required, written = plugin_header(original), plugin_header(candidate)
+    if written["flags"] != required["flags"] or not {m.casefold() for m in required["masters"]} <= {
+            m.casefold() for m in written["masters"]}:
+        raise Refusal("The edited plugin did not keep the original's header flags and masters; nothing published.")
+    want, got = header_fields(original), header_fields(candidate)
+    if got["version"] != want["version"]:
+        raise Refusal("The edited plugin changed the original's header version ({} -> {}); nothing published.".format(
+            want["version"], got["version"]))
+    lost = (want["onam"] & record_keys(candidate)) - got["onam"]  # an entry may go only with its record
+    if lost:
+        raise Refusal("The edited plugin dropped {} ONAM override entr{} for records it still contains; "
+                      "nothing published.".format(len(lost), "y" if len(lost) == 1 else "ies"))
+
+
 def retain_header(config, candidate, snapshot, original):
     """Put back the masters, flags and HEDR version of `original` that the backend's writer dropped from `candidate`
     (its lean master collector drops e.g. an injected-keyword provider: install repair b1c79507, 2026-10-28).
@@ -282,7 +381,7 @@ def retain_header(config, candidate, snapshot, original):
     if written["flags"] != required["flags"]:
         raise Refusal("The edited plugin changed the original's header flags; nothing published.")
     missing = {m.casefold() for m in required["masters"]} - {m.casefold() for m in written["masters"]}
-    if not missing:
+    if not missing and header_fields(candidate)["version"] == header_fields(original)["version"]:
         return None
     masters = _masters_of(original, snapshot.paths)
     masters.update(_masters_of(candidate, snapshot.paths))
@@ -293,9 +392,8 @@ def retain_header(config, candidate, snapshot, original):
     env = os.environ.copy()
     env["HOUSECARL_XELIB_ROOT"] = config.get("xelib_root", config["root"])
     helper = Path(config["root"]) / "tools/housecarl-preserve.js"
-    result = _with_linked_masters(work, masters, candidate, lambda: subprocess.run(
-        [config.get("node", "node"), str(helper), str(request), str(report)],
-        env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120))
+    result = _with_linked_masters(work, masters, candidate, lambda: _node(
+        [config.get("node", "node"), str(helper), str(request), str(report)], env, work, "master restore"))
     if "RESULT: OK" not in result.stdout or not report.is_file():
         raise Refusal("Restoring the original's masters failed; nothing published: " +
                       (result.stderr + result.stdout).replace("\0", "")[-1400:] + "; retained " + str(work))
@@ -316,9 +414,9 @@ def independent_check(config, candidate, snapshot, before=None, allowed=None):
     out = work / "inspection.json"
     env = os.environ.copy()
     env["HOUSECARL_XELIB_ROOT"] = config.get("xelib_root", config["root"])
-    result = _with_linked_masters(work, masters, candidate, lambda: subprocess.run(
-        [config.get("node", "node"), str(verifier), str(work), candidate.name, str(out)],
-        env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120))
+    result = _with_linked_masters(work, masters, candidate, lambda: _node(
+        [config.get("node", "node"), str(verifier), str(work), candidate.name, str(out)], env, work,
+        "independent xEdit check"))
     # The installed xelib has a documented native teardown exit-code problem. Require both markers and data.
     if "RESULT: OK" not in result.stdout or not out.is_file():
         detail = (result.stderr + result.stdout).replace("\0", "")
@@ -468,11 +566,14 @@ class Gateway:
                 meta = placeholder.parent / "meta.ini"
                 meta_text = meta.read_text(encoding="utf-8-sig")
                 old_plugin = "plugin=" + placeholder.name
-                if "generated=true" not in meta_text or meta_text.count(old_plugin) != 1:
+                lines = meta_text.splitlines()
+                owned = [i for i, line in enumerate(lines) if line.strip() == old_plugin]
+                if "generated=true" not in (line.strip() for line in lines) or len(owned) != 1:
                     raise Refusal("Private writer ownership metadata was incomplete.")
                 placeholder.unlink()
                 staged.replace(placeholder.parent / original.name)
-                meta.write_text(meta_text.replace(old_plugin, "plugin=" + original.name), encoding="utf-8")
+                lines[owned[0]] = "plugin=" + original.name
+                meta.write_text("\n".join(lines) + "\n", encoding="utf-8")
                 a["into"] = placeholder.parent.name
             elif original:
                 modlist = work / "profile/modlist.txt"
@@ -503,18 +604,15 @@ class Gateway:
         if len(candidates) != 1:
             raise Refusal("Expected exactly one candidate plugin; nothing was published.")
         candidate = candidates[0]
-        written = plugin_header(candidate)
+        plugin_header(candidate)
         retained_header = None
         if original is not None:
-            # An edit of an existing plugin must keep its header: the backend dropping a master or changing the
-            # ESM/ESL flags would reach the user's file (install repair b1c79507, 2026-10-28, found on a real edit).
-            # Dropped masters are put back; the check below then holds whatever the restore did.
+            # An edit of an existing plugin must keep its header: the backend dropping a master, changing the
+            # ESM/ESL flags or the HEDR version, or losing ONAM entries would reach the user's file (install repair
+            # b1c79507, 2026-10-28, found on a real edit). Dropped masters and the version are put back; the check
+            # after it holds whatever the restore did.
             retained_header = retain_header(config, candidate, snap, original)
-            written = plugin_header(candidate)
-            required = plugin_header(original)
-            if written["flags"] != required["flags"] or not {m.casefold() for m in required["masters"]} <= {
-                    m.casefold() for m in written["masters"]}:
-                raise Refusal("The edited plugin did not keep the original's header flags and masters; nothing published.")
+            check_header_kept(original, candidate)
         allowed = allowed_records(arguments)
         if name == "housecarl_create":
             allowed |= {r["formid"].casefold().lstrip("0") for r in result.get("created", []) if r.get("formid")}
