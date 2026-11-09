@@ -1,7 +1,6 @@
 ---
 name: skyrim-nif
 description: Inspect and modify NIF mesh files - AutoMod CLI for textures/strings/shaders, PyFFI for LE NiTriShape geometry edits, PyNifly for BSTriShape (SSE) and all animation/controller authoring plus parse-validation. Use when working with meshes, textures, skeleton nodes, collision blocks, mesh animation, or fixing VR mesh issues.
-paths: "**/*.nif,Data/meshes/**"
 ---
 
 # NIF Mesh Operations

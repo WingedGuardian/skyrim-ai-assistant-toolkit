@@ -371,8 +371,10 @@ Treat the user's examples as a **sample, not the spec.** When they name a few in
 Generated into `CLAUDE.md` only. Everything above is shared with every agent.
 
 - **Skills** live in `.claude/skills/<name>/SKILL.md`. Load one with the Skill tool (`Skill: skyrim-nif`).
-  A path-scoped skill (`paths:` in its frontmatter) is *listed* automatically when you touch a matching
-  file (`skyrim-nif` is scoped to `**/*.nif,Data/meshes/**`). Listing is not loading: invoke it.
+  A path-scoped skill (`paths:` in its frontmatter) is *listed* only after a `Read` or `Edit` of a matching
+  file; Glob and Bash do not list it (`skyrim-context` is scoped to `.psc/.pex/.ini/Data`). The binary-file
+  skills (`skyrim-nif`, `skyrim-bsa`, `skyrim-save`, `skyrim-audio`) are unscoped, so they are always listed,
+  because nobody Reads a binary file. Listing is not loading: invoke it.
 - **The guards** are `.claude/hooks/*.sh`, thin adapters over `tools/skyguard/`, wired up in
   `.claude/settings.json`: `Bash`, `PowerShell`, `Monitor` → `protect-bash` + `snapshot-before-tool`; `Edit`, `Write`,
   `NotebookEdit` → `protect-files` + `backup-before-edit`; the DevBench MCP tools → `protect-mcp`; SessionStart → `session-kb-guard` (knowledgebase snapshot, then your `## My preferences`). `setup.sh` records the

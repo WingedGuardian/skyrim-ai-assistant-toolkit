@@ -2275,6 +2275,12 @@ for use with the Skill tool: skyrim-context"* — the skill became **invocable**
 enter context. A description that says "Auto-loads when working with X" is describing an intention,
 not the mechanism.
 
+**What lists it (MEASURED 2026-11-08, issue #25):** only a `Read` or `Edit` of a matching file does.
+`Glob` returning the file does not, and neither does working on it through Bash (PyNifly, AutoMod). A
+scope made only of binary types (`.nif`, `.bsa`, `.ess`, `.fuz`) is therefore a gate that never opens,
+and `Skill: skyrim-nif` answered `Unknown skill`. Since 4.1 those four skills are unscoped and always
+listed; keep `paths:` only for text types that do get Read.
+
 **Consequence for any `CLAUDE.md` → skill migration:** the root file must keep an explicit *invoke*
 pointer. Without one, a future session sees no mention of the knowledge and concludes it does not
 exist — the migration silently deletes the guidance instead of deferring it. Never migrate a

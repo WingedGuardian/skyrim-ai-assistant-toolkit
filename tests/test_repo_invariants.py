@@ -578,3 +578,25 @@ def test_the_codex_files_are_not_gitignored():
                        cwd=str(REPO), capture_output=True, text=True, timeout=60)
     assert r.stdout.strip() == "", f"ignored: {r.stdout}"
     assert r.returncode == 1, r.stderr   # 1 = none ignored; 128 = not a repo (the check proved nothing)
+
+
+# Issue #25: a skill is listed only after a Read/Edit of a file its `paths:` scope matches. Nobody Reads a
+# binary file, so a scope made only of binary types is a gate that never opens.
+BINARY_SCOPE = re.compile(r"\.(nif|bsa|ba2|ess|skse|fuz|xwm|wav|dds|hkx|esp|esm|esl)$|^data/(meshes|sound|textures)/\*\*$",
+                          re.IGNORECASE)
+
+
+def _scope(skill_md):
+    head = skill_md.read_text(encoding="utf-8").split("\n---", 1)[0]
+    match = re.search(r'^paths:\s*"?([^"\n]*)"?\s*$', head, re.MULTILINE)
+    return [p.strip() for p in match.group(1).split(",") if p.strip()] if match else []
+
+
+def test_no_skill_is_scoped_only_to_binary_files():
+    offenders = {}
+    for skill_md in sorted((REPO / "agent" / "skills").glob("*/SKILL.md")):
+        scope = _scope(skill_md)
+        if scope and all(BINARY_SCOPE.search(p) for p in scope):
+            offenders[skill_md.parent.name] = scope
+    assert not offenders, "never-listed skill scopes (issue #25): %r" % offenders
+    assert _scope(REPO / "agent" / "skills" / "skyrim-context" / "SKILL.md"), "text-type scoping is kept"
