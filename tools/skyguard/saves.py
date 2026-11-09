@@ -31,9 +31,12 @@ whatever else asks, and 1-2 saves are backed up before the question reaches the 
 is refused; if shadow mode (guards off) lets it run, it reaches the dispatcher as an allow and is backed up first.
 
 KNOWN LIMITS: a save written by a script run from a file (`python fix.py`) is not seen (reading invoked scripts is
-planned for 4.2). Inline Python that writes a COMPUTED target is refused as S-SAVE-UNKNOWN when its literals name a
-save, a save folder or the settings folder (writes.python_computed_writes, #26); computed targets in code naming none,
-and other interpreters' computed paths, are not seen (literal paths in `python -c` and `node -e` moves and copies are); neither is an archive unpacked
+planned for 4.2). Inline Python that writes, moves or replaces a COMPUTED target is refused as S-SAVE-UNKNOWN when
+a literal in a path position (path-call argument, `/` operand, assigned or iterated value) names a save or has a
+`Saves` component, or resolves to the Saves or settings folder (writes.python_computed_writes / _path_literals /
+names_save_location, #26; a dict value counts when it holds a path separator). Not seen: computed targets whose
+path-position literals name none of those, getattr/exec/__import__/function aliases/launched processes, and other interpreters' computed
+paths (literal paths in `python -c` and `node -e` moves and copies are); neither is an archive unpacked
 by a library call (`[IO.Compression.ZipFile]::ExtractToDirectory`, `python -m zipfile -e`); a loop over saves (`for f in ...; do rm "$f"; done`) cannot be counted, so it is never backed up
 and stays whatever the delete rules decide (S-DEL-UNRESOLVED when it names a protected folder).
 """
@@ -208,7 +211,11 @@ def count(change: Change) -> Count:
             d["ops"].append(op)
         return k
 
+    from .writes import COMPUTED_SAVE, COMPUTED_SAVE_WHY   # writes imports the rule modules that import this one
     for t in change.targets:
+        if t.path == COMPUTED_SAVE:
+            unknown.append(COMPUTED_SAVE_WHY)
+            continue
         name = os.path.split(t.path)[1] if t.path else ""
         if not name or (not WILD.search(name) and not name.lower().endswith(EXTS)):
             unknown.append("unqualified save path")
