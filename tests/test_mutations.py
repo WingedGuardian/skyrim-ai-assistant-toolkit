@@ -1589,6 +1589,8 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
            "test_off_refuses_a_backup_that_does_not_verify_and_keeps_the_state"),
           ("se-not-refused", '    if not (game / "SkyrimVR.exe").is_file():', "    if False:",
            "test_se_and_ae_are_refused"),
+          ("stop-trusts-one-missed-listing", " and still_alive(o, port)]", " and False]",
+           "test_stop_after_a_missed_game_listing_still_quits_it_before_any_helper"),
           ("state-recorded-after-change", "    save_state(state)                              # recorded BEFORE the first change",
            "    pass                              # recorded BEFORE the first change",
            "test_backups_are_taken_and_recorded_before_the_first_change"),

@@ -874,3 +874,21 @@ def test_launch_and_emu_refuse_when_the_process_list_is_unreadable(tree, world, 
     assert mod.main(["launch", "--desktop", "current"]) == 2 and world.started == []
     assert not mod.load_state().get("session"), "refused before any desktop or session existed"
     assert mod.main(["emu", "on"]) == 2 and tree["null"].read_bytes() == b"stock null driver"
+
+
+def test_stop_after_a_missed_game_listing_still_quits_it_before_any_helper(tree, world):
+    """Issue #24: the first process list at `stop` omits the still-running owned game. Its own second opinion
+    (DevBench naming the PID, or the process handle) keeps it present, so it gets the orderly quit and no
+    SteamVR helper is terminated under a live game."""
+    launch_session(tree, world)
+    mod = tree["mod"]
+    order = []
+    real_quit, real_terminate = mod.devbench_quit, mod.terminate_verified
+    mod.devbench_quit = lambda port: (order.append("quit"), real_quit(port))[1]
+    mod.terminate_verified = lambda pid, start: (order.append(("game alive" if world.game() else "game gone", pid)),
+                                                 real_terminate(pid, start))[1]
+    world.drop_window = (world.clock.now, world.clock.now + 0.2)     # only stop's first read misses the game
+    assert mod.main(["stop"]) == 0
+    assert order and order[0] == "quit", order
+    assert all(step[0] == "game gone" for step in order[1:]), "a helper was terminated under the live game"
+    assert mod.load_state() is None

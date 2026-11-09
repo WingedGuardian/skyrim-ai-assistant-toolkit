@@ -1121,6 +1121,11 @@ def stop_owned(st) -> dict:
     games = [x for x in running if x["ProcessName"] in GAME_NAMES]
     if any(not any(same_process(g, o) for o in owned) for g in games):
         raise Refused("a game process this session did not start is running; stop refused, nothing sent")
+    # A process list can miss a running game once (#24). An owned game the list omits is still present while its
+    # own second opinions say so (DevBench naming its PID, or its exact process generation), so it gets the
+    # orderly quit and no helper is stopped under it.
+    games += [dict(o) for o in owned if o.get("ProcessName") in GAME_NAMES and
+              not any(same_process(g, o) for g in games) and still_alive(o, port)]
     skyrim = [g for g in games if g["ProcessName"] == "SkyrimVR"]
     if skyrim:
         watch, deadline = ExitWatch(skyrim, port), time.monotonic() + QUIT_WAIT
