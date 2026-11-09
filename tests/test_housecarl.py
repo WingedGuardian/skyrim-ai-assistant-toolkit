@@ -1112,7 +1112,7 @@ def test_an_onam_entry_may_go_with_its_removed_record(install, monkeypatch):
     assert gateway.header_fields(target)["onam"] == set()
 
 
-@pytest.mark.parametrize("candidate_version, triggered", [(1.71, True), (1.7, False)], ids=["drift", "same"])
+@pytest.mark.parametrize("candidate_version, triggered", [(1.69, True), (1.7, False), (1.71, "refused")], ids=["lowered", "same", "raised"])
 def test_a_version_only_drift_triggers_the_restore(install, monkeypatch, tmp_path, candidate_version, triggered):
     from types import SimpleNamespace
     original = Path(install["data_dir"]) / "Sword.esp"
@@ -1127,7 +1127,11 @@ def test_a_version_only_drift_triggers_the_restore(install, monkeypatch, tmp_pat
         calls.append(cand)
         return SimpleNamespace(stdout="", stderr="authored: xEdit not run in this test")
     monkeypatch.setattr(gateway, "_with_linked_masters", step)
-    if triggered:
+    if triggered == "refused":
+        with pytest.raises(Refusal, match="raised the plugin's header version"):
+            gateway.retain_header(install, candidate, order.capture(install), original)
+        assert calls == [], "a raised version is refused before any xEdit step"
+    elif triggered:
         with pytest.raises(Refusal, match="Restoring the original's masters failed"):
             gateway.retain_header(install, candidate, order.capture(install), original)
         assert calls == [candidate]
@@ -1165,3 +1169,23 @@ def test_an_xedit_timeout_is_a_refusal(tmp_path, monkeypatch):
     monkeypatch.setattr(gateway.subprocess, "run", slow)
     with pytest.raises(Refusal, match="did not finish within 120 s"):
         gateway._node(["node"], {}, tmp_path, "independent xEdit check")
+
+
+def test_a_master_that_vanishes_during_the_step_is_reported_as_changed(tmp_path, monkeypatch):
+    master = tmp_path / "masters" / "Skyrim.esm"
+    master.parent.mkdir()
+    plugin(master, 1)
+    candidate = tmp_path / "cand" / "Sword.esp"
+    candidate.parent.mkdir()
+    plugin(candidate, 0, ["Skyrim.esm"])
+    work = tmp_path / "work"
+    work.mkdir()
+    with pytest.raises(Refusal, match=r"Skyrim\.esm \(missing or unreadable\) changed"):
+        gateway._with_linked_masters(work, {"Skyrim.esm": master}, candidate, lambda: master.unlink())
+
+
+def test_record_keys_refuses_an_out_of_range_master_index(tmp_path):
+    path = tmp_path / "Bad.esp"
+    plugin(path, 0, ["Skyrim.esm"], records=[(b"WEAP", 0x05000800)])
+    with pytest.raises(Refusal, match="out-of-range master index"):
+        gateway.record_keys(path)

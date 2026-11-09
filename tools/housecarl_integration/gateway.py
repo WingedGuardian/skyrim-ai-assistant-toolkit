@@ -257,8 +257,13 @@ def _with_linked_masters(work, masters, candidate, step):
                 break
             time.sleep(0.5)
         # Compare every master BEFORE reporting leftover links, so a failed removal never hides a change.
-        changed = [name for name, (original, size, mtime) in before_stats.items()
-                   if (os.stat(original).st_size, os.stat(original).st_mtime_ns) != (size, mtime)]
+        changed = []
+        for name, (original, size, mtime) in before_stats.items():
+            try:
+                if (os.stat(original).st_size, os.stat(original).st_mtime_ns) != (size, mtime):
+                    changed.append(name)
+            except OSError:
+                changed.append(name + " (missing or unreadable)")   # e.g. a mod-manager redeploy mid-step
         problems = []
         if changed:
             problems.append("Master(s) {} changed during the xEdit step. They are not backed up here: restore them "
@@ -351,6 +356,8 @@ def record_keys(path):
             continue
         value = struct.unpack_from("<I", data, pos + 12)[0]
         index = value >> 24
+        if index > len(masters):
+            raise Refusal("Record with an out-of-range master index in " + str(path))
         keys.add((masters[index] if index < len(masters) else own, value & 0xFFFFFF))
         pos += 24 + size
     return keys
@@ -381,7 +388,12 @@ def retain_header(config, candidate, snapshot, original):
     if written["flags"] != required["flags"]:
         raise Refusal("The edited plugin changed the original's header flags; nothing published.")
     missing = {m.casefold() for m in required["masters"]} - {m.casefold() for m in written["masters"]}
-    if not missing and header_fields(candidate)["version"] == header_fields(original)["version"]:
+    was, now = header_fields(original)["version"], header_fields(candidate)["version"]
+    if was is not None and now is not None and now > was:
+        # Never lowered silently: a writer may raise the version because new records need its FormID range.
+        raise Refusal("The edit raised the plugin's header version from {} to {}; it is not lowered silently. "
+                      "Nothing published.".format(was, now))
+    if not missing and now == was:
         return None
     masters = _masters_of(original, snapshot.paths)
     masters.update(_masters_of(candidate, snapshot.paths))
