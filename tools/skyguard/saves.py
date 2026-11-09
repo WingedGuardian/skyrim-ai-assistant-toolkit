@@ -30,8 +30,10 @@ the approval check and the backup pass (portable.check, L2 HIGH-1): a bulk chang
 whatever else asks, and 1-2 saves are backed up before the question reaches the user. A call that the other rules deny
 is refused; if shadow mode (guards off) lets it run, it reaches the dispatcher as an allow and is backed up first.
 
-KNOWN LIMITS: a save written by a script run from a file (`python fix.py`), or by code that builds its path at run
-time, is not seen (literal paths in `python -c` and `node -e` moves and copies are); neither is an archive unpacked
+KNOWN LIMITS: a save written by a script run from a file (`python fix.py`) is not seen (reading invoked scripts is
+planned for 4.2). Inline Python that writes a COMPUTED target is refused as S-SAVE-UNKNOWN when its literals name a
+save, a save folder or the settings folder (writes.python_computed_writes, #26); computed targets in code naming none,
+and other interpreters' computed paths, are not seen (literal paths in `python -c` and `node -e` moves and copies are); neither is an archive unpacked
 by a library call (`[IO.Compression.ZipFile]::ExtractToDirectory`, `python -m zipfile -e`); a loop over saves (`for f in ...; do rm "$f"; done`) cannot be counted, so it is never backed up
 and stays whatever the delete rules decide (S-DEL-UNRESOLVED when it names a protected folder).
 """

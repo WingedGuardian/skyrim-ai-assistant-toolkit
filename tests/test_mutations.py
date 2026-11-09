@@ -12532,3 +12532,33 @@ MUTATIONS += [pytest.param(path, anchor, replacement, test, id="f35-" + name) fo
      _F35 + "test_every_python_option_spelling_still_reads_its_program_from_a_pipe[-E]", "python-e-is-no-code"),
 ]]
 
+
+# Issue #26: a computed Python write target in code that names a save location (writes.python_computed_writes + the
+# location check in writes.scan). One twin per clause; the last is a reverse twin: a literal Path target must stay
+# literal, or the #10 audit shapes (literal report paths beside a saves read) would be refused.
+_I26 = "tests/test_issue10_shapes.py::"
+MUTATIONS += [pytest.param("tools/skyguard/writes.py", anchor, replacement, _I26 + test, id="i26-" + name)
+              for anchor, replacement, test, name in [
+    ("                computed, strings = python_computed_writes(code)\n", "                computed, strings = False, []\n",
+     "test_a_computed_write_into_the_saves_folder_is_refused", "scan-not-wired"),
+    ("if is_save(a, roots) or is_save_folder(a, roots) or is_settings_folder(a, roots):",
+     "if is_save(a, roots) or is_settings_folder(a, roots):",
+     "test_a_computed_write_into_the_saves_folder_is_refused", "no-saves-folder-clause"),
+    ("if is_save(a, roots) or is_save_folder(a, roots) or is_settings_folder(a, roots):",
+     "if is_save_folder(a, roots) or is_settings_folder(a, roots):",
+     "test_a_computed_open_over_a_save_glob_is_refused", "no-save-file-clause"),
+    ("if is_save(a, roots) or is_save_folder(a, roots) or is_settings_folder(a, roots):",
+     "if is_save(a, roots) or is_save_folder(a, roots):",
+     "test_a_computed_write_below_the_settings_folder_is_refused", "no-settings-folder-clause"),
+    ('_PY_WRITE_METHODS = frozenset(("write_bytes", "write_text", "touch"))', '_PY_WRITE_METHODS = frozenset(("write_text", "touch"))',
+     "test_a_computed_write_into_the_saves_folder_is_refused", "write-bytes-not-a-write"),
+    ('"os.truncate": 0, "shutil.copy": 1, "shutil.copy2": 1,', '"os.truncate": 0, "shutil.copy": 1, "shutil.copy2-": 1,',
+     "test_a_computed_copy_onto_saves_is_refused", "copy2-not-a-write"),
+    ('_PY_WRITE_FUNCS = {"open": 0,', '_PY_WRITE_FUNCS = {"open-": 0,', "test_a_computed_open_over_a_save_glob_is_refused",
+     "open-not-a-write"),
+    ("        return True                                       # a mode chosen at run time may write\n",
+     "        return False                                      # a mode chosen at run time may write\n",
+     "test_an_open_whose_mode_is_chosen_at_run_time_counts_as_a_write", "runtime-mode-reads"),
+    ("            return (bare or dotted) and all(isinstance(a, ast.Constant)", "            return False and all(isinstance(a, ast.Constant)",
+     "test_the_five_reported_shapes_are_allowed", "literal-path-counts-as-computed"),
+]]

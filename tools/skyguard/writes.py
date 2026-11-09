@@ -610,6 +610,81 @@ def _python_write_targets(code: str) -> List[str]:
     return out
 
 
+# Issue #26: a Python write whose target is computed (`for p in Path(S).glob('*.ess'): p.write_bytes(b'')`) names no
+# file, so the literal reader above returns nothing for it and the save policy never saw the saves it changes.
+# These are the calls that write (or move a file onto) their target; deletes are read by deletes.py (S-DEL-CONFIG).
+_PY_WRITE_METHODS = frozenset(("write_bytes", "write_text", "touch"))
+_PY_WRITE_FUNCS = {"open": 0, "io.open": 0, "builtins.open": 0, "os.truncate": 0, "shutil.copy": 1, "shutil.copy2": 1,
+                   "shutil.copyfile": 1, "shutil.copytree": 1, "shutil.move": 1, "os.rename": 1, "os.replace": 1,
+                   "os.renames": 1}
+
+
+def python_computed_writes(code: str) -> Tuple[bool, List[str]]:
+    """(does this Python write a target it does not spell as a literal?, its string literals).
+
+    Read as Python (ast, never run). A write counts when its target argument is not a string literal or a
+    `Path(<literals>)`: a variable, a loop item, `Path(S) / name`, a glob result. A text-mode `open` (no
+    w/a/x/+ in a literal mode) writes nothing; a mode that is not a literal may write. Code that cannot be
+    parsed is left to the existing unparsed-code refusal (scan raises on it)."""
+    try:
+        nodes = python_nodes(code)
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return False, []
+    literals = [n.value for n in nodes if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+    modules, names = {}, {}
+    for node in nodes:
+        if isinstance(node, ast.Import):
+            modules.update({a.asname or a.name: a.name for a in node.names})
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            names.update({a.asname or a.name: node.module + "." + a.name for a in node.names})
+
+    def fixed(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return True
+        if isinstance(node, ast.Call) and node.args and not node.keywords:
+            f = node.func
+            bare = isinstance(f, ast.Name) and (f.id == "Path" or names.get(f.id) == "pathlib.Path")
+            dotted = (isinstance(f, ast.Attribute) and f.attr == "Path" and isinstance(f.value, ast.Name)
+                      and modules.get(f.value.id, f.value.id) == "pathlib")
+            return (bare or dotted) and all(isinstance(a, ast.Constant) and isinstance(a.value, str) for a in node.args)
+        return False
+
+    def mode_writes(call, index):
+        mode = next((k.value for k in call.keywords if k.arg == "mode"),
+                    call.args[index] if len(call.args) > index else None)
+        if mode is None:
+            return False
+        if isinstance(mode, ast.Constant) and isinstance(mode.value, str):
+            return any(c in mode.value for c in "wax+")
+        return True                                       # a mode chosen at run time may write
+
+    for node in nodes:
+        if not isinstance(node, ast.Call):
+            continue
+        f = node.func
+        if isinstance(f, ast.Attribute) and (f.attr in _PY_WRITE_METHODS or
+                                             f.attr == "open" and mode_writes(node, 0)):
+            receiver_is_module = isinstance(f.value, ast.Name) and modules.get(f.value.id, f.value.id) in (
+                "io", "builtins", "os", "shutil")
+            if not receiver_is_module and not fixed(f.value):
+                return True, literals
+        name = ""
+        if isinstance(f, ast.Name):
+            name = names.get(f.id, f.id)
+        elif isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name):
+            name = modules.get(f.value.id, f.value.id) + "." + f.attr
+        if name in _PY_WRITE_FUNCS:
+            index = _PY_WRITE_FUNCS[name]
+            keyword = {"os.truncate": "path"}.get(name, "dst" if index else "file")
+            target = node.args[index] if len(node.args) > index else next(
+                (k.value for k in node.keywords if k.arg == keyword), None)
+            if name in ("open", "io.open", "builtins.open") and not mode_writes(node, 1):
+                continue
+            if target is not None and not fixed(target):
+                return True, literals
+    return False, literals
+
+
 def text_write_targets(code: str, *, python_literals: bool = False) -> List[str]:
     if python_literals:
         return _python_write_targets(code)
@@ -1198,6 +1273,17 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             except ValueError:
                 if not _script_reads_stdin(e, command):
                     raise
+            # Issue #26: a computed write target in code that names a save, the Saves folder or the settings folder
+            # may change saves the guard cannot list or back up: S-SAVE-UNKNOWN, as for any save it cannot place.
+            if shellparse._PYTHON.fullmatch(e.program) and not _script_reads_stdin(e, command):
+                computed, strings = python_computed_writes(code)
+                if computed:
+                    base = targets.exec_cwd(e, cwd, env) or ""
+                    for s in strings:
+                        a = targets.resolve_literal(s, base, env) if len(s) < 1024 and "\n" not in s else None
+                        if is_save(a, roots) or is_save_folder(a, roots) or is_settings_folder(a, roots):
+                            saves.append(("", "write"))
+                            break
     for e, word in lit:
         base = cwd if e is None else (targets.exec_cwd(e, cwd, env) or "")
         a = targets.resolve_literal(word, base, env)                    # a literal: nothing in it expands
