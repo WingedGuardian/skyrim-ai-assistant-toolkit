@@ -1033,6 +1033,8 @@ def test_restore_refuses_a_flag_change_before_running_xedit(install, monkeypatch
     candidate = tmp_path / "cand" / "Sword.esp"
     candidate.parent.mkdir()
     plugin(candidate, flags=0x200, masters=[])
+    (tmp_path / "temp").mkdir()
+    monkeypatch.setattr(gateway.tempfile, "tempdir", str(tmp_path / "temp"))   # a mutant must not reach real %TEMP%
     monkeypatch.setattr(gateway.subprocess, "run", lambda *a, **k: pytest.fail("xEdit must not run"))
     with pytest.raises(Refusal, match="changed the original's header flags"):
         gateway.retain_header(install, candidate, order.capture(install), Path(install["data_dir"]) / "Sword.esp")
