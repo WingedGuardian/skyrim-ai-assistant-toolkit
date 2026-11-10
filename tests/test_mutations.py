@@ -12893,3 +12893,33 @@ MUTATIONS += [pytest.param(_W, anchor, replacement, _I26R12 + test, id="i26-" + 
      '    "maketrans", "removeprefix", "removesuffix", "hexdigest", "digest", "update", "copy", "setdefault", "fromkeys",',
      'test_the_safe_list_review_probes_are_refused[path-copy-314]', 'copy-is-a-read'),
 ]]
+
+# #26 round 13 (second safe-list review): unpacking, decoy imports, O_RDONLY, change-method values.
+_I26R13 = "tests/test_issue26_round13.py::"
+MUTATIONS += [pytest.param(_W, anchor, replacement, (test if "::" in test else _I26R13 + test) if not test.startswith("test_the_safe_list") else "tests/test_issue26_round12.py::" + test, id="i26-" + name)
+              for anchor, replacement, test, name in [
+    ('        if any(isinstance(a, ast.Starred) for a in node.args) or any(k.arg is None for k in node.keywords):',
+     '        if False:',
+     'test_the_second_list_review_probes_are_refused[remove-kwargs]', 'unpacked-arguments-unread'),
+    ('                     isinstance(flags.value, ast.Name) and modules.get(flags.value.id) == "os" or',
+     '                     True or',
+     'test_the_second_list_review_probes_are_refused[spoofed-rdonly]', 'rdonly-by-attribute-name'),
+    ('    rebound = (bound & protected) | {k for k, v in imported.items() if len(v) > 1}',
+     '    rebound = (bound & protected)',
+     'test_the_second_list_review_probes_are_refused[decoy-module-import]', 'decoy-import-unread'),
+    ('            if root in import_names and n.func.attr not in _READ_METHODS:',
+     '            if False:',
+     'test_the_safe_list_review_probes_are_refused[rebound-module]', 'rebound-import-method-trusted'),
+    ('_CHANGE_METHOD_VALUES = frozenset(("chmod", "lchmod",',
+     '_CHANGE_METHOD_VALUES = frozenset(("lchmod",',
+     'test_the_second_list_review_probes_are_refused[chmod-value]', 'chmod-value-trusted'),
+    ('"difflib", "pprint", "platform", "locale", "decimal", "fractions", "enum",',
+     '"difflib", "pprint", "platform", "locale", "decimal", "fractions", "typing", "enum",',
+     'test_the_second_list_review_probes_are_refused[typing-eval]', 'typing-is-a-read'),
+    ('_EXCEPTION_NAME = r"(?:Error|Exception|Warning|Exit|Interrupt|Iteration)$"',
+     '_EXCEPTION_NAME = r"(?:Error|Exception|Warning)$"',
+     'test_read_only_audits_the_list_refused_are_allowed[system-exit]', 'system-exit-unknown'),
+    ('    "argparse.ArgumentParser",',
+     '',
+     'test_read_only_audits_the_list_refused_are_allowed[argparse-cli]', 'argparse-parser-unknown'),
+]]

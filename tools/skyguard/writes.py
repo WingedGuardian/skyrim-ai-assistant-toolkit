@@ -762,7 +762,10 @@ def python_computed_writes(code: str) -> ComputedWrites:
 
     def os_open_writes(call):
         flags = argument(call, 1, "flags")
-        read_only = (isinstance(flags, ast.Attribute) and flags.attr == "O_RDONLY" or
+        # Only the real os.O_RDONLY (or 0): `class K: O_RDONLY = 0x301` is write+create+truncate (list review 2).
+        read_only = (isinstance(flags, ast.Attribute) and flags.attr == "O_RDONLY" and
+                     isinstance(flags.value, ast.Name) and modules.get(flags.value.id) == "os" or
+                     isinstance(flags, ast.Name) and names.get(flags.id) == "os.O_RDONLY" or
                      isinstance(flags, ast.Constant) and flags.value == 0)
         return not read_only
 
@@ -873,7 +876,7 @@ _READ_BUILTINS = frozenset((
 # deeper and nothing private. None of these modules has a module-level function that writes a file.
 _READ_MODULES = frozenset(("json", "hashlib", "re", "math", "struct", "datetime", "time", "os.path", "glob", "fnmatch",
                            "collections", "itertools", "base64", "binascii", "statistics", "textwrap", "string",
-                           "difflib", "pprint", "platform", "locale", "decimal", "fractions", "typing", "enum",
+                           "difflib", "pprint", "platform", "locale", "decimal", "fractions", "enum",
                            "dataclasses", "unicodedata", "random", "html", "shlex", "uuid", "zlib", "ntpath",
                            "posixpath"))
 _READ_FUNCS = frozenset((
@@ -886,6 +889,10 @@ _READ_FUNCS = frozenset((
     "sys.stderr.flush", "sys.stdout.reconfigure", "sys.stderr.reconfigure", "traceback.print_exc",
     "traceback.format_exc", "functools.reduce", "functools.lru_cache", "functools.cmp_to_key", "functools.wraps",
     "copy.deepcopy", "csv.reader", "csv.DictReader", "datetime.datetime.now", "datetime.datetime.utcnow",
+    # a csv writer writes to the file it is handed: that file's open() was judged (or it is stdout)
+    "csv.writer", "csv.DictWriter", "sys.stdout.buffer.write", "sys.stdout.buffer.flush",
+    # CLI parsing for an audit script; argparse.FileType (it opens files) stays unknown
+    "argparse.ArgumentParser",
     "datetime.datetime.fromtimestamp", "datetime.datetime.strptime", "datetime.datetime.fromisoformat",
     "datetime.date.today", "datetime.date.fromtimestamp", "datetime.date.fromisoformat",
     # a save's body is LZ4-compressed: read-only save audits decompress it (priced: 5 such audits, 2026-11-10)
@@ -907,12 +914,19 @@ _READ_METHODS = frozenset((
     "is_absolute", "to_bytes", "from_bytes", "bit_length", "hex", "fromhex", "unpack", "unpack_from", "pack",
     "pack_into", "iter_unpack", "isoweekday", "weekday", "now", "utcnow", "today", "fromtimestamp", "fromisoformat",
     "strptime", "astimezone", "getvalue", "elements", "clear", "reverse", "popleft", "appendleft", "__enter__",
-    "__exit__", "is_mount", "owner", "readlink", "samestat", "tobytes", "tolist"))
+    "__exit__", "is_mount", "owner", "readlink", "samestat", "tobytes", "tolist", "writerow", "writerows",
+    "writeheader", "add_argument", "parse_args", "parse_known_args", "add_mutually_exclusive_group",
+    "add_argument_group", "print_help", "print_usage", "error"))
 _READ_DATA = frozenset((                               # module attributes that are values, not functions
     "os.sep", "os.altsep", "os.linesep", "os.pathsep", "os.curdir", "os.pardir", "os.extsep", "os.devnull",
     "os.environ", "os.name", "os.O_RDONLY", "os.O_BINARY", "os.SEEK_SET", "os.SEEK_CUR", "os.SEEK_END", "sys.argv",
     "sys.stdin", "sys.stdout", "sys.stderr", "sys.platform", "sys.version_info", "sys.path", "sys.executable",
     "sys.maxsize"))
+# Method names that change a file when called, refused when handed on as a value (`map(p.chmod, ...)`); a direct call
+# of any of them is already refused as an unknown method (list review 2).
+_CHANGE_METHOD_VALUES = frozenset(("chmod", "lchmod", "chown", "mkdir", "makedirs", "touch", "copy", "move",
+                                   "copy_into", "move_into", "remove", "writestr", "write_text", "write_bytes"))
+_EXCEPTION_NAME = r"(?:Error|Exception|Warning|Exit|Interrupt|Iteration)$"   # raise SystemExit(...), StopIteration()
 _REROOT = frozenset(("os", "nt", "posix", "shutil", "subprocess", "io", "pathlib", "zipfile", "tarfile", "gzip",
                      "bz2", "lzma", "send2trash", "ctypes", "importlib", "builtins"))
 
@@ -941,15 +955,37 @@ def _unread_call(nodes, modules, names) -> bool:
             bound.add(n.name)
         elif type(n).__name__ in ("MatchAs", "MatchStar") and getattr(n, "name", None):
             bound.add(n.name)
-    rebound = bound & protected
+    # An import name bound to two different things (`import os as json` beside a decoy `import json` elsewhere): the
+    # tables above saw only the last one (list review 2).
+    imported = {}
+    for n in nodes:
+        if isinstance(n, ast.Import):
+            for a in n.names:
+                imported.setdefault(a.asname or a.name.split(".")[0], set()).add(a.name if a.asname else a.name.split(".")[0])
+        elif isinstance(n, ast.ImportFrom):
+            for a in n.names:
+                imported.setdefault(a.asname or a.name, set()).add((n.module or "") + "." + a.name)
+    import_names = set(modules) | roots | set(names)
+    rebound = (bound & protected) | {k for k, v in imported.items() if len(v) > 1}
 
     def root_name(node):
         while isinstance(node, ast.Attribute):
             node = node.value
         return node.id if isinstance(node, ast.Name) else None
 
-    if rebound and any(isinstance(n, ast.Call) and root_name(n.func) in rebound for n in nodes):
-        return True
+    # Calling the rebound name itself (`print = ...; print(n)`), or calling through a rebound IMPORT (`json = os;
+    # json.remove(n)`). A rebound builtin or variable used only as a method receiver (`hash = sha256(...);
+    # hash.hexdigest()`) is an ordinary variable.
+    for n in nodes:
+        if isinstance(n, ast.Call):
+            root = root_name(n.func)
+            if root not in rebound:
+                continue
+            if isinstance(n.func, ast.Name):
+                return True
+            # through a rebound import, only a known read method: `path.lower()` after `for path in ...` is a str
+            if root in import_names and n.func.attr not in _READ_METHODS:
+                return True
 
     # Files a judged open() made: their write()/flush() is judged by that open's mode.
     files = set()
@@ -1010,8 +1046,8 @@ def _unread_call(nodes, modules, names) -> bool:
     for node in nodes:
         if id(node) in called or id(node) in inner or not isinstance(getattr(node, "ctx", None), ast.Load):
             continue
-        if isinstance(node, ast.Attribute) and node.attr in _JUDGED_METHODS | _FILE_WRITES:
-            return True
+        if isinstance(node, ast.Attribute) and node.attr in _JUDGED_METHODS | _FILE_WRITES | _CHANGE_METHOD_VALUES:
+            return True                                   # `map(p.chmod, ...)`: a change method handed on
         name = (dotted(node) if isinstance(node, ast.Attribute) else
                 names.get(node.id) if isinstance(node, ast.Name) and node.id not in local else None)
         if name is not None and not known(name) and name not in _READ_DATA:
@@ -1020,8 +1056,20 @@ def _unread_call(nodes, modules, names) -> bool:
         if not isinstance(node, ast.Call):
             continue
         f = node.func
+        # `os.remove(**{'path': n})`, `open(*[n, 'w'])`: the write logic reads arguments by position and keyword,
+        # so an unpacked argument is unread there. Only a known READ may take one (`print(*rows)`) (list review 2).
+        if any(isinstance(a, ast.Starred) for a in node.args) or any(k.arg is None for k in node.keywords):
+            if isinstance(f, ast.Name) and (f.id in local or f.id in _READ_BUILTINS):
+                continue
+            target_name = dotted(f) if isinstance(f, ast.Attribute) else names.get(f.id) if isinstance(
+                f, ast.Name) else None
+            if target_name is not None and known(target_name) and target_name not in _JUDGED_CALLS:
+                continue
+            if target_name is None and isinstance(f, ast.Attribute) and f.attr in _READ_METHODS:
+                continue
+            return True
         if isinstance(f, ast.Name):
-            if f.id in local or f.id in _READ_BUILTINS or re.search(r"(?:Error|Exception|Warning)$", f.id):
+            if f.id in local or f.id in _READ_BUILTINS or re.search(_EXCEPTION_NAME, f.id):
                 continue
             if f.id in names:
                 if known(names[f.id]):
