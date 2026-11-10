@@ -631,95 +631,78 @@ _PY_MODE_AT = {"open": 1, "io.open": 1, "builtins.open": 1, "io.FileIO": 1}    #
 
 
 class ComputedWrites(NamedTuple):
-    """What python_computed_writes found (#26 round 3).
-    computed: some write/move target is neither a literal nor anchored to one, so it can land anywhere.
-    anchors:  (literal, exact) for targets the guard CAN place: exact = the whole target is that literal (directly, or
-              through a name assigned once), else the target lies below that literal folder (`Path('C:/bk') / p.name`).
-    literals: the string literals that can name where the computed targets land (see _location_literals)."""
+    """What python_computed_writes found (#26).
+    computed: a write, move, link or extraction whose target is not a direct literal, so it can land anywhere.
+    literals: the string literals that can name where it lands (see _location_literals), plus every extraction's
+              literal destination (the literal reader does not read extraction)."""
     computed: bool
-    anchors: Tuple[Tuple[str, bool], ...]
     literals: Tuple[str, ...]
 
 
+_PY_EXTRACT_METHODS = {"extractall": (0, "path"), "extract": (1, "path")}   # ZipFile / TarFile
+_PY_EXTRACT_FUNCS = {"shutil.unpack_archive": (1, "extract_dir")}
+
+
 def python_computed_writes(code: str) -> ComputedWrites:
-    """Read as Python (ast, never run): every write, link, move or replace and where its target can land.
+    """Read as Python (ast, never run): is anything written, moved, linked or extracted to a target this guard cannot
+    place? Fail closed (user decision 2026-11-09, after three reviews of finer placement): only a direct literal target
+    -- a string, or `Path(<literals>)` -- is placed, and _python_write_targets judges it with the full save policy.
+    Anything else is computed: a name, a `/` chain, os.path.join, a loop item. With an os.chdir in the code a relative
+    literal is computed too (it lands wherever chdir pointed). Archive extraction always counts as computed.
 
     Counted: `Path` write_bytes/write_text/touch/symlink_to/hardlink_to and `.open` in a writing mode; `.rename(x)` and
     a one-argument `.replace(x)` (a str.replace takes two), both sides; open/io.open/io.FileIO in a writing mode,
-    os.open unless os.O_RDONLY, os.truncate, copies onto a destination, links, and moves (source and destination). A
-    module's `.open(file, mode)` (gzip, tarfile, codecs) reads its mode from the second argument; a mode chosen at
-    run time may write. Not read (known limits): getattr, exec/eval of code strings, __import__, assignment aliases
-    of functions, subprocess-launched copies. Unparseable code returns nothing (scan's unparsed-code refusal)."""
+    os.open unless os.O_RDONLY, os.truncate, copies onto a destination, links, moves (source and destination), and
+    ZipFile/TarFile extractall/extract and shutil.unpack_archive. A module's `.open(file, mode)` (gzip, tarfile,
+    codecs) reads its mode from the second argument; a mode chosen at run time may write. Not read (known limits):
+    getattr, exec/eval of code strings, __import__, assignment aliases of functions, subprocess-launched copies.
+    Unparseable code returns nothing (scan's unparsed-code refusal)."""
     try:
         nodes = python_nodes(code)
     except (SyntaxError, ValueError, RecursionError, MemoryError):
-        return ComputedWrites(False, (), ())
+        return ComputedWrites(False, ())
     modules, names = {}, {}
     for node in nodes:
         if isinstance(node, ast.Import):
             modules.update({a.asname or a.name: a.name for a in node.names})
         elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
             names.update({a.asname or a.name: node.module + "." + a.name for a in node.names})
-    single = _assigned_once(nodes)
+    moves_cwd = any(isinstance(n, ast.Call) and (
+        isinstance(n.func, ast.Attribute) and n.func.attr == "chdir" or
+        isinstance(n.func, ast.Name) and names.get(n.func.id, n.func.id) in ("os.chdir", "chdir")) for n in nodes)
 
-    def fixed(node, depth=0):
-        """The literal a target is, or None: a string, Path(<literals>), a `/` chain or f-string of literals, or a
-        name assigned exactly once to one of those."""
-        if depth > 8:
-            return None
+    def direct(node):
+        """A string, or Path(<strings>): _python_write_targets reads these. Relative ones are not, after a chdir."""
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            return node.value
-        if isinstance(node, ast.Name) and node.id in single:
-            return fixed(single[node.id], depth + 1)
-        if isinstance(node, ast.JoinedStr):
-            parts = [p.value for p in node.values if isinstance(p, ast.Constant) and isinstance(p.value, str)]
-            return "".join(parts) if len(parts) == len(node.values) else None
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
-            left, right = fixed(node.left, depth + 1), fixed(node.right, depth + 1)
-            return left.rstrip("/\\") + "/" + right if left is not None and right is not None else None
-        if isinstance(node, ast.Call) and node.args and not node.keywords:
+            text = node.value
+        elif isinstance(node, ast.Call) and node.args and not node.keywords and all(
+                isinstance(a, ast.Constant) and isinstance(a.value, str) for a in node.args):
             f = node.func
             bare = isinstance(f, ast.Name) and (f.id == "Path" or names.get(f.id) == "pathlib.Path")
             dotted = (isinstance(f, ast.Attribute) and f.attr == "Path" and isinstance(f.value, ast.Name)
                       and modules.get(f.value.id, f.value.id) == "pathlib")
-            if bare or dotted:
-                parts = [fixed(a, depth + 1) for a in node.args]
-                return "/".join(p.rstrip("/\\") for p in parts) if all(p is not None for p in parts) else None
-        return None
-
-    def anchored(node):
-        """The literal folder a `/` chain starts from (`Path('C:/bk') / p.name` -> 'C:/bk'), or None."""
-        while isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
-            base = fixed(node.left)
-            if base is not None:
-                return base
-            node = node.left
-        return None
+            if not (bare or dotted):
+                return False
+            text = node.args[0].value
+        else:
+            return False
+        return not moves_cwd or bool(re.match(r"^(?:[A-Za-z]:)?[/\\]", text))
 
     computed = False
-    anchors: List[Tuple[str, bool]] = []
-
-    def direct(node):
-        """A literal or Path(<literals>): _python_write_targets already reads these, with the full save policy."""
-        if isinstance(node, ast.Constant):
-            return True
-        return (isinstance(node, ast.Call) and isinstance(node.func, (ast.Name, ast.Attribute))
-                and all(isinstance(a, ast.Constant) for a in node.args) and fixed(node) is not None)
+    extracted: List[str] = []
 
     def target(node):
         nonlocal computed
-        if node is None:
-            return
-        exact = fixed(node)
-        if exact is not None:
-            if not direct(node):
-                anchors.append((exact, True))
-            return
-        base = anchored(node)
-        if base is not None:
-            anchors.append((base, False))
-        else:
+        if node is not None and not direct(node):
             computed = True
+
+    def extraction(node):
+        nonlocal computed
+        computed = True                                   # no destination = the cwd; a literal one is still a place
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            extracted.append(node.value)
+        elif node is not None:
+            extracted.extend(c.value for c in ast.walk(node) if isinstance(c, ast.Constant) and isinstance(c.value, str))
 
     def argument(call, index, keyword):
         if len(call.args) > index:
@@ -762,11 +745,16 @@ def python_computed_writes(code: str) -> ComputedWrites:
             if moving and not receiver_is_module and not imported(f.value):
                 target(f.value)
                 target(node.args[0] if node.args else argument(node, 0, "target"))
+            if f.attr in _PY_EXTRACT_METHODS and not receiver_is_module:
+                extraction(argument(node, *_PY_EXTRACT_METHODS[f.attr]))
         name = ""
         if isinstance(f, ast.Name):
             name = names.get(f.id, f.id)
         elif isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name):
             name = modules.get(f.value.id, f.value.id) + "." + f.attr
+        if name in _PY_EXTRACT_FUNCS:
+            extraction(argument(node, *_PY_EXTRACT_FUNCS[name]))
+            continue
         if name not in _PY_WRITE_FUNCS:
             continue
         if name in _PY_MODE_AT and not mode_writes(node, _PY_MODE_AT[name]):
@@ -775,48 +763,7 @@ def python_computed_writes(code: str) -> ComputedWrites:
             continue
         for index, keyword in _PY_WRITE_FUNCS[name]:
             target(argument(node, index, keyword))
-    return ComputedWrites(computed, tuple(anchors), tuple(_location_literals(nodes)))
-
-
-def _assigned_once(nodes):
-    """name -> its value, for names bound exactly once in the code, by a plain `name = value`."""
-    count, value = {}, {}
-
-    def bind(t, v=None):
-        if isinstance(t, ast.Name):
-            count[t.id] = count.get(t.id, 0) + 1
-            if v is not None:
-                value[t.id] = v
-        elif isinstance(t, (ast.Tuple, ast.List)):
-            for e in t.elts:
-                bind(e)
-        elif isinstance(t, ast.Starred):
-            bind(t.value)
-
-    for node in nodes:
-        if isinstance(node, ast.Assign):
-            for t in node.targets:
-                bind(t, node.value if len(node.targets) == 1 else None)
-        elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
-            bind(node.target)
-        elif isinstance(node, (ast.For, ast.comprehension)):
-            bind(node.target)
-        elif isinstance(node, ast.withitem) and node.optional_vars is not None:
-            bind(node.optional_vars)
-        elif isinstance(node, ast.NamedExpr):
-            bind(node.target)
-        elif isinstance(node, ast.arg):
-            count[node.arg] = count.get(node.arg, 0) + 1
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            count[node.name] = count.get(node.name, 0) + 1
-        elif isinstance(node, (ast.Import, ast.ImportFrom)):
-            for a in node.names:
-                key = (a.asname or a.name).split(".")[0]
-                count[key] = count.get(key, 0) + 1
-        elif isinstance(node, (ast.Global, ast.Nonlocal)):
-            for n in node.names:
-                count[n] = count.get(n, 0) + 2              # bound elsewhere too: never single
-    return {k: v for k, v in value.items() if count.get(k) == 1}
+    return ComputedWrites(computed, tuple(_location_literals(nodes)) + tuple(extracted))
 
 
 # A literal outside a path position names a location only when it is shaped like a path: it starts with a drive, a
@@ -1522,23 +1469,15 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             # may change saves the guard cannot list or back up: S-SAVE-UNKNOWN, as for any save it cannot place.
             if shellparse._PYTHON.fullmatch(e.program) and not _script_reads_stdin(e, command):
                 found = python_computed_writes(code)
-                base = targets.exec_cwd(e, cwd, env) or ""
-                actual = targets.physical_cwd(e, cwd, env) or ""
+                if found.computed:
+                    base = targets.exec_cwd(e, cwd, env) or ""
 
-                def names_saves(s):
-                    a = targets.resolve_literal(s, base, env) if len(s) < 1024 and "\n" not in s else None
-                    return is_save_folder(a, roots) or is_settings_folder(a, roots) or names_save_location(s)
+                    def names_saves(s):
+                        a = targets.resolve_literal(s, base, env) if len(s) < 1024 and "\n" not in s else None
+                        return is_save_folder(a, roots) or is_settings_folder(a, roots) or names_save_location(s)
 
-                for literal, exact in found.anchors:
-                    a = targets.resolve_literal(literal, base, env) if len(literal) < 1024 else None
-                    if exact and is_save(a, roots):
-                        # a save named through a name assigned once: backed up like any literal save
-                        saves.append((targets.physical(literal, actual, "cmd", env, literal=True) or "", "write"))
-                    elif (not exact and names_saves(literal)) or (exact and (is_save_folder(a, roots) or
-                                                                             _unplaced_save(literal))):
+                    if any(names_saves(s) for s in found.literals):
                         saves.append((COMPUTED_SAVE, "write"))
-                if found.computed and any(names_saves(s) for s in found.literals):
-                    saves.append((COMPUTED_SAVE, "write"))
     for e, word in lit:
         base = cwd if e is None else (targets.exec_cwd(e, cwd, env) or "")
         a = targets.resolve_literal(word, base, env)                    # a literal: nothing in it expands

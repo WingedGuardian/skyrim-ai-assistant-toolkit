@@ -40,8 +40,10 @@ def test_ordinary_code_that_changes_saves_is_refused(install, body):
     assert decide(install, heredoc(body.format(S=install["saves"], D=_docs(install)))) == "deny"
 
 
-# ---- finding 2: audits and copy-outs whose destination is literal, through a name or a literal folder
-ALLOWED = {
+# ---- fail closed (user decision 2026-11-09, after round 3's placement reopened holes): a destination reached through a
+# name or a `/` chain is computed, so beside a saves read it is refused. The accepted cost; the message says to name
+# the target literally or split the read from the write. The literal forms right after stay allowed.
+COMPUTED_DESTINATIONS = {
     "report-path-in-a-name": "import json\nfrom pathlib import Path\nOUT = 'C:/Temp/report.json'\n"
                              "rows = [p.name for p in Path(r'{S}').glob('*.ess')]\nopen(OUT, 'w').write(json.dumps(rows))\n",
     "manifest-with": "import hashlib\nfrom pathlib import Path\nout = r'C:/Temp/manifest.txt'\nwith open(out, 'w') as f:\n"
@@ -53,17 +55,65 @@ ALLOWED = {
 }
 
 
-@pytest.mark.parametrize("body", list(ALLOWED.values()), ids=list(ALLOWED))
-def test_reading_saves_and_writing_to_a_literal_place_is_allowed(install, body):
+@pytest.mark.parametrize("body", list(COMPUTED_DESTINATIONS.values()), ids=list(COMPUTED_DESTINATIONS))
+def test_a_computed_destination_beside_a_saves_read_is_refused_by_design(install, body):
+    assert decide(install, heredoc(body.format(S=install["saves"]))) == "deny"
+
+
+LITERAL_DESTINATIONS = {
+    "report-literal": "import json\nfrom pathlib import Path\nrows = [p.name for p in Path(r'{S}').glob('*.ess')]\n"
+                      "open('C:/Temp/report.json', 'w').write(json.dumps(rows))\n",
+    "report-path-literal": "from pathlib import Path\n"
+                           "Path('C:/Temp/report.json').write_text(str([p.name for p in Path(r'{S}').glob('*.ess')]))\n",
+}
+
+
+@pytest.mark.parametrize("body", list(LITERAL_DESTINATIONS.values()), ids=list(LITERAL_DESTINATIONS))
+def test_reading_saves_and_writing_to_a_literal_path_is_allowed(install, body):
     assert decide(install, heredoc(body.format(S=install["saves"]))) == "allow"
 
 
-def test_a_save_named_through_a_name_assigned_once_is_backed_up(install):
-    """`p = r'<Saves>/Save1.ess'; open(p, 'wb')`: one known save, so the usual pair backup, not a refusal."""
+def test_a_save_reached_through_a_name_is_refused_not_trusted(install):
+    """`p = r'<Saves>/Save1.ess'; open(p, 'wb')`: the guard does not follow names, so it cannot back it up."""
     body = "p = r'" + install["saves"] + "/Save1.ess'\nopen(p, 'wb').close()\n"
-    v = shell_rules.decide(heredoc(body), install["roots"], Audit(), cwd=str(install["work"]), shell="bash",
-                           env=install["env"])
-    assert v.decision == "allow" and v.saves is not None and v.saves.change.targets, v
+    assert decide(install, heredoc(body)) == "deny"
+
+
+# ---- round 3 review: the holes placement opened, and two older ones
+REOPENED = {
+    "first-folder-above-settings": "import shutil\nfrom pathlib import Path\n"
+                                   "for game in ('Skyrim VR', 'Skyrim Special Edition'):\n"
+                                   "    for p in Path('C:/Temp/bk').glob('*.ess'):\n"
+                                   "        shutil.copy2(p, Path(r'{MG}') / game / 'Saves' / p.name)\n",
+    "relative-to-my-games": "import shutil\nfrom pathlib import Path\nBK = Path('C:/Temp/bk')\n"
+                            "for p in BK.rglob('*.ess'):\n    shutil.copy2(p, Path(r'{MG}') / p.relative_to(BK))\n",
+    "settings-folder-in-a-name": "import shutil\nDST = r'{C}'\nshutil.copytree(r'C:/Temp/restore', DST, dirs_exist_ok=True)\n",
+    "zip-extract-into-saves": "import zipfile\nzipfile.ZipFile('C:/Temp/b.zip').extractall(r'{S}')\n",
+    "unpack-into-settings": "import shutil\nshutil.unpack_archive('C:/Temp/b.zip', r'{C}')\n",
+    "tar-extract-via-name": "import tarfile\nD = r'{S}'\ntarfile.open('C:/Temp/b.tar').extractall(D)\n",
+    "chdir-then-relative": "import os\nos.chdir(r'{S}')\nopen('Save1.ess', 'wb').close()\n",
+    "join-of-literals": "import os\nopen(os.path.join(r'{S}', 'Save1.ess'), 'wb').close()\n",
+}
+
+
+@pytest.mark.parametrize("body", list(REOPENED.values()), ids=list(REOPENED))
+def test_round_three_holes_are_closed(install, body):
+    s = install["saves"]
+    c = s.rsplit("/", 1)[0]
+    assert decide(install, heredoc(body.format(S=s, C=c, MG=c.rsplit("/", 1)[0]))) == "deny"
+
+
+def test_an_extraction_to_a_relative_saves_folder_is_refused(install):
+    """Only the extraction's own destination names the place: `Saves` relative to the settings folder it runs in."""
+    body = "import zipfile\nzipfile.ZipFile('C:/Temp/b.zip').extractall('Saves')\n"
+    v = shell_rules.decide(heredoc(body), install["roots"], Audit(), cwd=install["saves"].rsplit("/", 1)[0],
+                           shell="bash", env=install["env"])
+    assert v.decision == "deny", v
+
+
+def test_an_extraction_elsewhere_is_allowed(install):
+    body = "import zipfile\nzipfile.ZipFile('C:/Temp/b.zip').extractall('C:/Temp/out')\n"
+    assert decide(install, heredoc(body)) == "allow"
 
 
 def test_a_copy_anchored_inside_the_saves_folder_is_refused(install):

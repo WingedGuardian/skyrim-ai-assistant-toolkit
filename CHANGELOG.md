@@ -21,10 +21,9 @@
 
   Text is not a location: content written or logged, text swapped in by an edit, multi-line strings and command lines held as data.
 
-  A target the guard can place is judged as that place. That covers a literal, a name assigned once to a literal, and a `/` chain from a literal folder:
-  - a literal save is backed up as before;
-  - a write into the Saves folder is refused;
-  - anything else is allowed. So an audit writing its report to `OUT = 'C:/Temp/report.json'`, or copying saves out to a backup folder, works (#10). Read-only loops (`open(p, 'rb')`, `gzip.open(p)`) stay allowed.
+  The rule fails closed. Only a direct literal target (a string or `Path(<literals>)`) is placed, so a literal save is backed up as before and a literal report path stays allowed (#10). A target reached through a name, a `/` chain or `os.path.join` counts as computed. So does every archive extraction (`extractall`, `shutil.unpack_archive`), and every relative target after an `os.chdir`. Read-only loops (`open(p, 'rb')`, `gzip.open(p)`) stay allowed.
+
+  The cost is accepted: beside a saves read, a report or a copy-out written through a computed path is refused. Name the path literally, or split the step.
 
   Priced over 129,150 recorded tool calls: 8 newly refused. 6 write save-named files or a Saves tree into a folder the guard cannot place, which is the rule's purpose. 2 are false positives: a script writing JSON that held save paths as data to a computed path, and a test harness that named the Saves folder beside a computed write. For those, spell the output path literally or split the step. Still not seen: a script run from a file (`python fix.py`); reading invoked scripts is planned for 4.2.
 - Save guard (#10): the read-only audit shapes reported against the install guard (a docstring and a localhost URL, a hash audit with a report, an `_isolation.py` helper name, a freeze helper, a profile probe) are allowed by the toolkit guard, and now have regression tests beside real save changes that stay refused.
