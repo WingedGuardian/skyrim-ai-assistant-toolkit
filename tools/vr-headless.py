@@ -331,9 +331,10 @@ def process_alive(pid, start) -> bool:
         raise ProcessReadError("the owned process handle could not be read: {}".format(e)) from e
 
 
-def terminate_verified(pid, start) -> None:
+def terminate_verified(pid, start) -> str:
+    """"terminated", or "exited" when the recorded process proved it ended by itself first."""
     import vr_background_desktop as d
-    d.terminate_verified(pid, start)
+    return d.terminate_verified(pid, start)
 
 
 def parent_pid(pid):
@@ -1146,7 +1147,7 @@ def stop_owned(st) -> dict:
             time.sleep(1)                                       # paced: DevBench may answer at once, or not at all
     elif games and not wait_until_exited(games, port, deadline=time.monotonic() + 60):
         raise Refused("the owned SKSE loader is still running; the session is kept")
-    stopped = []
+    stopped, exited = [], []
     deadline = time.monotonic() + 15
     while True:
         running = read_processes()
@@ -1170,10 +1171,13 @@ def stop_owned(st) -> dict:
         if time.monotonic() > deadline:
             raise Refused("the owned SteamVR helpers have not stopped; the session is kept")
         for x in helpers:
-            terminate_verified(x["Id"], x["StartTime"])
-            stopped.append(x["Id"])
+            if terminate_verified(x["Id"], x["StartTime"]) == "exited":
+                exited.append(x["Id"])           # it ended by itself (a stopped parent's child); nothing was sent
+            else:
+                stopped.append(x["Id"])
         time.sleep(0.5)
-    session["cleanup"] = {"game_exited": True, "helpers_stopped": stopped, "steam_left_running": True}
+    session["cleanup"] = {"game_exited": True, "helpers_stopped": stopped, "helpers_exited": exited,
+                          "steam_left_running": True}
     save_state(st)
     return session["cleanup"]
 
