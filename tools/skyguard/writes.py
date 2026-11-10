@@ -796,9 +796,12 @@ def python_computed_writes(code: str) -> ComputedWrites:
             if f.attr in _PY_WRITE_METHODS and not receiver_is_module:
                 target(f.value)
             if f.attr == "open" and not receiver_is_module:
-                if imported(f.value):                     # gzip.open(file, mode): the file is the first argument
+                # gzip.open(file, mode), and any receiver given two arguments (`__builtins__.open(p, 'w')`, a module
+                # reached through sys.modules): the file is the first argument, the mode the second (safe-list review).
+                if imported(f.value) or len(node.args) >= 2 or any(k.arg in ("file", "filename", "name")
+                                                                   for k in node.keywords):
                     if mode_writes(node, 1):
-                        target(argument(node, 0, "filename") or argument(node, 0, "name"))
+                        target(argument(node, 0, "file") or argument(node, 0, "filename") or argument(node, 0, "name"))
                 elif mode_writes(node, 0):                # Path(...).open(mode)
                     target(f.value)
             moving = f.attr == "rename" or f.attr == "replace" and (
@@ -848,31 +851,43 @@ def python_computed_writes(code: str) -> ComputedWrites:
     return ComputedWrites(computed, tuple(_location_literals(nodes)) + tuple(extracted))
 
 
-# The conservative scan's known reads (#26, user decision 2026-11-10). A call is known when it is one the write logic
-# above already judges, or one of these. Everything else -- an unknown module function, a method this list does not
-# name, a call through a subscript or another call -- counts as a possible change. Ambiguous names (`remove`: a list
-# or os; `add`) are deliberately not here: in code that names a save location they are refused.
+# The conservative scan's known reads (#26, user decision 2026-11-10; reviewed as a list the same day). A call is known
+# when it is one the write logic above already judges, or an EXACT read below. Everything else -- an unknown module
+# function, anything deeper than one public name below a read module (`json.codecs.open`, `argparse._os.remove`,
+# `ElementTree.ElementTree.write`), a method this list does not name, a call through a subscript, a variable or
+# another call -- counts as a possible change. Ambiguous names (`remove`, `add`, `copy`: a list, os, Path in 3.14)
+# are deliberately not reads: in code that names a save location they are refused.
 _JUDGED_CALLS = (frozenset(_PY_WRITE_FUNCS) | frozenset(_PY_DELETE_FUNCS) | frozenset(_PY_EXTRACT_FUNCS) |
                  frozenset(_PY_MODULE_OPENS) | frozenset(_PY_MODE_AT) |
                  {"codecs.open", "os.chdir", "chdir", "zipfile.ZipFile", "tarfile.TarFile", "tarfile.open"})
-_JUDGED_METHODS = _PY_WRITE_METHODS | _PY_DELETE_METHODS | frozenset((
-    "open", "rename", "replace", "extractall", "extract",
-    "write", "writelines", "flush"))                  # a file object: its open() was judged for its mode
+_JUDGED_METHODS = _PY_WRITE_METHODS | _PY_DELETE_METHODS | frozenset(("open", "rename", "replace", "extractall",
+                                                                         "extract"))
+_FILE_WRITES = frozenset(("write", "writelines", "flush", "truncate"))   # judged only on a file a judged open() made
 _READ_BUILTINS = frozenset((
     "print", "len", "sorted", "list", "dict", "set", "frozenset", "tuple", "str", "int", "float", "bool", "bytes",
-    "range", "enumerate", "zip", "map", "filter", "min", "max", "sum", "any", "all", "abs", "round", "repr", "ascii",
-    "isinstance", "issubclass", "hasattr", "type", "iter", "next", "reversed", "format", "ord", "chr", "hex", "oct",
-    "bin", "divmod", "hash", "id", "callable", "super", "object", "slice", "complex", "pow", "exit", "quit"))
-_READ_MODULES = ("json", "hashlib", "re", "math", "struct", "datetime", "time", "os.path", "glob", "fnmatch",
-                 "collections", "itertools", "base64", "binascii", "statistics", "textwrap", "string", "difflib",
-                 "pprint", "platform", "locale", "decimal", "fractions", "typing", "enum", "dataclasses",
-                 "unicodedata", "copy", "random", "html", "sys", "argparse", "shlex", "uuid", "zlib", "traceback",
-                 "functools", "xml.etree", "configparser", "csv", "pathlib", "ntpath", "posixpath")
+    "bytearray", "memoryview", "range", "enumerate", "zip", "map", "filter", "min", "max", "sum", "any", "all", "abs",
+    "round", "repr", "ascii", "isinstance", "issubclass", "hasattr", "type", "iter", "next", "reversed", "format",
+    "ord", "chr", "hex", "oct", "bin", "divmod", "hash", "id", "callable", "super", "object", "slice", "complex", "pow",
+    "exit", "quit"))
+# One public name directly below these is a read (`json.loads`, `hashlib.sha256`, `collections.Counter`); nothing
+# deeper and nothing private. None of these modules has a module-level function that writes a file.
+_READ_MODULES = frozenset(("json", "hashlib", "re", "math", "struct", "datetime", "time", "os.path", "glob", "fnmatch",
+                           "collections", "itertools", "base64", "binascii", "statistics", "textwrap", "string",
+                           "difflib", "pprint", "platform", "locale", "decimal", "fractions", "typing", "enum",
+                           "dataclasses", "unicodedata", "random", "html", "shlex", "uuid", "zlib", "ntpath",
+                           "posixpath"))
 _READ_FUNCS = frozenset((
     "os.listdir", "os.scandir", "os.walk", "os.stat", "os.lstat", "os.getcwd", "os.getenv", "os.fspath",
     "os.cpu_count", "os.getpid", "os.environ.get", "os.get_terminal_size", "os.urandom", "os.fsencode", "os.fsdecode",
     "os.close", "os.read", "os.fstat", "os.lseek",                          # a descriptor os.open was judged for
-    "io.StringIO", "io.BytesIO", "io.TextIOWrapper", "zipfile.is_zipfile", "tarfile.is_tarfile", "Path", "PurePath",
+    "io.StringIO", "io.BytesIO", "zipfile.is_zipfile", "tarfile.is_tarfile", "shutil.disk_usage",
+    "Path", "PurePath", "pathlib.Path", "pathlib.PurePath", "pathlib.PureWindowsPath", "pathlib.PurePosixPath",
+    "sys.exit", "sys.getsizeof", "sys.intern", "sys.stdout.write", "sys.stderr.write", "sys.stdout.flush",
+    "sys.stderr.flush", "sys.stdout.reconfigure", "sys.stderr.reconfigure", "traceback.print_exc",
+    "traceback.format_exc", "functools.reduce", "functools.lru_cache", "functools.cmp_to_key", "functools.wraps",
+    "copy.deepcopy", "csv.reader", "csv.DictReader", "datetime.datetime.now", "datetime.datetime.utcnow",
+    "datetime.datetime.fromtimestamp", "datetime.datetime.strptime", "datetime.datetime.fromisoformat",
+    "datetime.date.today", "datetime.date.fromtimestamp", "datetime.date.fromisoformat",
     # a save's body is LZ4-compressed: read-only save audits decompress it (priced: 5 such audits, 2026-11-10)
     "lz4.block.decompress", "lz4.frame.decompress"))
 _READ_METHODS = frozenset((
@@ -884,23 +899,20 @@ _READ_METHODS = frozenset((
     "keys", "values", "items", "append", "extend", "insert", "pop", "sort", "index", "count", "find", "rfind",
     "partition", "rpartition", "zfill", "center", "ljust", "rjust", "isdigit", "isalpha", "isalnum", "isspace",
     "islower", "isupper", "isnumeric", "isdecimal", "isidentifier", "isprintable", "expandtabs", "translate",
-    "maketrans", "removeprefix", "removesuffix", "hexdigest", "digest", "update", "copy", "setdefault", "fromkeys",
+    "maketrans", "removeprefix", "removesuffix", "hexdigest", "digest", "update", "setdefault", "fromkeys",
     "most_common", "namelist", "infolist", "getinfo", "getmembers", "getnames", "getmember", "extractfile", "close",
     "seek", "tell", "fileno", "isatty", "readable", "seekable", "group", "groups", "groupdict", "span", "start", "end",
     "findall", "finditer", "search", "fullmatch", "sub", "subn", "loads", "dumps", "total_seconds", "isoformat",
     "strftime", "timestamp", "date", "time", "difference", "union", "intersection", "issubset", "issuperset",
     "is_absolute", "to_bytes", "from_bytes", "bit_length", "hex", "fromhex", "unpack", "unpack_from", "pack",
-    "pack_into", "iter_unpack", "isoweekday", "weekday", "now", "utcnow", "today", "fromtimestamp",
-    "fromisoformat", "strptime", "astimezone", "ljust", "parse_args", "add_argument", "add_mutually_exclusive_group",
-    "getvalue", "most_common", "elements", "clear", "reverse", "popleft", "appendleft", "keys", "__enter__",
-    "__exit__", "__init__", "is_mount", "owner", "group", "readlink", "samestat", "items"))
-
-
+    "pack_into", "iter_unpack", "isoweekday", "weekday", "now", "utcnow", "today", "fromtimestamp", "fromisoformat",
+    "strptime", "astimezone", "getvalue", "elements", "clear", "reverse", "popleft", "appendleft", "__enter__",
+    "__exit__", "is_mount", "owner", "readlink", "samestat", "tobytes", "tolist"))
 _READ_DATA = frozenset((                               # module attributes that are values, not functions
     "os.sep", "os.altsep", "os.linesep", "os.pathsep", "os.curdir", "os.pardir", "os.extsep", "os.devnull",
-    "os.environ", "os.name", "os.O_RDONLY", "os.O_BINARY", "os.SEEK_SET", "os.SEEK_CUR", "os.SEEK_END"))
-
-
+    "os.environ", "os.name", "os.O_RDONLY", "os.O_BINARY", "os.SEEK_SET", "os.SEEK_CUR", "os.SEEK_END", "sys.argv",
+    "sys.stdin", "sys.stdout", "sys.stderr", "sys.platform", "sys.version_info", "sys.path", "sys.executable",
+    "sys.maxsize"))
 _REROOT = frozenset(("os", "nt", "posix", "shutil", "subprocess", "io", "pathlib", "zipfile", "tarfile", "gzip",
                      "bz2", "lzma", "send2trash", "ctypes", "importlib", "builtins"))
 
@@ -910,13 +922,53 @@ def _unread_call(nodes, modules, names) -> bool:
     local = {n.name for n in nodes if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
     local |= {t.id for n in nodes if isinstance(n, ast.Assign) and isinstance(n.value, ast.Lambda)
               for t in n.targets if isinstance(t, ast.Name)}
+    roots = {k.split(".")[0] for k in modules}
+
+    # Safe-list review: a name the tables trust must mean what its import says. Rebinding one (`json = os`, a
+    # parameter or loop variable named `json`, `def print(...)`) and then calling through it is a possible change.
+    protected = set(modules) | roots | set(names) | _READ_BUILTINS | {"open", "Path", "PurePath", "__builtins__"}
+    bound = set()
+    for n in nodes:
+        if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
+            bound.add(n.id)
+        elif isinstance(n, ast.arg):
+            bound.add(n.arg)
+        elif isinstance(n, (ast.Global, ast.Nonlocal)):
+            bound.update(n.names)
+        elif isinstance(n, ast.ExceptHandler) and n.name:
+            bound.add(n.name)
+        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(n.name)
+        elif type(n).__name__ in ("MatchAs", "MatchStar") and getattr(n, "name", None):
+            bound.add(n.name)
+    rebound = bound & protected
+
+    def root_name(node):
+        while isinstance(node, ast.Attribute):
+            node = node.value
+        return node.id if isinstance(node, ast.Name) else None
+
+    if rebound and any(isinstance(n, ast.Call) and root_name(n.func) in rebound for n in nodes):
+        return True
+
+    # Files a judged open() made: their write()/flush() is judged by that open's mode.
+    files = set()
+    for n in nodes:
+        opened = None
+        if isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name):
+            opened, alias = n.value, n.targets[0].id
+        elif isinstance(n, ast.withitem) and isinstance(n.optional_vars, ast.Name):
+            opened, alias = n.context_expr, n.optional_vars.id
+        if isinstance(opened, ast.Call) and (isinstance(opened.func, ast.Name) and opened.func.id == "open" or
+                                             isinstance(opened.func, ast.Attribute) and opened.func.attr == "open"):
+            files.add(alias)
 
     def dotted(node):
         """`a.b.c` from a module name, or None when the chain does not start at an imported module."""
         if isinstance(node, ast.Name):
             if node.id in modules:
                 return modules[node.id]
-            if any(k.split(".")[0] == node.id for k in modules):     # `import lz4.block` binds `lz4`
+            if node.id in roots:                          # `import lz4.block` binds `lz4`
                 return node.id
             return names.get(node.id) if node.id in names else None
         if isinstance(node, ast.Attribute):
@@ -937,9 +989,19 @@ def _unread_call(nodes, modules, names) -> bool:
         name = ".".join(parts)
         data = next((d for d in _READ_DATA if name.startswith(d + ".")), None)
         if data is not None:                              # a method on a module value: `os.sep.join(...)`
-            return parts[-1] in _READ_METHODS
-        return ((name in _JUDGED_CALLS and not rerooted) or name in _READ_FUNCS or
-                any(name == m or name.startswith(m + ".") for m in _READ_MODULES))
+            return name in _READ_FUNCS or parts[-1] in _READ_METHODS
+        if (name in _JUDGED_CALLS and not rerooted) or name in _READ_FUNCS:
+            return True
+        module, _, attr = name.rpartition(".")
+        return module in _READ_MODULES and bool(attr)    # exactly one name below: `json.codecs.open` is not a read
+
+    def judged_file_write(f):
+        receiver = f.value
+        if isinstance(receiver, ast.Name) and receiver.id in files:
+            return True
+        return isinstance(receiver, ast.Call) and (
+            isinstance(receiver.func, ast.Name) and receiver.func.id == "open" or
+            isinstance(receiver.func, ast.Attribute) and receiver.func.attr == "open")
 
     # A function handed on as a value is called where this guard cannot see (`map(subprocess.call, ...)`,
     # `map(Path.rename, ...)`): a module function or a judged method referenced but not called must be a known read.
@@ -948,7 +1010,7 @@ def _unread_call(nodes, modules, names) -> bool:
     for node in nodes:
         if id(node) in called or id(node) in inner or not isinstance(getattr(node, "ctx", None), ast.Load):
             continue
-        if isinstance(node, ast.Attribute) and node.attr in _JUDGED_METHODS:
+        if isinstance(node, ast.Attribute) and node.attr in _JUDGED_METHODS | _FILE_WRITES:
             return True
         name = (dotted(node) if isinstance(node, ast.Attribute) else
                 names.get(node.id) if isinstance(node, ast.Name) and node.id not in local else None)
@@ -976,13 +1038,13 @@ def _unread_call(nodes, modules, names) -> bool:
                 return True
             if f.attr in _READ_METHODS or f.attr in _JUDGED_METHODS:
                 continue
+            if f.attr in _FILE_WRITES and judged_file_write(f):
+                continue
             return True
         if isinstance(f, ast.Lambda):
             continue
         return True                                       # a call through a subscript or another call's result
     return False
-
-
 
 
 # A literal outside a path position names a location only when it is shaped like a path: it starts with a drive, a

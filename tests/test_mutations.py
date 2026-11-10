@@ -12857,3 +12857,39 @@ MUTATIONS += [pytest.param(_W, anchor, replacement, _T11 + test, id="i26-" + nam
      "                continue\n            if f.attr in _READ_METHODS or f.attr in _JUDGED_METHODS:",
      "test_an_unknown_change_run_from_saves_is_refused[unknown-module]", "unknown-module-function-trusted"),
 ]]
+
+# #26 round 12 (safe-list review): rebinding, judged file writes, one-level reads, open mode, copy.
+_I26R12 = "tests/test_issue26_round12.py::"
+MUTATIONS += [pytest.param(_W, anchor, replacement, _I26R12 + test, id="i26-" + name)
+              for anchor, replacement, test, name in [
+    ('    if rebound and any(isinstance(n, ast.Call) and root_name(n.func) in rebound for n in nodes):',
+     '    if False:',
+     'test_the_safe_list_review_probes_are_refused[rebound-module]', 'rebound-call-trusted'),
+    ('        elif isinstance(n, ast.arg):\n            bound.add(n.arg)',
+     '        elif False:\n            bound.add(n.arg)',
+     'test_the_safe_list_review_probes_are_refused[lambda-param]', 'parameter-rebinding-unread'),
+    ('        if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):',
+     '        if False:',
+     'test_the_safe_list_review_probes_are_refused[rebound-module]', 'assignment-rebinding-unread'),
+    ('        elif isinstance(n, ast.withitem) and isinstance(n.optional_vars, ast.Name):',
+     '        elif False:',
+     'test_a_report_written_through_a_judged_open_beside_a_saves_read_stays_allowed', 'with-file-unbound'),
+    ('        if isinstance(receiver, ast.Name) and receiver.id in files:\n            return True',
+     '        if False:\n            return True',
+     'test_a_report_written_through_a_judged_open_beside_a_saves_read_stays_allowed', 'file-name-write-unjudged'),
+    ('        return isinstance(receiver, ast.Call) and (',
+     '        return False and (',
+     'test_a_report_written_through_an_open_call_beside_a_saves_read_stays_allowed', 'open-call-write-unjudged'),
+    ('        return module in _READ_MODULES and bool(attr)    # exactly one name below: `json.codecs.open` is not a read',
+     '        return any(name.startswith(m + ".") for m in _READ_MODULES)',
+     'test_the_safe_list_review_probes_are_refused[random-private-os]', 'read-module-prefix-match'),
+    ('                if imported(f.value) or len(node.args) >= 2 or any(k.arg in ("file", "filename", "name")',
+     '                if imported(f.value) or any(k.arg in ("file", "filename", "name")',
+     'test_the_safe_list_review_probes_are_refused[builtins-open]', 'open-mode-from-path'),
+    ('_JUDGED_METHODS = _PY_WRITE_METHODS | _PY_DELETE_METHODS | frozenset(("open", "rename", "replace", "extractall",',
+     '_JUDGED_METHODS = _PY_WRITE_METHODS | _PY_DELETE_METHODS | frozenset(("write", "open", "rename", "replace", "extractall",',
+     'test_the_safe_list_review_probes_are_refused[writer-parameter]', 'write-any-receiver'),
+    ('    "maketrans", "removeprefix", "removesuffix", "hexdigest", "digest", "update", "setdefault", "fromkeys",',
+     '    "maketrans", "removeprefix", "removesuffix", "hexdigest", "digest", "update", "copy", "setdefault", "fromkeys",',
+     'test_the_safe_list_review_probes_are_refused[path-copy-314]', 'copy-is-a-read'),
+]]
