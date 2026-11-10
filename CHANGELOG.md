@@ -17,15 +17,22 @@
 - **Save guard (#26):** inline Python that writes, copies, links, moves or replaces a target it computes, for example a loop over the Saves folder (`for p in Path(S).glob('*.ess'): p.write_bytes(b'')`, `shutil.move(p, ...)`, `p.rename(...)`, `os.open(p, O_WRONLY)`), was allowed with no backup and no approval, because only literal targets were read. When the code names a save location, it is now refused as a save the guard cannot place (S-SAVE-UNKNOWN), with a message saying to name the saves literally or split the read from the write. The code names a save location when it holds any of these:
   - a path-shaped literal anywhere (a helper's argument, a default parameter, an argv fallback, a tuple, `+=`, `os.path.join(docs, 'My Games', 'Skyrim VR', 'Saves')`) that names a save or a `Saves` folder;
   - a bare `'Saves'`, `'*.ess'` or `.ess` filter in a path position (`Path(D) / 'Saves'`, `glob('*.ess')`, `n.endswith('.ess')`, `p.suffix == '.ess'`);
-  - a literal that resolves to the Saves or settings folder.
+  - a literal that resolves to the settings folder from where the code runs;
+  - or the code runs from inside the settings area itself (`cd Saves && python -c "...extractall()"`).
 
-  Text is not a location: content written or logged, text swapped in by an edit, multi-line strings and command lines held as data.
+  Text is not a location when it sits in the write or log call itself or in a text edit's arguments, and multi-line strings and command lines held as data never count. Text first assigned to a name and then written can still count.
 
-  The rule fails closed. Only a direct literal target (a string or `Path(<literals>)`) is placed, so a literal save is backed up as before and a literal report path stays allowed (#10). A target reached through a name, a `/` chain or `os.path.join` counts as computed. So does every archive extraction (`extractall`, `shutil.unpack_archive`), and every relative target after an `os.chdir`. Read-only loops (`open(p, 'rb')`, `gzip.open(p)`) stay allowed.
+  The rule fails closed. A literal target is placed only for the calls and modes the existing literal reader judges: `open`/`io.open` with a literal mode, `Path(...).write_bytes`/`write_text`/`.open(<literal mode>)`, `os.truncate`, copies and moves. So a literal save is backed up as before there, and a literal report path stays allowed (#10). Everything else counts as computed:
+  - a target reached through a name, a `/` chain or `os.path.join`;
+  - `io.FileIO`, `os.open`, `touch`, links, `gzip.open(...,'wb')`, `zipfile.ZipFile(...,'w')` and a mode chosen at run time, literal or not;
+  - every archive extraction (`extractall`, `extract`, `shutil.unpack_archive`);
+  - every relative target after an `os.chdir`.
+
+  Read-only loops (`open(p, 'rb')`, `gzip.open(p)`) stay allowed.
 
   The cost is accepted: beside a saves read, a report or a copy-out written through a computed path is refused. Name the path literally, or split the step.
 
-  Priced over 129,150 recorded tool calls: 8 newly refused. 6 write save-named files or a Saves tree into a folder the guard cannot place, which is the rule's purpose. 2 are false positives: a script writing JSON that held save paths as data to a computed path, and a test harness that named the Saves folder beside a computed write. For those, spell the output path literally or split the step. Still not seen: a script run from a file (`python fix.py`); reading invoked scripts is planned for 4.2.
+  Priced over 129,532 recorded tool calls: 8 newly refused. 6 write save-named files or a Saves tree into a folder the guard cannot place, which is the rule's purpose. 2 are false positives: a script writing JSON that held save paths as data to a computed path, and a test harness that named the Saves folder beside a computed write. For those, spell the output path literally or split the step. Still not seen: a script run from a file (`python fix.py`); reading invoked scripts is planned for 4.2.
 - Save guard (#10): the read-only audit shapes reported against the install guard (a docstring and a localhost URL, a hash audit with a report, an `_isolation.py` helper name, a freeze helper, a profile probe) are allowed by the toolkit guard, and now have regression tests beside real save changes that stay refused.
 - Headless `stop`: when the first process list misses the still-running game, `stop` used to skip the orderly quit and stop the SteamVR helpers under the live game, then recorded the game as exited. Now an owned game the list omits still counts while DevBench names its PID or its exact process generation runs, so it gets the quit first. Helper termination never selected the game itself, and `off` already refused to restore under it (#24).
 - The `skyrim-nif`, `skyrim-bsa`, `skyrim-save` and `skyrim-audio` skills are always listed. A path-scoped skill is listed only after a `Read` or `Edit` of a matching file, and nobody Reads a mesh, archive, save or audio file, so these four were never invocable where the instructions said to invoke them (`Unknown skill: skyrim-nif`). `skyrim-context` stays scoped. A repository test refuses a skill scoped only to binary file types (#25).

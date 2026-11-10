@@ -621,13 +621,17 @@ _PY_WRITE_METHODS = frozenset(("write_bytes", "write_text", "touch", "symlink_to
 # name -> the (position, keyword) arguments a call writes or takes away. A move counts its source too: the save goes.
 _PY_WRITE_FUNCS = {
     "open": ((0, "file"),), "io.open": ((0, "file"),), "builtins.open": ((0, "file"),), "io.FileIO": ((0, "file"),),
-    "os.open": ((0, "path"),), "os.truncate": ((0, "path"),),
+    "zipfile.ZipFile": ((0, "file"),), "os.open": ((0, "path"),), "os.truncate": ((0, "path"),),
     "shutil.copy": ((1, "dst"),), "shutil.copy2": ((1, "dst"),), "shutil.copyfile": ((1, "dst"),),
     "shutil.copytree": ((1, "dst"),), "os.link": ((1, "dst"),), "os.symlink": ((1, "dst"),),
     "shutil.move": ((0, "src"), (1, "dst")), "os.rename": ((0, "src"), (1, "dst")),
     "os.replace": ((0, "src"), (1, "dst")), "os.renames": ((0, "old"), (1, "new")),
 }
-_PY_MODE_AT = {"open": 1, "io.open": 1, "builtins.open": 1, "io.FileIO": 1}    # mode argument; absent = read
+_PY_MODE_AT = {"open": 1, "io.open": 1, "builtins.open": 1, "io.FileIO": 1, "zipfile.ZipFile": 1}   # absent = read
+# The calls _python_write_targets judges for a literal target (the rest are computed even when literal).
+_LITERAL_READ_FUNCS = frozenset(("open", "io.open", "builtins.open", "os.truncate", "shutil.copy", "shutil.copy2",
+                                 "shutil.copyfile", "shutil.copytree", "shutil.move", "os.rename", "os.replace",
+                                 "os.renames"))
 
 
 class ComputedWrites(NamedTuple):
@@ -691,18 +695,22 @@ def python_computed_writes(code: str) -> ComputedWrites:
     computed = False
     extracted: List[str] = []
 
-    def target(node):
+    def target(node, readable=True):
+        """readable: the literal reader judges this call and mode for a literal target (#26 round 4 review:
+        FileIO, os.open, links, touch, module opens and run-time modes it never reads)."""
         nonlocal computed
-        if node is not None and not direct(node):
+        if node is not None and not (readable and direct(node)):
             computed = True
+
+    def mode_literal(call, index):
+        mode = argument(call, index, "mode")
+        return mode is None or isinstance(mode, ast.Constant) and isinstance(mode.value, str)
 
     def extraction(node):
         nonlocal computed
         computed = True                                   # no destination = the cwd; a literal one is still a place
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            extracted.append(node.value)
-        elif node is not None:
-            extracted.extend(c.value for c in ast.walk(node) if isinstance(c, ast.Constant) and isinstance(c.value, str))
+            extracted.append(node.value)                  # a computed destination's literals: _location_literals
 
     def argument(call, index, keyword):
         if len(call.args) > index:
@@ -734,13 +742,13 @@ def python_computed_writes(code: str) -> ComputedWrites:
             receiver_is_module = isinstance(f.value, ast.Name) and modules.get(f.value.id, f.value.id) in (
                 "io", "builtins", "os", "shutil")
             if f.attr in _PY_WRITE_METHODS and not receiver_is_module:
-                target(f.value)
+                target(f.value, f.attr in ("write_bytes", "write_text"))
             if f.attr == "open" and not receiver_is_module:
                 if imported(f.value):                     # gzip.open(file, mode): the file is the first argument
                     if mode_writes(node, 1):
-                        target(argument(node, 0, "filename"))
+                        target(argument(node, 0, "filename"), False)
                 elif mode_writes(node, 0):                # Path(...).open(mode)
-                    target(f.value)
+                    target(f.value, mode_literal(node, 0))
             moving = f.attr == "rename" or f.attr == "replace" and len(node.args) == 1 and not node.keywords
             if moving and not receiver_is_module and not imported(f.value):
                 target(f.value)
@@ -761,8 +769,9 @@ def python_computed_writes(code: str) -> ComputedWrites:
             continue
         if name == "os.open" and not os_open_writes(node):
             continue
+        readable = name in _LITERAL_READ_FUNCS and (name not in _PY_MODE_AT or mode_literal(node, _PY_MODE_AT[name]))
         for index, keyword in _PY_WRITE_FUNCS[name]:
-            target(argument(node, index, keyword))
+            target(argument(node, index, keyword), readable)
     return ComputedWrites(computed, tuple(_location_literals(nodes)) + tuple(extracted))
 
 
@@ -1474,9 +1483,15 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
 
                     def names_saves(s):
                         a = targets.resolve_literal(s, base, env) if len(s) < 1024 and "\n" not in s else None
-                        return is_save_folder(a, roots) or is_settings_folder(a, roots) or names_save_location(s)
+                        # A literal inside Saves carries a `Saves` component; run from the settings area is the
+                        # cwd check below. Resolving adds a relative settings folder (`Path('Skyrim VR')` from My Games).
+                        return is_settings_folder(a, roots) or names_save_location(s)
 
-                    if any(names_saves(s) for s in found.literals):
+                    here = targets.resolve_literal(".", base, env) if base else None
+                    # #26 round 4 review: run from the settings area, a computed target needs no literal at all
+                    # (`cd Saves && python -c "...extractall()"`, `os.listdir()` + rename).
+                    if (here is not None and targets.zone(here, roots) == "config") or any(
+                            names_saves(s) for s in found.literals):
                         saves.append((COMPUTED_SAVE, "write"))
     for e, word in lit:
         base = cwd if e is None else (targets.exec_cwd(e, cwd, env) or "")
