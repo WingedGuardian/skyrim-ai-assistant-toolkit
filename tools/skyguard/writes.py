@@ -677,7 +677,7 @@ _PY_VALUE_COUNTED = (frozenset(_PY_WRITE_FUNCS) | frozenset(_PY_DELETE_FUNCS) | 
                      frozenset(_PY_MODULE_OPENS)) - {"open", "io.open", "builtins.open"}
 
 
-def python_computed_writes(code: str) -> ComputedWrites:
+def python_computed_writes(code: str, conservative: bool = True) -> ComputedWrites:
     """Read as Python (ast, never run): is anything written, moved, linked or extracted to a target this guard cannot
     place? Fail closed (user decision 2026-11-09, after three reviews of finer placement): only a direct literal target
     -- a string, or `Path(<literals>)` -- is placed, and _python_write_targets judges it with the full save policy.
@@ -767,8 +767,8 @@ def python_computed_writes(code: str) -> ComputedWrites:
         if any(isinstance(n, (ast.Name, ast.Attribute)) and isinstance(n.ctx, ast.Store) and
                (getattr(n, "id", None) == "O_RDONLY" or getattr(n, "attr", None) == "O_RDONLY") for n in nodes):
             return not (isinstance(flags, ast.Constant) and flags.value == 0)
-        read_only = (isinstance(flags, ast.Attribute) and flags.attr == "O_RDONLY" and
-                     isinstance(flags.value, ast.Name) and modules.get(flags.value.id) == "os" or
+        # (an `X.O_RDONLY` of another module is an unknown value: the conservative scan refuses it)
+        read_only = (isinstance(flags, ast.Attribute) and flags.attr == "O_RDONLY" or
                      isinstance(flags, ast.Name) and names.get(flags.id) == "os.O_RDONLY" or
                      isinstance(flags, ast.Constant) and flags.value == 0)
         return not read_only
@@ -853,7 +853,7 @@ def python_computed_writes(code: str) -> ComputedWrites:
     # #26 conservative scan (user decision 2026-11-10, after six review rounds each found another spelling of a change
     # call: `shutil.os.remove`, `p.rename` passed as a value, ...): the named calls above are not the whole set. Every
     # other call must be a known read; a call this guard does not know counts as computed (fail closed by construction).
-    if not computed:
+    if not computed and conservative:                   # off only in tests of the named layer above
         try:
             computed = _unread_call(nodes, modules, names)
         except RecursionError:                            # a 2000-deep attribute chain: unreadable, so a possible change
@@ -934,9 +934,6 @@ _READ_DATA = frozenset((                               # module attributes that 
 _CHANGE_METHOD_VALUES = frozenset(("chmod", "lchmod", "chown", "mkdir", "makedirs", "touch", "copy", "move",
                                    "copy_into", "move_into", "remove", "writestr", "write_text", "write_bytes"))
 _EXCEPTION_NAME = r"(?:Error|Exception|Warning|Exit|Interrupt|Iteration)$"   # raise SystemExit(...), StopIteration()
-_REROOT = frozenset(("os", "nt", "posix", "shutil", "subprocess", "io", "pathlib", "zipfile", "tarfile", "gzip",
-                     "bz2", "lzma", "send2trash", "ctypes", "importlib", "builtins"))
-
 
 def _unread_call(nodes, modules, names) -> bool:
     """A call this guard neither judges nor knows to be a read (see the tables above)."""
@@ -1030,19 +1027,13 @@ def _unread_call(nodes, modules, names) -> bool:
 
     def known(name):
         parts = name.split(".")
-        # A module reached through another (`os.path.os.remove`, `shutil.os.remove`) is that module: re-root the
-        # chain at its last such segment (a container, not the called name) before judging it (round 10 review).
-        # The write logic judges only calls on a module named directly, so a re-rooted call must be a known read.
-        rerooted = False
-        for i in range(len(parts) - 2, 0, -1):
-            if parts[i] in _REROOT:
-                parts, rerooted = [_OS_SPELLINGS.get(parts[i], parts[i])] + parts[i + 1:], True
-                break
-        name = ".".join(parts)
+        # A module reached through another (`os.path.os.remove`, `shutil.os.remove`, `json.codecs.open`) is never
+        # a read: only exactly one name below a read module is (below), and a judged call counts only when the
+        # write logic named its module directly (it does not read `shutil.os`).
         data = next((d for d in _READ_DATA if name.startswith(d + ".")), None)
         if data is not None:                              # a method on a module value: `os.sep.join(...)`
             return name in _READ_FUNCS or parts[-1] in _READ_METHODS
-        if (name in _JUDGED_CALLS and not rerooted) or name in _READ_FUNCS:
+        if (name in _JUDGED_CALLS and len(parts) == 2) or name in _READ_FUNCS:
             return True
         module, _, attr = name.rpartition(".")
         return module in _READ_MODULES and bool(attr)    # exactly one name below: `json.codecs.open` is not a read
