@@ -3354,8 +3354,8 @@ _SR_CLAUSES = [
      "test_resaver_text_rule_on_an_opaque_program[opaque-op-in-filename]"),
     # Task 7: decide() parses once (with the dialect) and hands the parse to the ReSaver rule.
     # (Anchor follows Task 17, which made decide() accept the caller's parse; the fallback parse keeps the dialect.)
-    ("dialect", "    parsed = shellparse.parse(command, shell) if parsed is None else parsed\n    dels",
-     "    parsed = shellparse.parse(command) if parsed is None else parsed\n    dels",
+    ("dialect", "    parsed = shellparse.parse(command, shell) if parsed is None else parsed\n    # #26 review 3",
+     "    parsed = shellparse.parse(command) if parsed is None else parsed\n    # #26 review 3",
      "t04-heredoc-py"),
 ]
 MUTATIONS += [
@@ -10066,7 +10066,7 @@ MUTATIONS += [pytest.param("tools/skyguard/writes.py", before, after,
     "tests/test_python_literal_writes.py::" + test, id="python-literal-" + name) for before, after, test, name in (
     ('    if len(code) > 1024 * 1024:', '    if False:',
      'test_oversized_python_analysis_refuses_instead_of_guessing_an_identity', 'analysis-bound'),
-    ('        nodes = python_nodes(code)', '        nodes = python_nodes("pass")',
+    ('        nodes = python_nodes(code)\n    except SyntaxError:', '        nodes = python_nodes("pass")\n    except SyntaxError:',
      'test_python_write_literals_decode_to_the_filename_value', 'syntax-reader'),
 )]
 
@@ -12514,7 +12514,7 @@ MUTATIONS += [pytest.param(path, anchor, replacement, test, id="f35-" + name) fo
      _F35 + "test_every_spelling_of_cps_target_folder_is_read[cp -vt '<C>/Saves' main.ess]", "target-clustered"),
     ("tools/skyguard/deletes.py", 'if len(head) >= 3 and "--target-directory".startswith(head):', 'if head == "--target-directory":',
      _F35 + "test_every_spelling_of_cps_target_folder_is_read[cp --target='<C>/Saves' x/main.ess]", "target-shortened"),
-    ("tools/skyguard/writes.py", 'if any(a.name == "*" for a in node.names):', 'if False:',
+    ("tools/skyguard/writes.py", 'if any(a.name == "*" for a in node.names):        # `from os import *` brings', 'if False:        # `from os import *` brings',
      _F35 + "test_a_star_import_or_a_set_of_saves_is_read[from os import *; remove('<C>/Saves/main.ess')]", "star-import-delete"),
     ("tools/skyguard/shellparse.py", """        return program == "stdin" or "i" in seen\n""", """        return program == "stdin"\n""",
      _F35 + "test_python_i_reads_a_pipe_after_its_script[-i tool.py]", "python-i-reads-pipe"),
