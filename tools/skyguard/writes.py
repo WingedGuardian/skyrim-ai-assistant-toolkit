@@ -885,6 +885,31 @@ def names_save_location(text: str) -> bool:
     return low.endswith(SAVE_EXTS) or "saves" in [part.strip() for part in low.split("/")]
 
 
+_COMMAND_NAMES_SAVES = re.compile(r"(?i)(?:^|[/\\\s\"'=:;(])saves(?:[/\\\s\"';)]|$)|\.(?:ess|skse)\b|my games|SKYRIM_SAVE_DIRS")
+_COMMAND_WORDS = re.compile(r""""([^"]*)"|'([^']*)'|([^\s"';|&()<>]+)""")
+
+
+def command_names_saves(command: str, base: str, roots, env) -> bool:
+    """Issue #26 round 7 (user ruling 2026-11-09): a computed write run from a cwd the guard cannot work out
+    (`S=...; cd "$S"` in a command the parser will not trust, `cd "$(...)"`) is refused only when the command's own
+    text names a save location: a `Saves` component, a .ess/.skse name, `My Games`, SKYRIM_SAVE_DIRS, or a path-shaped
+    word that resolves into the settings area (a custom sLocalSavePath folder). Failing closed on every unknown cwd
+    refused 227 ordinary scratch-folder scripts in the priced history; a cd computed at run time with no save
+    location anywhere in the text is not seen (documented limit)."""
+    if _COMMAND_NAMES_SAVES.search(command):
+        return True
+    for m in _COMMAND_WORDS.finditer(command):
+        word = next(g for g in m.groups() if g is not None)
+        if m.group(3) is not None and re.match(r"[A-Za-z_]\w*=", word):
+            word = word.split("=", 1)[1]                  # an unquoted assignment value: D=C:/x
+        if not word or len(word) >= 1024 or not _PATH_SHAPED.match(word):
+            continue
+        a = targets.resolve_literal(word, base, env)
+        if a is not None and targets.zone(a, roots) == "config":
+            return True
+    return False
+
+
 def text_write_targets(code: str, *, python_literals: bool = False) -> List[str]:
     if python_literals:
         return _python_write_targets(code)
@@ -1489,8 +1514,10 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                     here = targets.resolve_literal(".", base, env) if base else None
                     # #26 round 4 review: run from the settings area, a computed target needs no literal at all
                     # (`cd Saves && python -c "...extractall()"`, `os.listdir()` + rename).
-                    # an unknown cwd (`cd "$D" && python ...`) may be the settings area: fail closed (round 5)
-                    if here is None or targets.zone(here, roots) == "config" or any(
+                    # an unknown cwd (`cd "$D" && python ...`) may be the settings area: refused when the command
+                    # names a save location anywhere in its text (round 7, user ruling)
+                    unknown = here is None and command_names_saves(command, targets.normalise_cwd(cwd) or "", roots, env)
+                    if unknown or here is not None and targets.zone(here, roots) == "config" or any(
                             names_saves(s) for s in found.literals):
                         saves.append((COMPUTED_SAVE, "write"))
     for e, word in lit:

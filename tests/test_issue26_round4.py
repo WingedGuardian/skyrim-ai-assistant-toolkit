@@ -71,10 +71,49 @@ def test_round_five_seams_are_closed(install, body):
     assert decide_in(install, heredoc(body.format(S=install["saves"])), str(install["work"])) == "deny"
 
 
+_EXTRACT_HERE = " && python -c \"import zipfile; zipfile.ZipFile('C:/Temp/b.zip').extractall()\""
+
+
+def _cwd_is_unknown(cmd):
+    """The test must reach the unknown-cwd clause, not pass through the settings-area cwd clause."""
+    from skyguard import shellparse
+    return [e.cd_before for e in shellparse.parse(cmd, "bash").execs if e.program == "python"] == ["?"]
+
+
 def test_an_unknown_cwd_with_a_computed_write_fails_closed(install):
-    cmd = ("D='" + install["saves"] + "'; cd \"$D\" && python -c \"import zipfile; "
-           "zipfile.ZipFile('C:/Temp/b.zip').extractall()\"")
+    cmd = "D='" + install["saves"] + "'; cd \"$(echo \"$D\")\"" + _EXTRACT_HERE
+    assert _cwd_is_unknown(cmd)
     assert decide_in(install, cmd, str(install["work"])) == "deny"
+
+
+def test_an_unknown_cwd_found_by_the_word_saves_fails_closed(install):
+    """No word resolves into the settings area: only the `Saves` word in the text says where this runs."""
+    cmd = "cd \"$(find C:/ -maxdepth 6 -type d -name Saves | head -1)\"" + _EXTRACT_HERE
+    assert _cwd_is_unknown(cmd)
+    assert decide_in(install, cmd, str(install["work"])) == "deny"
+
+
+def test_an_unknown_cwd_naming_a_custom_settings_folder_fails_closed(tmp_path):
+    """A settings folder whose path spells neither Saves nor My Games: only resolving the word places it."""
+    from test_issue10_shapes import paths
+    game, config = tmp_path / "Game", tmp_path / "cfg"
+    (game / "Data").mkdir(parents=True)
+    (config / "Saves").mkdir(parents=True)
+    env = {"SKYRIM_GAME_ROOT": str(game), "SKYRIM_CONFIG_DIR": str(config)}
+    inst = dict(roots=paths.roots(game.as_posix(), str(game), env), env=env)
+    cmd = "D=" + config.as_posix() + "; cd \"$(echo \"$D\")\"" + _EXTRACT_HERE
+    assert _cwd_is_unknown(cmd)
+    assert decide_in(inst, cmd, str(tmp_path)) == "deny"
+
+
+def test_an_unknown_cwd_in_ordinary_scratch_work_is_allowed(install):
+    """The priced false-positive class (227 history commands): a scratch folder the parser will not trust."""
+    w = str(install["work"].as_posix())
+    cmd = ('S="' + w + '"; cd "$S"; python -c "\nimport zipfile;z=zipfile.ZipFile(\'openvr.zip\')\n'
+           'for n in z.namelist():\n  if n.endswith(\'.h\'): z.extract(n,\'.\')\n"; '
+           'cmd.exe //c "$(cygpath -w "$S/build.bat")"; cd ..; ls')
+    assert _cwd_is_unknown(cmd)
+    assert decide_in(install, cmd, w) == "allow"
 
 
 def _my_games(inst):
