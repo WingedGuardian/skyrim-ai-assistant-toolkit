@@ -12717,3 +12717,15 @@ MUTATIONS += [pytest.param("tools/vr-headless.py", anchor, replacement, _HX + te
     ("        if passes and time.monotonic() > deadline:\n", "        if time.monotonic() > deadline:\n",
      "test_a_census_slower_than_the_whole_budget_still_terminates_what_it_proved", "deadline-before-first-pass"),
 ]]
+# A failure while the managed game runs (Souls control05 shape): the toolkit keeps the orderly quit and the error.
+_RF = "tests/test_headless_run_failure.py::"
+MUTATIONS += [pytest.param("tools/vr-headless.py", anchor, replacement, _RF + test, id="run-failure-" + name)
+              for anchor, replacement, test, name in [
+    ("            rc = cmd_stop()                      # owned processes exist: orderly exit, then restore",
+     "            rc = cmd_off()                      # owned processes exist: orderly exit, then restore",
+     "test_a_failure_while_the_game_runs_still_quits_it_once_then_restores[inventory]", "cleanup-without-quit"),
+    ("        error = e\n        raise\n    finally:\n", "        error = e\n        return 2\n    finally:\n",
+     "test_a_failure_while_the_game_runs_still_quits_it_once_then_restores[ctrl-c]", "ctrl-c-swallowed"),
+    ('            print("ERROR during the managed session', '            (lambda *a, **k: None)("ERROR during the managed session',
+     "test_the_original_error_survives_a_cleanup_that_also_fails", "original-error-dropped"),
+]]
