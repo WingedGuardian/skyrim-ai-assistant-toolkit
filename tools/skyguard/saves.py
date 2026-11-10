@@ -35,7 +35,8 @@ planned for 4.2). Inline Python that writes, moves or replaces a COMPUTED target
 any literal shaped like a path names a save or has a `Saves` component, or a path-position or filter literal does
 (`Path(D) / 'Saves'`, `glob('*.ess')`, `n.endswith('.ess')`, `p.suffix == '.ess'`), or a literal resolves to the
 settings folder, or the code runs from inside the settings area, or from an unknown cwd in a command whose text
-names a save location (writes.python_computed_writes / _location_literals / command_names_saves,
+names a save location; computed deletes count too (writes.python_computed_writes / _location_literals /
+command_names_saves,
 #26). Text inside a write/log call or a text edit's arguments, multi-line strings and command lines are not a
 location (text assigned to a name first can be). Fail closed: a literal target is placed only when the literal reader
 itself returns it (open/io.open with a literal mode, Path write_bytes/write_text/.open(literal), os.truncate,

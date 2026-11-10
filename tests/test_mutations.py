@@ -12689,3 +12689,57 @@ MUTATIONS += [pytest.param(path, anchor, replacement, test, id="i26-" + name)
 _SV26 = "tests/test_issue26_review.py::test_the_refusal_says_what_to_do_instead"
 MUTATIONS += [pytest.param("tools/skyguard/saves.py", "        if t.path == COMPUTED_SAVE:\n", "        if False:\n", _SV26,
                            id="i26-message-unqualified")]
+
+# #26 round 8 (round 7 review): the word scan spellings, star names from every table, computed deletes.
+_T8 = "tests/test_issue26_round8.py::"
+MUTATIONS += [pytest.param(_W, anchor, replacement, test if "::" in test and not test.startswith("R4::") else
+                           (_T4 + test[4:] if test.startswith("R4::") else _T8 + test), id="i26-" + name)
+              for anchor, replacement, test, name in [
+    ('_SAVES_WORD = r"(?<![\\w.-])saves(?![\\w-])"',
+     '_SAVES_WORD = r"(?<![\\w.-])saves(?:[/\\\\\\s\\"\';)]|$)"',
+     'test_saves_followed_by_a_shell_operator_is_seen[and-and]', 'saves-separator-list'),
+    ('_SAVES_WORD = r"(?<![\\w.-])saves(?![\\w-])"',
+     '_SAVES_WORD = r"saves"',
+     'test_a_word_containing_saves_is_not_a_location', 'saves-substring'),
+    ('_MY_GAMES = r"my(?:\\\\?\\s|%20)+games"',
+     '_MY_GAMES = r"my games"',
+     'test_each_way_a_command_names_a_save_location_is_seen[escaped-my-games]', 'my-games-escaped-missed'),
+    ('_MY_GAMES = r"my(?:\\\\?\\s|%20)+games"',
+     '_MY_GAMES = r"my(?:\\\\?\\s)+games"',
+     'test_each_way_a_command_names_a_save_location_is_seen[percent-my-games]', 'my-games-percent-missed'),
+    ('_SAVE_NAME = r"\\.(?:ess|skse)\\b"',
+     '_SAVE_NAME = r"(?!x)x"',
+     'test_each_way_a_command_names_a_save_location_is_seen[save-name-only]', 'save-name-word-unread'),
+    ('_SAVE_DIRS_VAR = r"SKYRIM_SAVE_DIRS"',
+     '_SAVE_DIRS_VAR = r"(?!x)x"',
+     'test_each_way_a_command_names_a_save_location_is_seen[save-dirs-variable]', 'save-dirs-var-unread'),
+    ('        words = {raw, re.sub(r"\\\\(.)", r"\\1", raw)} if m.group(3) is not None else {raw}',
+     '        words = {raw}',
+     'test_an_escaped_space_in_a_custom_settings_folder_is_resolved', 'escaped-word-unresolved'),
+    ('            if m.group(3) is not None and re.match(r"[A-Za-z_]\\w*=", word):',
+     '            if False:',
+     'R4::test_an_unknown_cwd_naming_a_custom_settings_folder_fails_closed', 'assignment-value-unsplit'),
+    ('    for table in (_PY_WRITE_FUNCS, _PY_EXTRACT_FUNCS, _PY_DELETE_FUNCS):',
+     '    for table in (_PY_EXTRACT_FUNCS, _PY_DELETE_FUNCS):',
+     'test_star_imports_of_every_counted_module_are_read[io-fileio-loop]', 'star-writes-unread'),
+    ('    for table in (_PY_WRITE_FUNCS, _PY_EXTRACT_FUNCS, _PY_DELETE_FUNCS):',
+     '    for table in (_PY_WRITE_FUNCS, _PY_DELETE_FUNCS):',
+     'test_star_imports_of_every_counted_module_are_read[shutil-unpack]', 'star-extract-unread'),
+    ('    for table in (_PY_WRITE_FUNCS, _PY_EXTRACT_FUNCS, _PY_DELETE_FUNCS):',
+     '    for table in (_PY_WRITE_FUNCS, _PY_EXTRACT_FUNCS):',
+     'test_a_computed_delete_run_from_the_saves_folder_is_refused[os-unlink-star]', 'star-deletes-unread'),
+    ('        if name in _PY_DELETE_FUNCS:\n',
+     '        if False:\n',
+     'test_a_computed_delete_run_from_the_saves_folder_is_refused[os-remove-listdir]', 'computed-delete-uncounted'),
+    ('            if f.attr in _PY_DELETE_METHODS and not receiver_is_module and not node.args:',
+     '            if False:',
+     'test_a_computed_delete_run_from_the_saves_folder_is_refused[path-unlink-iterdir]', 'path-unlink-uncounted'),
+    ('        if name in _PY_MODULE_OPENS and isinstance(f, ast.Name):',
+     '        if False:',
+     'test_star_imports_of_every_counted_module_are_read[gzip-open-by-name]', 'module-open-by-name-uncounted'),
+]]
+MUTATIONS += [pytest.param(
+    _W, "                for item in (given.elts if isinstance(given, (ast.List, ast.Tuple, ast.Set)) else [given]):",
+    "                for item in [given]:",
+    "tests/test_review_v4_35f8_fixes.py::test_a_star_import_or_a_set_of_saves_is_read",
+    id="i26-delete-list-not-split")]

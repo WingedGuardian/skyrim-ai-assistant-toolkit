@@ -446,8 +446,8 @@ _READ_ONLY_IMPORTS = frozenset((
     "enum", "fnmatch", "fractions", "functools", "glob", "hashlib", "html", "itertools", "json", "locale", "math",
     "os", "os.path", "pathlib", "platform", "pprint", "random", "re", "statistics", "string", "struct",
     "sys", "textwrap", "time", "typing", "unicodedata", "xml.etree", "xml.etree.ElementTree"))
-_STAR_NAMES = {"os": ("remove", "unlink", "rename", "renames", "replace", "truncate"),
-               "shutil": ("move", "copy", "copy2", "copyfile", "copytree"), "send2trash": ("send2trash",)}
+# `from <module> import *` names: built below the change tables, from every module-level call they count (#26
+# round 8 review: a hand-kept list missed io.FileIO, gzip/tarfile/zipfile classes, os.link, shutil.unpack_archive).
 _READ_OPEN = re.compile(
     r"""(?<![.\w])open\(\s*(?:[rRbBuU]{0,2}"[^"\n]*"|[rRbBuU]{0,2}'[^'\n]*'|[\w.\[\]]+)\s*"""
     r"""(?:,\s*(?:mode\s*=\s*)?['"](?:r|rb|rt|br|tr)['"])?\s*"""
@@ -643,6 +643,31 @@ class ComputedWrites(NamedTuple):
 
 _PY_EXTRACT_METHODS = {"extractall": (0, "path"), "extract": (1, "path")}   # ZipFile / TarFile
 _PY_EXTRACT_FUNCS = {"shutil.unpack_archive": (1, "extract_dir")}
+# Module opens called by name after `from gzip import *` (`gzip.open(...)` by attribute is read below as well).
+_PY_MODULE_OPENS = {"gzip.open": ((0, "filename"),), "bz2.open": ((0, "filename"),), "lzma.open": ((0, "filename"),),
+                    "tarfile.open": ((0, "name"),)}
+# #26 round 8 (user ruling 14:58 covers deletes): a computed delete counts as a change the guard cannot place, so one
+# run from inside the settings area (`cd Saves && python -c "[os.remove(f) for f in os.listdir()]"`, allowed in 4.0)
+# is refused. A literal delete is still placed (the literal reader returns it) and judged by deletes.py.
+_PY_DELETE_FUNCS = {"os.remove": ((0, "path"),), "os.unlink": ((0, "path"),), "os.rmdir": ((0, "path"),),
+                    "os.removedirs": ((0, "name"),), "shutil.rmtree": ((0, "path"),),
+                    "send2trash.send2trash": ((0, "paths"),)}
+_PY_DELETE_METHODS = frozenset(("unlink", "rmdir"))       # Path(...).unlink() / .rmdir()
+
+
+def _star_names() -> dict:
+    out: dict = {}
+    # Module opens are left out: after `from gzip import *` a bare `open(p, 'wb')` reads as builtin open, counted the
+    # same way (`from gzip import open as gopen` is read by name below).
+    for table in (_PY_WRITE_FUNCS, _PY_EXTRACT_FUNCS, _PY_DELETE_FUNCS):
+        for dotted in table:
+            module, _, name = dotted.rpartition(".")
+            if module and module != "builtins":
+                out.setdefault(module, set()).add(name)
+    return {module: tuple(sorted(names)) for module, names in out.items()}
+
+
+_STAR_NAMES = _star_names()
 
 
 def python_computed_writes(code: str) -> ComputedWrites:
@@ -755,6 +780,8 @@ def python_computed_writes(code: str) -> ComputedWrites:
                 target(node.args[0] if node.args else argument(node, 0, "target"))
             if f.attr in _PY_EXTRACT_METHODS and not receiver_is_module:
                 extraction(argument(node, *_PY_EXTRACT_METHODS[f.attr]))
+            if f.attr in _PY_DELETE_METHODS and not receiver_is_module and not node.args:
+                target(f.value)                           # Path(...).unlink() / .rmdir(); os.rmdir(x) is read by name
         name = ""
         if isinstance(f, ast.Name):
             name = names.get(f.id, f.id)
@@ -762,6 +789,18 @@ def python_computed_writes(code: str) -> ComputedWrites:
             name = modules.get(f.value.id, f.value.id) + "." + f.attr
         if name in _PY_EXTRACT_FUNCS:
             extraction(argument(node, *_PY_EXTRACT_FUNCS[name]))
+            continue
+        if name in _PY_DELETE_FUNCS:
+            for index, keyword in _PY_DELETE_FUNCS[name]:
+                given = argument(node, index, keyword)
+                # send2trash([...]): each literal is placed on its own, as the literal reader reads them
+                for item in (given.elts if isinstance(given, (ast.List, ast.Tuple, ast.Set)) else [given]):
+                    target(item)
+            continue
+        if name in _PY_MODULE_OPENS and isinstance(f, ast.Name):
+            if mode_writes(node, 1):                      # by attribute it is the `.open` branch above
+                for index, keyword in _PY_MODULE_OPENS[name]:
+                    target(argument(node, index, keyword))
             continue
         if name not in _PY_WRITE_FUNCS:
             continue
@@ -885,8 +924,13 @@ def names_save_location(text: str) -> bool:
     return low.endswith(SAVE_EXTS) or "saves" in [part.strip() for part in low.split("/")]
 
 
-_COMMAND_NAMES_SAVES = re.compile(r"(?i)(?:^|[/\\\s\"'=:;(])saves(?:[/\\\s\"';)]|$)|\.(?:ess|skse)\b|my games|SKYRIM_SAVE_DIRS")
-_COMMAND_WORDS = re.compile(r""""([^"]*)"|'([^']*)'|([^\s"';|&()<>]+)""")
+# Round 8 review: a word boundary, not a list of separators (`cd "$D"/Saves&& ...`), and `My\ Games` / `My%20Games`.
+_SAVES_WORD = r"(?<![\w.-])saves(?![\w-])"
+_SAVE_NAME = r"\.(?:ess|skse)\b"
+_MY_GAMES = r"my(?:\\?\s|%20)+games"
+_SAVE_DIRS_VAR = r"SKYRIM_SAVE_DIRS"
+_COMMAND_NAMES_SAVES = re.compile("(?i)" + "|".join((_SAVES_WORD, _SAVE_NAME, _MY_GAMES, _SAVE_DIRS_VAR)))
+_COMMAND_WORDS = re.compile(r""""([^"]*)"|'([^']*)'|((?:\\.|[^\s"';|&()<>\\])+)""")
 
 
 def command_names_saves(command: str, base: str, roots, env) -> bool:
@@ -899,14 +943,17 @@ def command_names_saves(command: str, base: str, roots, env) -> bool:
     if _COMMAND_NAMES_SAVES.search(command):
         return True
     for m in _COMMAND_WORDS.finditer(command):
-        word = next(g for g in m.groups() if g is not None)
-        if m.group(3) is not None and re.match(r"[A-Za-z_]\w*=", word):
-            word = word.split("=", 1)[1]                  # an unquoted assignment value: D=C:/x
-        if not word or len(word) >= 1024 or not _PATH_SHAPED.match(word):
-            continue
-        a = targets.resolve_literal(word, base, env)
-        if a is not None and targets.zone(a, roots) == "config":
-            return True
+        raw = next(g for g in m.groups() if g is not None)
+        # Unquoted, bash reads `My\ Games` as one word, while a Windows path keeps its backslashes: try both.
+        words = {raw, re.sub(r"\\(.)", r"\1", raw)} if m.group(3) is not None else {raw}
+        for word in words:
+            if m.group(3) is not None and re.match(r"[A-Za-z_]\w*=", word):
+                word = word.split("=", 1)[1]              # an unquoted assignment value: D=C:/x
+            if not word or len(word) >= 1024 or not _PATH_SHAPED.match(word):
+                continue
+            a = targets.resolve_literal(word, base, env)
+            if a is not None and targets.zone(a, roots) == "config":
+                return True
     return False
 
 
