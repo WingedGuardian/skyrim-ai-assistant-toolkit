@@ -28,6 +28,9 @@ HOOK = "protect-bash"
 
 NO_COMMAND_LOG = "no command in payload -- hook could not evaluate its rules"
 NO_COMMAND_DENY = rules.RULES["S-INERT-NOCMD"]["template"]
+TOO_LARGE_DENY = ("Blocked: this command is larger than the guard can read (%d characters) and names a save location "
+                  "or runs in the settings folder, so the guard cannot list the saves it changes. Put the data in a "
+                  "file and pass its path, or split the command." % shellparse.MAX_INPUT_CHARS)
 NO_ROOT_LOG = "could not derive the install root -- the delete guard evaluated NOTHING"
 NO_ROOT_DENY = rules.RULES["S-INERT-NOROOT"]["template"]
 
@@ -273,6 +276,16 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
     # --- hard blocks
     # Deletes (Task 7): decided on the commands that RUN and where their operands RESOLVE (deletes.py, E16).
     parsed = shellparse.parse(command, shell) if parsed is None else parsed
+    # #26 review 3 (also in 4.0.0, MEASURED): past the parser's input cap the inline code is never read, so three
+    # literal save writes padded with 300 KB of data were allowed. Such a command that names a save location, or runs
+    # in the settings area, is refused: the guard cannot list what it changes.
+    if not parsed.ok and len(command) > shellparse.MAX_INPUT_CHARS:
+        base = targets.normalise_cwd(cwd) or ""
+        here = targets.resolve_literal(".", base, env) if base else None
+        if writes.command_names_saves(command, base, roots, env) or (
+                here is not None and targets.zone(here, roots) == "config"):
+            audit.rule(HOOK, "S-SAVE-UNKNOWN", "deny", TOO_LARGE_DENY)
+            return Verdict("deny", TOO_LARGE_DENY)
     dels = deletes.scan(command, parsed, roots, cwd, env)
     # Plan 6 Task 12 (R12): a write -- or a delete (fix round 1, I1) -- into .skyguard/** is the CLI's alone. Checked before
     # the delete deny, because S-DEL-INSTALL is shadowed by guards off and S-SELF-STATE is not.

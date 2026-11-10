@@ -12923,3 +12923,32 @@ MUTATIONS += [pytest.param(_W, anchor, replacement, (test if "::" in test else _
      '',
      'test_read_only_audits_the_list_refused_are_allowed[argparse-cli]', 'argparse-parser-unknown'),
 ]]
+
+# #26 round 14 (third safe-list review): size cap, judged calls as values, shadowed defs, O_RDONLY, depth.
+MUTATIONS += [pytest.param(path, anchor, replacement, "tests/test_issue26_round14.py::" + test, id="i26-" + name)
+              for path, anchor, replacement, test, name in [
+    ('tools/skyguard/shell_rules.py', '    if not parsed.ok and len(command) > shellparse.MAX_INPUT_CHARS:',
+     '    if False:',
+     'test_a_command_past_the_size_cap_that_names_saves_is_refused', 'size-cap-unguarded'),
+    ('tools/skyguard/shell_rules.py', '        if writes.command_names_saves(command, base, roots, env) or (',
+     '        if False or (',
+     'test_a_command_past_the_size_cap_that_names_saves_is_refused', 'size-cap-save-words-unread'),
+    ('tools/skyguard/shell_rules.py', '                here is not None and targets.zone(here, roots) == "config"):',
+     '                False):',
+     'test_a_command_past_the_size_cap_run_from_saves_is_refused', 'size-cap-settings-cwd-unread'),
+    ('tools/skyguard/writes.py', '        if isinstance(node, ast.Name) and node.id in _JUDGED_CALLS and node.id not in names and node.id not in local:',
+     '        if False:',
+     'test_the_third_list_review_probes_are_refused[map-open]', 'builtin-open-value-trusted'),
+    ('tools/skyguard/writes.py', '        if name is not None and (not known(name) or name in _JUDGED_CALLS) and name not in _READ_DATA:',
+     '        if name is not None and (not known(name)) and name not in _READ_DATA:',
+     'test_the_third_list_review_probes_are_refused[imported-open-value]', 'judged-call-value-trusted'),
+    ('tools/skyguard/writes.py', '    local = {name for name in local if binds.get(name, 0) == 1}',
+     '    pass',
+     'test_the_third_list_review_probes_are_refused[def-shadowed-by-data]', 'shadowed-local-trusted'),
+    ('tools/skyguard/writes.py', '        if any(isinstance(n, (ast.Name, ast.Attribute)) and isinstance(n.ctx, ast.Store) and',
+     '        if False and any(isinstance(n, (ast.Name, ast.Attribute)) and isinstance(n.ctx, ast.Store) and',
+     'test_the_third_list_review_probes_are_refused[rdonly-attribute-rebound]', 'rdonly-rebinding-unread'),
+    ('tools/skyguard/writes.py', '        except RecursionError:                            # a 2000-deep attribute chain',
+     '        except ValueError:                            # a 2000-deep attribute chain',
+     'test_the_third_list_review_probes_are_refused[too-deep-chain]', 'deep-chain-crashes'),
+]]

@@ -762,7 +762,11 @@ def python_computed_writes(code: str) -> ComputedWrites:
 
     def os_open_writes(call):
         flags = argument(call, 1, "flags")
-        # Only the real os.O_RDONLY (or 0): `class K: O_RDONLY = 0x301` is write+create+truncate (list review 2).
+        # Only the real os.O_RDONLY (or 0): `class K: O_RDONLY = 0x301` is write+create+truncate (list review 2), and
+        # nothing may assign an O_RDONLY anywhere (`os.O_RDONLY = 0x301`, `O_RDONLY = 0x301`; list review 3).
+        if any(isinstance(n, (ast.Name, ast.Attribute)) and isinstance(n.ctx, ast.Store) and
+               (getattr(n, "id", None) == "O_RDONLY" or getattr(n, "attr", None) == "O_RDONLY") for n in nodes):
+            return not (isinstance(flags, ast.Constant) and flags.value == 0)
         read_only = (isinstance(flags, ast.Attribute) and flags.attr == "O_RDONLY" and
                      isinstance(flags.value, ast.Name) and modules.get(flags.value.id) == "os" or
                      isinstance(flags, ast.Name) and names.get(flags.id) == "os.O_RDONLY" or
@@ -849,8 +853,11 @@ def python_computed_writes(code: str) -> ComputedWrites:
     # #26 conservative scan (user decision 2026-11-10, after six review rounds each found another spelling of a change
     # call: `shutil.os.remove`, `p.rename` passed as a value, ...): the named calls above are not the whole set. Every
     # other call must be a known read; a call this guard does not know counts as computed (fail closed by construction).
-    if not computed and _unread_call(nodes, modules, names):
-        computed = True
+    if not computed:
+        try:
+            computed = _unread_call(nodes, modules, names)
+        except RecursionError:                            # a 2000-deep attribute chain: unreadable, so a possible change
+            computed = True
     return ComputedWrites(computed, tuple(_location_literals(nodes)) + tuple(extracted))
 
 
@@ -941,20 +948,29 @@ def _unread_call(nodes, modules, names) -> bool:
     # Safe-list review: a name the tables trust must mean what its import says. Rebinding one (`json = os`, a
     # parameter or loop variable named `json`, `def print(...)`) and then calling through it is a possible change.
     protected = set(modules) | roots | set(names) | _READ_BUILTINS | {"open", "Path", "PurePath", "__builtins__"}
-    bound = set()
+    binds: dict = {}
+
+    def bind(name):
+        binds[name] = binds.get(name, 0) + 1
+
     for n in nodes:
         if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
-            bound.add(n.id)
+            bind(n.id)
         elif isinstance(n, ast.arg):
-            bound.add(n.arg)
+            bind(n.arg)
         elif isinstance(n, (ast.Global, ast.Nonlocal)):
-            bound.update(n.names)
+            for name in n.names:
+                bind(name)
         elif isinstance(n, ast.ExceptHandler) and n.name:
-            bound.add(n.name)
+            bind(n.name)
         elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            bound.add(n.name)
+            bind(n.name)
         elif type(n).__name__ in ("MatchAs", "MatchStar") and getattr(n, "name", None):
-            bound.add(n.name)
+            bind(n.name)
+    bound = set(binds)
+    # A local def or lambda is trusted only when that is its one binding: `def w(): pass; w = open; w(n, 'w')`, a
+    # parameter or comprehension variable of the same name, is something else (list review 3).
+    local = {name for name in local if binds.get(name, 0) == 1}
     # An import name bound to two different things (`import os as json` beside a decoy `import json` elsewhere): the
     # tables above saw only the last one (list review 2).
     imported = {}
@@ -1050,7 +1066,10 @@ def _unread_call(nodes, modules, names) -> bool:
             return True                                   # `map(p.chmod, ...)`: a change method handed on
         name = (dotted(node) if isinstance(node, ast.Attribute) else
                 names.get(node.id) if isinstance(node, ast.Name) and node.id not in local else None)
-        if name is not None and not known(name) and name not in _READ_DATA:
+        if isinstance(node, ast.Name) and node.id in _JUDGED_CALLS and node.id not in names and node.id not in local:
+            return True                                   # `map(open, ns, ['w'] * n)`: builtin open handed on
+        if name is not None and (not known(name) or name in _JUDGED_CALLS) and name not in _READ_DATA:
+            # a judged call handed on as a value is not judged: its arguments are never seen (`map(io.open, ...)`)
             return True
     for node in nodes:
         if not isinstance(node, ast.Call):
