@@ -59,3 +59,30 @@ def test_a_word_that_only_contains_saves_is_not_a_location(install, word):
 def test_a_read_only_map_over_a_scratch_folder_is_allowed(install):
     body = "import glob, os\nprint(list(map(os.path.getsize, glob.glob('C:/Temp/build/*'))))\n"
     assert decide_in(install, heredoc(body), install["saves"]) == "allow"
+
+
+# --- round 9 review (round 10 fixes)
+ROUND10_FROM_SAVES = {
+    "bound-method-value": "from pathlib import Path\nfor f in [p.unlink for p in Path('.').iterdir()]:\n    f()\n",
+    "nt-remove": "import nt, os\nfor n in os.listdir():\n    nt.remove(n)\n",
+    "from-nt-unlink": "import os\nfrom nt import unlink\nfor n in os.listdir():\n    unlink(n)\n",
+    "posix-remove": "import posix, os\nfor n in os.listdir():\n    posix.remove(n)\n",
+}
+
+
+@pytest.mark.parametrize("body", list(ROUND10_FROM_SAVES.values()), ids=list(ROUND10_FROM_SAVES))
+def test_round_nine_delete_shapes_run_from_saves_are_refused(install, body):
+    assert decide_in(install, heredoc(body), install["saves"]) == "deny"
+
+
+ROUND10_QUOTED = {
+    "locale-string": 'cd "$D"/Sa$"ves"&&' + RD,
+    "line-continuation": 'cd "$D"/Sa\\\nves&&' + RD,
+}
+
+
+@pytest.mark.parametrize("cmd", list(ROUND10_QUOTED.values()), ids=list(ROUND10_QUOTED))
+def test_more_bash_quoting_inside_a_save_word_is_seen(install, cmd):
+    cmd = 'D="$(cat C:/Temp/where.txt)"; ' + cmd
+    assert _cwd_is_unknown(cmd)
+    assert decide_in(install, cmd, str(install["work"])) == "deny"

@@ -656,12 +656,8 @@ _PY_DELETE_FUNCS = {"os.remove": ((0, "path"),), "os.unlink": ((0, "path"),), "o
 _PY_DELETE_METHODS = frozenset(("unlink", "rmdir"))       # Path(...).unlink() / .rmdir()
 
 
-def _names_path_class(node, modules, names) -> bool:
-    """`Path`, `PurePath`, `pathlib.Path` (however imported): the receiver of an unbound `Path.unlink(p)`."""
-    if isinstance(node, ast.Name):
-        return names.get(node.id, node.id).split(".")[-1] in ("Path", "PurePath", "WindowsPath", "PosixPath")
-    return (isinstance(node, ast.Attribute) and node.attr in ("Path", "PurePath", "WindowsPath", "PosixPath") and
-            isinstance(node.value, ast.Name) and modules.get(node.value.id, node.value.id) == "pathlib")
+# `nt` and `posix` are the modules os re-exports (round 9 review: `nt.remove(n)` was read as no call at all).
+_OS_SPELLINGS = {"nt": "os", "posix": "os"}
 
 
 def _star_names() -> dict:
@@ -693,8 +689,10 @@ def python_computed_writes(code: str) -> ComputedWrites:
     os.open unless os.O_RDONLY, os.truncate, copies onto a destination, links, moves (source and destination), and
     ZipFile/TarFile extractall/extract and shutil.unpack_archive. A module's `.open(file, mode)` (gzip, tarfile,
     codecs) reads its mode from the second argument; a mode chosen at run time may write. Not read (known limits):
-    getattr, exec/eval of code strings, __import__, subprocess-launched copies. A counted function handed on as a value
-    (`map(os.remove, ...)`, `rep = os.replace`) counts as computed.
+    getattr and other string-named access (operator.methodcaller, `os.__dict__[...]`), private helpers
+    (shutil._rmtree_unsafe), exec/eval of code strings, __import__, subprocess-launched copies. A counted function or
+    write/delete method handed on as a value (`map(os.remove, ...)`, `rep = os.replace`, `[p.unlink for p in ...]`)
+    counts as computed; `nt`/`posix` are read as os.
     Unparseable code returns nothing (scan's unparsed-code refusal)."""
     try:
         nodes = python_nodes(code)
@@ -703,11 +701,12 @@ def python_computed_writes(code: str) -> ComputedWrites:
     modules, names = {}, {}
     for node in nodes:
         if isinstance(node, ast.Import):
-            modules.update({a.asname or a.name: a.name for a in node.names})
+            modules.update({a.asname or a.name: _OS_SPELLINGS.get(a.name, a.name) for a in node.names})
         elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
-            names.update({a.asname or a.name: node.module + "." + a.name for a in node.names})
+            module = _OS_SPELLINGS.get(node.module, node.module)          # `from nt import unlink` is os.unlink
+            names.update({a.asname or a.name: module + "." + a.name for a in node.names})
             if any(a.name == "*" for a in node.names):        # `from os import *` (review round 5)
-                names.update({n: node.module + "." + n for n in _STAR_NAMES.get(node.module, ())})
+                names.update({n: module + "." + n for n in _STAR_NAMES.get(module, ())})
     try:                                                  # what the literal reader itself judges (round 6)
         emitted = {os.path.normcase(str(w)) for w in _python_write_targets(code)}
     except ValueError:
@@ -776,9 +775,8 @@ def python_computed_writes(code: str) -> ComputedWrites:
     for node in nodes:
         if id(node) in called or not isinstance(getattr(node, "ctx", None), ast.Load):
             continue
-        if isinstance(node, ast.Attribute) and node.attr in _PY_DELETE_METHODS | _PY_WRITE_METHODS and \
-                _names_path_class(node.value, modules, names):
-            computed = True                               # map(Path.unlink, ...) / map(pathlib.Path.unlink, ...)
+        if isinstance(node, ast.Attribute) and node.attr in _PY_DELETE_METHODS | _PY_WRITE_METHODS:
+            computed = True             # map(Path.unlink, ...), [p.unlink for p in ...]: any receiver (round 9 review)
             continue
         if isinstance(node, ast.Name):
             value = names.get(node.id, node.id)
@@ -974,7 +972,9 @@ def _bash_unquoted(command: str) -> str:
             return m.group(1).encode("latin-1", "backslashreplace").decode("unicode_escape")
         except (UnicodeError, ValueError):
             return m.group(1)
-    text = re.sub(r"\$'((?:[^'\\]|\\.)*)'", ansi_c, command)
+    text = command.replace("\\\n", "")                    # a line continuation joins `Sa\<newline>ves`
+    text = re.sub(r"\$'((?:[^'\\]|\\.)*)'", ansi_c, text)
+    text = re.sub(r'\$(?=")', "", text)                     # $"..." (locale string) is a quoted word: `Sa$"ves"`
     return re.sub(r"""['"\\]""", "", text)
 
 
