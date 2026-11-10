@@ -42,7 +42,7 @@ location (text assigned to a name first can be). Fail closed: a literal target i
 itself returns it (open/io.open with a literal mode, Path write_bytes/write_text/.open(literal), os.truncate,
 positional or src=/dst= copies and moves); everything else is computed -- names, `/` chains, os.path.join, FileIO, os.open, touch, links, module
 opens, run-time modes, every archive extraction and, after an os.chdir, every relative target. Not seen: computed
-targets in code whose literals name no save location, run from outside the settings area, getattr/exec/__import__/function aliases/launched processes, and other interpreters' computed
+targets in code whose literals name no save location, run from outside the settings area, getattr/exec/__import__/launched processes, and other interpreters' computed
 paths (literal paths in `python -c` and `node -e` moves and copies are); neither is an archive unpacked
 by a library call (`[IO.Compression.ZipFile]::ExtractToDirectory`, `python -m zipfile -e`); a loop over saves (`for f in ...; do rm "$f"; done`) cannot be counted, so it is never backed up
 and stays whatever the delete rules decide (S-DEL-UNRESOLVED when it names a protected folder).

@@ -12676,7 +12676,7 @@ MUTATIONS += [pytest.param(path, anchor, replacement, test, id="i26-" + name)
      '                    if here is not None and targets.zone(here, roots) == "config" or any(\n',
      _T4 + "test_an_unknown_cwd_with_a_computed_write_fails_closed", "unknown-cwd-trusted"),
     # round 7 (user ruling): an unknown cwd refuses only when the command names a save location; one twin per clause
-    (_W, "    if _COMMAND_NAMES_SAVES.search(command):\n        return True\n", "    if False:\n        return True\n",
+    (_W, "    if _COMMAND_NAMES_SAVES.search(command) or _COMMAND_NAMES_SAVES.search(_bash_unquoted(command)):", "    if False:",
      _T4 + "test_an_unknown_cwd_found_by_the_word_saves_fails_closed", "unknown-cwd-save-words-unread"),
     (_W, '        if a is not None and targets.zone(a, roots) == "config":\n', "        if False:\n",
      _T4 + "test_an_unknown_cwd_naming_a_custom_settings_folder_fails_closed", "unknown-cwd-settings-word-unresolved"),
@@ -12701,11 +12701,8 @@ MUTATIONS += [pytest.param(_W, anchor, replacement, test if "::" in test and not
     ('_SAVES_WORD = r"(?<![\\w.-])saves(?![\\w-])"',
      '_SAVES_WORD = r"saves"',
      'test_a_word_containing_saves_is_not_a_location', 'saves-substring'),
-    ('_MY_GAMES = r"my(?:\\\\?\\s|%20)+games"',
-     '_MY_GAMES = r"my games"',
-     'test_each_way_a_command_names_a_save_location_is_seen[escaped-my-games]', 'my-games-escaped-missed'),
-    ('_MY_GAMES = r"my(?:\\\\?\\s|%20)+games"',
-     '_MY_GAMES = r"my(?:\\\\?\\s)+games"',
+    ('_MY_GAMES = r"my(?:\\s|%20)+games"',
+     '_MY_GAMES = r"my(?:\\s)+games"',
      'test_each_way_a_command_names_a_save_location_is_seen[percent-my-games]', 'my-games-percent-missed'),
     ('_SAVE_NAME = r"\\.(?:ess|skse)\\b"',
      '_SAVE_NAME = r"(?!x)x"',
@@ -12731,13 +12728,17 @@ MUTATIONS += [pytest.param(_W, anchor, replacement, test if "::" in test and not
     ('        if name in _PY_DELETE_FUNCS:\n',
      '        if False:\n',
      'test_a_computed_delete_run_from_the_saves_folder_is_refused[os-remove-listdir]', 'computed-delete-uncounted'),
-    ('            if f.attr in _PY_DELETE_METHODS and not receiver_is_module and not node.args:',
-     '            if False:',
+    ('            if f.attr in _PY_DELETE_METHODS and not receiver_is_module:\n',
+     '            if False:\n',
      'test_a_computed_delete_run_from_the_saves_folder_is_refused[path-unlink-iterdir]', 'path-unlink-uncounted'),
     ('        if name in _PY_MODULE_OPENS and isinstance(f, ast.Name):',
      '        if False:',
      'test_star_imports_of_every_counted_module_are_read[gzip-open-by-name]', 'module-open-by-name-uncounted'),
 ]]
+MUTATIONS += [pytest.param(
+    _W, "    if _COMMAND_NAMES_SAVES.search(command) or _COMMAND_NAMES_SAVES.search(_bash_unquoted(command)):",
+    "    if _COMMAND_NAMES_SAVES.search(_bash_unquoted(command)):",
+    "tests/test_issue26_round9.py::test_a_windows_backslash_path_naming_saves_is_seen_raw", id="i26-raw-text-unread")]
 MUTATIONS += [pytest.param(
     _W, "                for item in (given.elts if isinstance(given, (ast.List, ast.Tuple, ast.Set)) else [given]):",
     "                for item in [given]:",
@@ -12781,4 +12782,34 @@ MUTATIONS += [pytest.param("tools/vr-headless.py", anchor, replacement, _RF + te
      "test_a_failure_while_the_game_runs_still_quits_it_once_then_restores[ctrl-c]", "ctrl-c-swallowed"),
     ('            print("ERROR during the managed session', '            (lambda *a, **k: None)("ERROR during the managed session',
      "test_the_original_error_survives_a_cleanup_that_also_fails", "original-error-dropped"),
+]]
+
+# #26 round 9 (round 8 review): unbound/positional unlink, counted functions as values, bash quoting.
+_T9 = "tests/test_issue26_round9.py::"
+MUTATIONS += [pytest.param(_W, anchor, replacement, _T9 + test, id="i26-" + name)
+              for anchor, replacement, test, name in [
+    ('            if f.attr in _PY_DELETE_METHODS and not receiver_is_module:\n',
+     '            if f.attr in _PY_DELETE_METHODS and not receiver_is_module and not node.args:\n',
+     'test_round_eight_delete_shapes_run_from_saves_are_refused[unlink-positional]', 'unlink-positional-skipped'),
+    ('    return (isinstance(node, ast.Attribute) and node.attr in ("Path", "PurePath", "WindowsPath", "PosixPath") and',
+     '    return (False and isinstance(node, ast.Attribute) and node.attr in ("Path", "PurePath", "WindowsPath", "PosixPath") and',
+     'test_round_eight_delete_shapes_run_from_saves_are_refused[map-pathlib-unlink]', 'pathlib-path-class-unread'),
+    ('        if value in _PY_VALUE_COUNTED:\n            computed = True\n',
+     '        if False:\n            computed = True\n',
+     'test_round_eight_delete_shapes_run_from_saves_are_refused[map-os-remove]', 'function-value-uncounted'),
+    ('            computed = True                               # map(Path.unlink, ...) / map(pathlib.Path.unlink, ...)',
+     '            pass                               # map(Path.unlink, ...) / map(pathlib.Path.unlink, ...)',
+     'test_round_eight_delete_shapes_run_from_saves_are_refused[map-path-unlink]', 'path-method-value-uncounted'),
+    ('            value = names.get(node.id, node.id)\n        elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):\n            value = modules.get',
+     '            continue\n        elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):\n            value = modules.get',
+     'test_round_eight_delete_shapes_run_from_saves_are_refused[map-imported-remove]', 'imported-name-value-uncounted'),
+    ('    if _COMMAND_NAMES_SAVES.search(command) or _COMMAND_NAMES_SAVES.search(_bash_unquoted(command)):',
+     '    if _COMMAND_NAMES_SAVES.search(command):',
+     'test_bash_quoting_inside_a_save_word_is_seen[empty-single]', 'bash-quoting-unread'),
+    ('    text = re.sub(r"\\$\'((?:[^\'\\\\]|\\\\.)*)\'", ansi_c, command)',
+     '    text = command',
+     'test_bash_quoting_inside_a_save_word_is_seen[ansi-c]', 'ansi-c-undecoded'),
+    ('_SAVES_WORD = r"(?<![\\w.-])saves(?![\\w-])"',
+     '_SAVES_WORD = r"saves(?![\\w-])"',
+     'test_a_word_that_only_contains_saves_is_not_a_location[my-saves]', 'saves-lookbehind-dropped'),
 ]]

@@ -28,7 +28,7 @@
   - every archive extraction (`extractall`, `extract`, `shutil.unpack_archive`);
   - every relative target after an `os.chdir`.
 
-  A computed delete counts the same way (`os.remove`, `os.unlink`, `os.rmdir`, `os.removedirs`, `shutil.rmtree`, `send2trash`, `Path.unlink`/`rmdir`), so one run from inside the Saves folder (`cd Saves && python -c "[os.remove(f) for f in os.listdir()]"`), allowed in 4.0, is refused. Literal deletes are judged by the delete rules as before. `from <module> import *` brings in every counted call of that module.
+  A computed delete counts the same way (`os.remove`, `os.unlink`, `os.rmdir`, `os.removedirs`, `shutil.rmtree`, `send2trash`, `Path.unlink`/`rmdir`), so one run from inside the Saves folder (`cd Saves && python -c "[os.remove(f) for f in os.listdir()]"`), allowed in 4.0, is refused, as is a counted function handed on as a value (`map(os.remove, os.listdir())`). Literal `os.remove`, `os.unlink`, `send2trash` and `Path.unlink` targets are judged by the delete rules as before; a literal `shutil.rmtree`, `os.rmdir` or `os.removedirs` target counts as computed. `from <module> import *` brings in every counted call of that module. The save words are also read with bash quoting taken out (`Sa''ves`, `S\aves`, `$'...'`); a glob (`Sav*`) or a short 8.3 name (`MYGAME~1`) is not read.
 
   Read-only loops (`open(p, 'rb')`, `gzip.open(p)`) stay allowed.
 

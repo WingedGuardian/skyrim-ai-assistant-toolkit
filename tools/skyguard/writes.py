@@ -648,11 +648,20 @@ _PY_MODULE_OPENS = {"gzip.open": ((0, "filename"),), "bz2.open": ((0, "filename"
                     "tarfile.open": ((0, "name"),)}
 # #26 round 8 (user ruling 14:58 covers deletes): a computed delete counts as a change the guard cannot place, so one
 # run from inside the settings area (`cd Saves && python -c "[os.remove(f) for f in os.listdir()]"`, allowed in 4.0)
-# is refused. A literal delete is still placed (the literal reader returns it) and judged by deletes.py.
+# is refused. A literal os.remove/os.unlink/send2trash/Path.unlink target is still placed (the literal reader returns
+# it) and judged by deletes.py; a literal rmtree/rmdir/removedirs target counts as computed.
 _PY_DELETE_FUNCS = {"os.remove": ((0, "path"),), "os.unlink": ((0, "path"),), "os.rmdir": ((0, "path"),),
                     "os.removedirs": ((0, "name"),), "shutil.rmtree": ((0, "path"),),
                     "send2trash.send2trash": ((0, "paths"),)}
 _PY_DELETE_METHODS = frozenset(("unlink", "rmdir"))       # Path(...).unlink() / .rmdir()
+
+
+def _names_path_class(node, modules, names) -> bool:
+    """`Path`, `PurePath`, `pathlib.Path` (however imported): the receiver of an unbound `Path.unlink(p)`."""
+    if isinstance(node, ast.Name):
+        return names.get(node.id, node.id).split(".")[-1] in ("Path", "PurePath", "WindowsPath", "PosixPath")
+    return (isinstance(node, ast.Attribute) and node.attr in ("Path", "PurePath", "WindowsPath", "PosixPath") and
+            isinstance(node.value, ast.Name) and modules.get(node.value.id, node.value.id) == "pathlib")
 
 
 def _star_names() -> dict:
@@ -668,6 +677,8 @@ def _star_names() -> dict:
 
 
 _STAR_NAMES = _star_names()
+_PY_VALUE_COUNTED = (frozenset(_PY_WRITE_FUNCS) | frozenset(_PY_DELETE_FUNCS) | frozenset(_PY_EXTRACT_FUNCS) |
+                     frozenset(_PY_MODULE_OPENS)) - {"open", "io.open", "builtins.open"}
 
 
 def python_computed_writes(code: str) -> ComputedWrites:
@@ -682,7 +693,8 @@ def python_computed_writes(code: str) -> ComputedWrites:
     os.open unless os.O_RDONLY, os.truncate, copies onto a destination, links, moves (source and destination), and
     ZipFile/TarFile extractall/extract and shutil.unpack_archive. A module's `.open(file, mode)` (gzip, tarfile,
     codecs) reads its mode from the second argument; a mode chosen at run time may write. Not read (known limits):
-    getattr, exec/eval of code strings, __import__, assignment aliases of functions, subprocess-launched copies.
+    getattr, exec/eval of code strings, __import__, subprocess-launched copies. A counted function handed on as a value
+    (`map(os.remove, ...)`, `rep = os.replace`) counts as computed.
     Unparseable code returns nothing (scan's unparsed-code refusal)."""
     try:
         nodes = python_nodes(code)
@@ -758,6 +770,24 @@ def python_computed_writes(code: str) -> ComputedWrites:
     def imported(node):
         return isinstance(node, ast.Name) and (node.id in modules or node.id in names)
 
+    # A counted function handed on as a value (`map(os.remove, os.listdir())`, `list(map(Path.unlink, ...))`) changes
+    # targets this guard never sees: computed (round 8 review). Builtin open defaults to reading, so it is left out.
+    called = {id(n.func) for n in nodes if isinstance(n, ast.Call)}
+    for node in nodes:
+        if id(node) in called or not isinstance(getattr(node, "ctx", None), ast.Load):
+            continue
+        if isinstance(node, ast.Attribute) and node.attr in _PY_DELETE_METHODS | _PY_WRITE_METHODS and \
+                _names_path_class(node.value, modules, names):
+            computed = True                               # map(Path.unlink, ...) / map(pathlib.Path.unlink, ...)
+            continue
+        if isinstance(node, ast.Name):
+            value = names.get(node.id, node.id)
+        elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            value = modules.get(node.value.id, node.value.id) + "." + node.attr
+        else:
+            continue
+        if value in _PY_VALUE_COUNTED:
+            computed = True
     for node in nodes:
         if not isinstance(node, ast.Call):
             continue
@@ -780,8 +810,10 @@ def python_computed_writes(code: str) -> ComputedWrites:
                 target(node.args[0] if node.args else argument(node, 0, "target"))
             if f.attr in _PY_EXTRACT_METHODS and not receiver_is_module:
                 extraction(argument(node, *_PY_EXTRACT_METHODS[f.attr]))
-            if f.attr in _PY_DELETE_METHODS and not receiver_is_module and not node.args:
-                target(f.value)                           # Path(...).unlink() / .rmdir(); os.rmdir(x) is read by name
+            if f.attr in _PY_DELETE_METHODS and not receiver_is_module:
+                # p.unlink() / p.unlink(True) / p.rmdir() (round 8 review). An unbound Path.unlink(p) has the class as
+                # its receiver, never a literal, so it is computed too. os.rmdir(x) is read by name below.
+                target(f.value)
         name = ""
         if isinstance(f, ast.Name):
             name = names.get(f.id, f.id)
@@ -927,10 +959,23 @@ def names_save_location(text: str) -> bool:
 # Round 8 review: a word boundary, not a list of separators (`cd "$D"/Saves&& ...`), and `My\ Games` / `My%20Games`.
 _SAVES_WORD = r"(?<![\w.-])saves(?![\w-])"
 _SAVE_NAME = r"\.(?:ess|skse)\b"
-_MY_GAMES = r"my(?:\\?\s|%20)+games"
+_MY_GAMES = r"my(?:\s|%20)+games"            # `My\ Games` is read through _bash_unquoted
 _SAVE_DIRS_VAR = r"SKYRIM_SAVE_DIRS"
 _COMMAND_NAMES_SAVES = re.compile("(?i)" + "|".join((_SAVES_WORD, _SAVE_NAME, _MY_GAMES, _SAVE_DIRS_VAR)))
 _COMMAND_WORDS = re.compile(r""""([^"]*)"|'([^']*)'|((?:\\.|[^\s"';|&()<>\\])+)""")
+
+
+def _bash_unquoted(command: str) -> str:
+    """The text with bash's quoting taken out, so `Sa''ves`, `Sa""ves`, `S\\aves`, `$'Sav\\x65s'` and `My' 'Games` read
+    as the words bash passes on (round 8 review). An over-approximation used only to look for save words: a word
+    split by quotes everywhere is joined, never split."""
+    def ansi_c(m):
+        try:
+            return m.group(1).encode("latin-1", "backslashreplace").decode("unicode_escape")
+        except (UnicodeError, ValueError):
+            return m.group(1)
+    text = re.sub(r"\$'((?:[^'\\]|\\.)*)'", ansi_c, command)
+    return re.sub(r"""['"\\]""", "", text)
 
 
 def command_names_saves(command: str, base: str, roots, env) -> bool:
@@ -940,7 +985,7 @@ def command_names_saves(command: str, base: str, roots, env) -> bool:
     word that resolves into the settings area (a custom sLocalSavePath folder). Failing closed on every unknown cwd
     refused 227 ordinary scratch-folder scripts in the priced history; a cd computed at run time with no save
     location anywhere in the text is not seen (documented limit)."""
-    if _COMMAND_NAMES_SAVES.search(command):
+    if _COMMAND_NAMES_SAVES.search(command) or _COMMAND_NAMES_SAVES.search(_bash_unquoted(command)):
         return True
     for m in _COMMAND_WORDS.finditer(command):
         raw = next(g for g in m.groups() if g is not None)
