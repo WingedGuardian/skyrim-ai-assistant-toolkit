@@ -53,6 +53,30 @@ READ_LITERALS = {
 }
 
 
+ROUND5 = {
+    "renames-keywords-onto": "import os\nos.renames(old='C:/Temp/x.ess', new=r'{S}/Save1.ess')\n",
+    "renames-keywords-away": "import os\nos.renames(old=r'{S}/Save1.ess', new='C:/Temp/x.ess')\n",
+    "path-rename-target-kw": "from pathlib import Path\nPath('C:/Temp/x.ess').rename(target=r'{S}/Save1.ess')\n",
+    "path-replace-target-kw": "from pathlib import Path\nPath('C:/Temp/x.ess').replace(target=r'{S}/Save1.ess')\n",
+    "tarfile-name-kw": "import tarfile\ntarfile.open(name=r'{S}/Save1.ess', mode='w').close()\n",
+    "tarfile-class": "import tarfile\ntarfile.TarFile(r'{S}/Save1.ess', 'w').close()\n",
+    "gzip-class": "import gzip\ngzip.GzipFile(r'{S}/Save1.ess', 'wb').close()\n",
+    "star-os-rename": "from os import *\nfor n in listdir(r'{S}'):\n    rename(r'{S}/' + n, r'{S}/' + n + '.x')\n",
+    "star-shutil-move": "import glob\nfrom shutil import *\nfor f in glob.glob(r'{S}/*.ess'):\n    move(f, 'C:/Temp/')\n",
+}
+
+
+@pytest.mark.parametrize("body", list(ROUND5.values()), ids=list(ROUND5))
+def test_round_five_seams_are_closed(install, body):
+    assert decide_in(install, heredoc(body.format(S=install["saves"])), str(install["work"])) == "deny"
+
+
+def test_an_unknown_cwd_with_a_computed_write_fails_closed(install):
+    cmd = ("D='" + install["saves"] + "'; cd \"$D\" && python -c \"import zipfile; "
+           "zipfile.ZipFile('C:/Temp/b.zip').extractall()\"")
+    assert decide_in(install, cmd, str(install["work"])) == "deny"
+
+
 def _my_games(inst):
     return inst["saves"].rsplit("/", 2)[0]
 

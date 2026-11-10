@@ -34,11 +34,11 @@ KNOWN LIMITS: a save written by a script run from a file (`python fix.py`) is no
 planned for 4.2). Inline Python that writes, moves or replaces a COMPUTED target is refused as S-SAVE-UNKNOWN when
 any literal shaped like a path names a save or has a `Saves` component, or a path-position or filter literal does
 (`Path(D) / 'Saves'`, `glob('*.ess')`, `n.endswith('.ess')`, `p.suffix == '.ess'`), or a literal resolves to the
-settings folder, or the code runs from inside the settings area (writes.python_computed_writes / _location_literals,
+settings folder, or the code runs from inside the settings area or an unknown cwd (writes.python_computed_writes / _location_literals,
 #26). Text inside a write/log call or a text edit's arguments, multi-line strings and command lines are not a
-location (text assigned to a name first can be). Fail closed: a literal target is placed only for the calls and modes
-the literal reader judges (open/io.open with a literal mode, Path write_bytes/write_text/.open(literal), os.truncate,
-copies, moves); everything else is computed -- names, `/` chains, os.path.join, FileIO, os.open, touch, links, module
+location (text assigned to a name first can be). Fail closed: a literal target is placed only when the literal reader
+itself returns it (open/io.open with a literal mode, Path write_bytes/write_text/.open(literal), os.truncate,
+positional or src=/dst= copies and moves); everything else is computed -- names, `/` chains, os.path.join, FileIO, os.open, touch, links, module
 opens, run-time modes, every archive extraction and, after an os.chdir, every relative target. Not seen: computed
 targets in code whose literals name no save location, run from outside the settings area, getattr/exec/__import__/function aliases/launched processes, and other interpreters' computed
 paths (literal paths in `python -c` and `node -e` moves and copies are); neither is an archive unpacked

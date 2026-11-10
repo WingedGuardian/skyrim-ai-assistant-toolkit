@@ -18,13 +18,13 @@
   - a path-shaped literal anywhere (a helper's argument, a default parameter, an argv fallback, a tuple, `+=`, `os.path.join(docs, 'My Games', 'Skyrim VR', 'Saves')`) that names a save or a `Saves` folder;
   - a bare `'Saves'`, `'*.ess'` or `.ess` filter in a path position (`Path(D) / 'Saves'`, `glob('*.ess')`, `n.endswith('.ess')`, `p.suffix == '.ess'`);
   - a literal that resolves to the settings folder from where the code runs;
-  - or the code runs from inside the settings area itself (`cd Saves && python -c "...extractall()"`).
+  - or the code runs from inside the settings area itself (`cd Saves && python -c "...extractall()"`), or from a folder the guard cannot work out (`cd "$D"`).
 
   Text is not a location when it sits in the write or log call itself or in a text edit's arguments, and multi-line strings and command lines held as data never count. Text first assigned to a name and then written can still count.
 
-  The rule fails closed. A literal target is placed only for the calls and modes the existing literal reader judges: `open`/`io.open` with a literal mode, `Path(...).write_bytes`/`write_text`/`.open(<literal mode>)`, `os.truncate`, copies and moves. So a literal save is backed up as before there, and a literal report path stays allowed (#10). Everything else counts as computed:
+  The rule fails closed. A literal target is placed only when the existing literal reader itself returns that literal: `open`/`io.open` with a literal mode, `Path(...).write_bytes`/`write_text`/`.open(<literal mode>)`, `os.truncate`, and positional or `src=`/`dst=` copies and moves. So a literal save is backed up as before there, and a literal report path stays allowed (#10). Everything else counts as computed:
   - a target reached through a name, a `/` chain or `os.path.join`;
-  - `io.FileIO`, `os.open`, `touch`, links, `gzip.open(...,'wb')`, `zipfile.ZipFile(...,'w')` and a mode chosen at run time, literal or not;
+  - `io.FileIO`, `os.open`, `touch`, links, `gzip.open(...,'wb')`, `zipfile.ZipFile(...,'w')`, the `tarfile`/`gzip`/`bz2`/`lzma` file classes, keyword spellings the literal reader does not read (`os.renames(old=, new=)`, `Path.rename(target=)`), and a mode chosen at run time, literal or not;
   - every archive extraction (`extractall`, `extract`, `shutil.unpack_archive`);
   - every relative target after an `os.chdir`.
 
