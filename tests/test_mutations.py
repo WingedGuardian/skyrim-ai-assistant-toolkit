@@ -12743,3 +12743,42 @@ MUTATIONS += [pytest.param(
     "                for item in [given]:",
     "tests/test_review_v4_35f8_fixes.py::test_a_star_import_or_a_set_of_saves_is_read",
     id="i26-delete-list-not-split")]
+# Headless cleanup when a SteamVR helper exits by itself (ported from the Souls lifecycle repair, 2026-11-09).
+# One twin per clause of vr_background_desktop.terminate_verified's proved-exit excuse, plus the stop wiring.
+_HX = "tests/test_headless_helper_exit.py::"
+MUTATIONS += [pytest.param(path, anchor, replacement, _HX + test, id="helper-exit-" + name)
+              for path, anchor, replacement, test, name in [
+    ("tools/vr_background_desktop.py", "        if error == 87 and process_generation_limited(pid) is None:\n",
+     "        if False:\n", "test_a_helper_already_gone_is_recorded_as_exited", "gone-not-excused"),
+    ("tools/vr_background_desktop.py", "        if error == 87 and process_generation_limited(pid) is None:\n",
+     "        if error == 87:\n", "test_an_unopenable_pid_still_listed_keeps_its_error", "gone-unproved"),
+    ("tools/vr_background_desktop.py", "        if error == 87 and process_generation_limited(pid) is None:\n",
+     "        if process_generation_limited(pid) is None:\n", "test_open_access_denied_is_never_an_exit",
+     "open-denied-excused"),
+    ("tools/vr_background_desktop.py", "            if kernel32.WaitForSingleObject(handle, int(EXIT_SETTLE_SECONDS * 1000)) == 0:",
+     "            if False:", "test_real_process_that_exited_while_a_handle_holds_it_is_exited", "rundown-not-excused"),
+    ("tools/vr_background_desktop.py", "            if kernel32.WaitForSingleObject(handle, int(EXIT_SETTLE_SECONDS * 1000)) == 0:",
+     "            if True:", "test_a_live_helper_that_refuses_termination_keeps_its_error", "live-failure-excused"),
+    ("tools/vr-headless.py", '            if terminate_verified(x["Id"], x["StartTime"]) == "exited":',
+     "            if terminate_verified(x[\"Id\"], x[\"StartTime\"]) and False:",
+     "test_stop_completes_when_a_helper_exits_by_itself", "stop-ignores-exited"),
+]]
+MUTATIONS += [pytest.param("tools/vr-headless.py", anchor, replacement, _HX + test, id="helper-exit-" + name)
+              for anchor, replacement, test, name in [
+    ("                if census is None:\n", "                if True:\n",
+     "test_many_late_helpers_are_all_terminated_within_the_budget", "census-per-helper"),
+    ("        if passes and time.monotonic() > deadline:\n", "        if time.monotonic() > deadline:\n",
+     "test_a_census_slower_than_the_whole_budget_still_terminates_what_it_proved", "deadline-before-first-pass"),
+]]
+# A failure while the managed game runs (Souls control05 shape): the toolkit keeps the orderly quit and the error.
+_RF = "tests/test_headless_run_failure.py::"
+MUTATIONS += [pytest.param("tools/vr-headless.py", anchor, replacement, _RF + test, id="run-failure-" + name)
+              for anchor, replacement, test, name in [
+    ("            rc = cmd_stop()                      # owned processes exist: orderly exit, then restore",
+     "            rc = cmd_off()                      # owned processes exist: orderly exit, then restore",
+     "test_a_failure_while_the_game_runs_still_quits_it_once_then_restores[inventory]", "cleanup-without-quit"),
+    ("        error = e\n        raise\n    finally:\n", "        error = e\n        return 2\n    finally:\n",
+     "test_a_failure_while_the_game_runs_still_quits_it_once_then_restores[ctrl-c]", "ctrl-c-swallowed"),
+    ('            print("ERROR during the managed session', '            (lambda *a, **k: None)("ERROR during the managed session',
+     "test_the_original_error_survives_a_cleanup_that_also_fails", "original-error-dropped"),
+]]

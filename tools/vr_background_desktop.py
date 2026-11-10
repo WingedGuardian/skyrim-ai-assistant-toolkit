@@ -229,16 +229,36 @@ def process_generation_limited(pid):
         kernel32.CloseHandle(handle)
 
 
-def terminate_verified(pid, start_time: str) -> None:
-    """Terminate one owned process, re-checking its creation time on the OPENED handle first (PID reuse)."""
+EXIT_SETTLE_SECONDS = 5
+
+
+def terminate_verified(pid, start_time: str) -> str:
+    """Terminate one owned process, re-checking its creation time on the OPENED handle first (PID reuse).
+
+    Returns "terminated", or "exited" when the recorded process ended by itself first. Stopping a parent SteamVR web
+    helper makes its Chromium children exit on their own, so this is the normal case during cleanup (measured in the
+    Souls lifecycle repair, 2026-11-09): such a child is already gone when it is opened (ERROR_INVALID_PARAMETER),
+    or it is running down, when TerminateProcess fails with ERROR_ACCESS_DENIED until its handle signals. Either
+    failure is excused only when the exit is proved: a complete process snapshot without the PID, or this handle
+    signalling within EXIT_SETTLE_SECONDS. A live process keeps its original error."""
     _, kernel32, w = _api()
-    handle = _check(kernel32.OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid)))
+    handle = kernel32.OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, int(pid))
+    if not handle:
+        error = ctypes.get_last_error()
+        if error == 87 and process_generation_limited(pid) is None:
+            return "exited"
+        raise ctypes.WinError(error)
     try:
         times = [w.FILETIME() for _ in range(4)]
         _check(kernel32.GetProcessTimes(handle, *[ctypes.byref(t) for t in times]))
         if abs((_filetime(times[0]) - parse_start(start_time)).total_seconds()) > 0.001:
             raise RuntimeError("PID {} was reused by another process; refusing to terminate it".format(pid))
-        _check(kernel32.TerminateProcess(handle, 0))
+        if not kernel32.TerminateProcess(handle, 0):
+            error = ctypes.get_last_error()
+            if kernel32.WaitForSingleObject(handle, int(EXIT_SETTLE_SECONDS * 1000)) == 0:   # WAIT_OBJECT_0
+                return "exited"
+            raise ctypes.WinError(error)
+        return "terminated"
     finally:
         kernel32.CloseHandle(handle)
 

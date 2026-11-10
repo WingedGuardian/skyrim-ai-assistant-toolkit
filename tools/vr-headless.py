@@ -331,9 +331,10 @@ def process_alive(pid, start) -> bool:
         raise ProcessReadError("the owned process handle could not be read: {}".format(e)) from e
 
 
-def terminate_verified(pid, start) -> None:
+def terminate_verified(pid, start) -> str:
+    """"terminated", or "exited" when the recorded process proved it ended by itself first."""
     import vr_background_desktop as d
-    d.terminate_verified(pid, start)
+    return d.terminate_verified(pid, start)
 
 
 def parent_pid(pid):
@@ -1146,17 +1147,20 @@ def stop_owned(st) -> dict:
             time.sleep(1)                                       # paced: DevBench may answer at once, or not at all
     elif games and not wait_until_exited(games, port, deadline=time.monotonic() + 60):
         raise Refused("the owned SKSE loader is still running; the session is kept")
-    stopped = []
-    deadline = time.monotonic() + 15
+    stopped, exited = [], []
+    deadline, passes = time.monotonic() + 15, 0
     while True:
         running = read_processes()
+        census = None                         # one process census per pass: each costs a PowerShell CIM query
         for x in running:                     # late helpers need the same ownership proof as launch
             if (x["ProcessName"] in VR_NAMES and x["ProcessName"] not in GAME_NAMES and x.get("Path") and
                     not any(same_process(x, o) for o in owned) and
                     not any(same_process(x, o) for o in session.get("observed_runtime", []))):
+                if census is None:
+                    census = read_process_tree()
                 desk = make_desktop(session["desktop_mode"], session["desktop"])
                 try:
-                    proved = proven_process(x, session, read_process_tree(), desk)
+                    proved = proven_process(x, session, census, desk)
                 finally:
                     desk.close()
                 if proved:
@@ -1167,13 +1171,19 @@ def stop_owned(st) -> dict:
                    any(same_process(x, o) for o in owned)]
         if not helpers:
             break
-        if time.monotonic() > deadline:
+        # Every pass terminates what it proved before the deadline counts (Souls control06: proving ~14 helpers used
+        # the whole budget, and nothing was ever terminated).
+        if passes and time.monotonic() > deadline:
             raise Refused("the owned SteamVR helpers have not stopped; the session is kept")
+        passes += 1
         for x in helpers:
-            terminate_verified(x["Id"], x["StartTime"])
-            stopped.append(x["Id"])
+            if terminate_verified(x["Id"], x["StartTime"]) == "exited":
+                exited.append(x["Id"])           # it ended by itself (a stopped parent's child); nothing was sent
+            else:
+                stopped.append(x["Id"])
         time.sleep(0.5)
-    session["cleanup"] = {"game_exited": True, "helpers_stopped": stopped, "steam_left_running": True}
+    session["cleanup"] = {"game_exited": True, "helpers_stopped": stopped, "helpers_exited": exited,
+                          "steam_left_running": True}
     save_state(st)
     return session["cleanup"]
 
