@@ -840,7 +840,149 @@ def python_computed_writes(code: str) -> ComputedWrites:
             continue
         for index, keyword in _PY_WRITE_FUNCS[name]:
             target(argument(node, index, keyword))
+    # #26 conservative scan (user decision 2026-11-10, after six review rounds each found another spelling of a change
+    # call: `shutil.os.remove`, `p.rename` passed as a value, ...): the named calls above are not the whole set. Every
+    # other call must be a known read; a call this guard does not know counts as computed (fail closed by construction).
+    if not computed and _unread_call(nodes, modules, names):
+        computed = True
     return ComputedWrites(computed, tuple(_location_literals(nodes)) + tuple(extracted))
+
+
+# The conservative scan's known reads (#26, user decision 2026-11-10). A call is known when it is one the write logic
+# above already judges, or one of these. Everything else -- an unknown module function, a method this list does not
+# name, a call through a subscript or another call -- counts as a possible change. Ambiguous names (`remove`: a list
+# or os; `add`) are deliberately not here: in code that names a save location they are refused.
+_JUDGED_CALLS = (frozenset(_PY_WRITE_FUNCS) | frozenset(_PY_DELETE_FUNCS) | frozenset(_PY_EXTRACT_FUNCS) |
+                 frozenset(_PY_MODULE_OPENS) | frozenset(_PY_MODE_AT) |
+                 {"codecs.open", "os.chdir", "chdir", "zipfile.ZipFile", "tarfile.TarFile", "tarfile.open"})
+_JUDGED_METHODS = _PY_WRITE_METHODS | _PY_DELETE_METHODS | frozenset((
+    "open", "rename", "replace", "extractall", "extract",
+    "write", "writelines", "flush"))                  # a file object: its open() was judged for its mode
+_READ_BUILTINS = frozenset((
+    "print", "len", "sorted", "list", "dict", "set", "frozenset", "tuple", "str", "int", "float", "bool", "bytes",
+    "range", "enumerate", "zip", "map", "filter", "min", "max", "sum", "any", "all", "abs", "round", "repr", "ascii",
+    "isinstance", "issubclass", "hasattr", "type", "iter", "next", "reversed", "format", "ord", "chr", "hex", "oct",
+    "bin", "divmod", "hash", "id", "callable", "super", "object", "slice", "complex", "pow", "exit", "quit"))
+_READ_MODULES = ("json", "hashlib", "re", "math", "struct", "datetime", "time", "os.path", "glob", "fnmatch",
+                 "collections", "itertools", "base64", "binascii", "statistics", "textwrap", "string", "difflib",
+                 "pprint", "platform", "locale", "decimal", "fractions", "typing", "enum", "dataclasses",
+                 "unicodedata", "copy", "random", "html", "sys", "argparse", "shlex", "uuid", "zlib", "traceback",
+                 "functools", "xml.etree", "configparser", "csv", "pathlib", "ntpath", "posixpath")
+_READ_FUNCS = frozenset((
+    "os.listdir", "os.scandir", "os.walk", "os.stat", "os.lstat", "os.getcwd", "os.getenv", "os.fspath",
+    "os.cpu_count", "os.getpid", "os.environ.get", "os.get_terminal_size", "os.urandom", "os.fsencode", "os.fsdecode",
+    "os.close", "os.read", "os.fstat", "os.lseek",                          # a descriptor os.open was judged for
+    "io.StringIO", "io.BytesIO", "io.TextIOWrapper", "zipfile.is_zipfile", "tarfile.is_tarfile", "Path", "PurePath",
+    # a save's body is LZ4-compressed: read-only save audits decompress it (priced: 5 such audits, 2026-11-10)
+    "lz4.block.decompress", "lz4.frame.decompress"))
+_READ_METHODS = frozenset((
+    "read", "read_text", "read_bytes", "readline", "readlines", "exists", "is_file", "is_dir", "is_symlink", "iterdir",
+    "glob", "rglob", "stat", "lstat", "resolve", "absolute", "relative_to", "is_relative_to", "with_suffix",
+    "with_name", "with_stem", "joinpath", "as_posix", "as_uri", "match", "samefile", "expanduser", "home", "cwd",
+    "split", "rsplit", "splitlines", "strip", "lstrip", "rstrip", "lower", "upper", "casefold", "title",
+    "capitalize", "swapcase", "startswith", "endswith", "join", "format", "format_map", "encode", "decode", "get",
+    "keys", "values", "items", "append", "extend", "insert", "pop", "sort", "index", "count", "find", "rfind",
+    "partition", "rpartition", "zfill", "center", "ljust", "rjust", "isdigit", "isalpha", "isalnum", "isspace",
+    "islower", "isupper", "isnumeric", "isdecimal", "isidentifier", "isprintable", "expandtabs", "translate",
+    "maketrans", "removeprefix", "removesuffix", "hexdigest", "digest", "update", "copy", "setdefault", "fromkeys",
+    "most_common", "namelist", "infolist", "getinfo", "getmembers", "getnames", "getmember", "extractfile", "close",
+    "seek", "tell", "fileno", "isatty", "readable", "seekable", "group", "groups", "groupdict", "span", "start", "end",
+    "findall", "finditer", "search", "fullmatch", "sub", "subn", "loads", "dumps", "total_seconds", "isoformat",
+    "strftime", "timestamp", "date", "time", "difference", "union", "intersection", "issubset", "issuperset",
+    "is_absolute", "to_bytes", "from_bytes", "bit_length", "hex", "fromhex", "unpack", "unpack_from", "pack",
+    "pack_into", "iter_unpack", "isoweekday", "weekday", "now", "utcnow", "today", "fromtimestamp",
+    "fromisoformat", "strptime", "astimezone", "ljust", "parse_args", "add_argument", "add_mutually_exclusive_group",
+    "getvalue", "most_common", "elements", "clear", "reverse", "popleft", "appendleft", "keys", "__enter__",
+    "__exit__", "__init__", "is_mount", "owner", "group", "readlink", "samestat", "items"))
+
+
+_READ_DATA = frozenset((                               # module attributes that are values, not functions
+    "os.sep", "os.altsep", "os.linesep", "os.pathsep", "os.curdir", "os.pardir", "os.extsep", "os.devnull",
+    "os.environ", "os.name", "os.O_RDONLY", "os.O_BINARY", "os.SEEK_SET", "os.SEEK_CUR", "os.SEEK_END"))
+
+
+_REROOT = frozenset(("os", "nt", "posix", "shutil", "subprocess", "io", "pathlib", "zipfile", "tarfile", "gzip",
+                     "bz2", "lzma", "send2trash", "ctypes", "importlib", "builtins"))
+
+
+def _unread_call(nodes, modules, names) -> bool:
+    """A call this guard neither judges nor knows to be a read (see the tables above)."""
+    local = {n.name for n in nodes if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+    local |= {t.id for n in nodes if isinstance(n, ast.Assign) and isinstance(n.value, ast.Lambda)
+              for t in n.targets if isinstance(t, ast.Name)}
+
+    def dotted(node):
+        """`a.b.c` from a module name, or None when the chain does not start at an imported module."""
+        if isinstance(node, ast.Name):
+            if node.id in modules:
+                return modules[node.id]
+            if any(k.split(".")[0] == node.id for k in modules):     # `import lz4.block` binds `lz4`
+                return node.id
+            return names.get(node.id) if node.id in names else None
+        if isinstance(node, ast.Attribute):
+            head = dotted(node.value)
+            return head + "." + node.attr if head else None
+        return None
+
+    def known(name):
+        parts = name.split(".")
+        # A module reached through another (`os.path.os.remove`, `shutil.os.remove`) is that module: re-root the
+        # chain at its last such segment (a container, not the called name) before judging it (round 10 review).
+        # The write logic judges only calls on a module named directly, so a re-rooted call must be a known read.
+        rerooted = False
+        for i in range(len(parts) - 2, 0, -1):
+            if parts[i] in _REROOT:
+                parts, rerooted = [_OS_SPELLINGS.get(parts[i], parts[i])] + parts[i + 1:], True
+                break
+        name = ".".join(parts)
+        data = next((d for d in _READ_DATA if name.startswith(d + ".")), None)
+        if data is not None:                              # a method on a module value: `os.sep.join(...)`
+            return parts[-1] in _READ_METHODS
+        return ((name in _JUDGED_CALLS and not rerooted) or name in _READ_FUNCS or
+                any(name == m or name.startswith(m + ".") for m in _READ_MODULES))
+
+    # A function handed on as a value is called where this guard cannot see (`map(subprocess.call, ...)`,
+    # `map(Path.rename, ...)`): a module function or a judged method referenced but not called must be a known read.
+    called = {id(n.func) for n in nodes if isinstance(n, ast.Call)}
+    inner = {id(n.value) for n in nodes if isinstance(n, ast.Attribute)}
+    for node in nodes:
+        if id(node) in called or id(node) in inner or not isinstance(getattr(node, "ctx", None), ast.Load):
+            continue
+        if isinstance(node, ast.Attribute) and node.attr in _JUDGED_METHODS:
+            return True
+        name = (dotted(node) if isinstance(node, ast.Attribute) else
+                names.get(node.id) if isinstance(node, ast.Name) and node.id not in local else None)
+        if name is not None and not known(name) and name not in _READ_DATA:
+            return True
+    for node in nodes:
+        if not isinstance(node, ast.Call):
+            continue
+        f = node.func
+        if isinstance(f, ast.Name):
+            if f.id in local or f.id in _READ_BUILTINS or re.search(r"(?:Error|Exception|Warning)$", f.id):
+                continue
+            if f.id in names:
+                if known(names[f.id]):
+                    continue
+                return True
+            if f.id in _JUDGED_CALLS or f.id in _READ_FUNCS:
+                continue
+            return True                                   # an unknown name: a variable holding any callable
+        if isinstance(f, ast.Attribute):
+            name = dotted(f)
+            if name is not None:                          # a module function, however deep (`shutil.os.remove`)
+                if known(name):
+                    continue
+                return True
+            if f.attr in _READ_METHODS or f.attr in _JUDGED_METHODS:
+                continue
+            return True
+        if isinstance(f, ast.Lambda):
+            continue
+        return True                                       # a call through a subscript or another call's result
+    return False
+
+
 
 
 # A literal outside a path position names a location only when it is shaped like a path: it starts with a drive, a

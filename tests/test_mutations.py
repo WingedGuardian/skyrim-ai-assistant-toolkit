@@ -12828,3 +12828,32 @@ MUTATIONS += [pytest.param(_W, anchor, replacement, "tests/test_issue26_round9.p
     ('    return re.sub(r"""[\'"\\\\]""", "", text)', '    return re.sub(r"""[\'"]""", "", text)',
      'test_bash_quoting_inside_a_save_word_is_seen[backslash]', 'quote-strip-narrowed'),
 ]]
+# #26 conservative scan (user decision 2026-11-10): every call judged or a known read; one twin per clause.
+_T11 = "tests/test_issue26_round11.py::"
+MUTATIONS += [pytest.param(_W, anchor, replacement, _T11 + test, id="i26-" + name)
+              for anchor, replacement, test, name in [
+    ("    if not computed and _unread_call(nodes, modules, names):", "    if False:",
+     "test_an_unknown_change_run_from_saves_is_refused[subprocess]", "conservative-scan-unwired"),
+    ("                parts, rerooted = [_OS_SPELLINGS.get(parts[i], parts[i])] + parts[i + 1:], True", "                pass",
+     "test_an_unknown_change_run_from_saves_is_refused[os-path-os-remove]", "module-chain-not-rerooted"),
+    ("        return ((name in _JUDGED_CALLS and not rerooted) or name in _READ_FUNCS or",
+     "        return ((name in _JUDGED_CALLS) or name in _READ_FUNCS or",
+     "test_an_unknown_change_run_from_saves_is_refused[shutil-os-remove]", "rerooted-judged-trusted"),
+    ("        if isinstance(node, ast.Attribute) and node.attr in _JUDGED_METHODS:\n            return True",
+     "        if False:\n            return True",
+     "test_an_unknown_change_run_from_saves_is_refused[map-path-rename]", "judged-method-value-trusted"),
+    ("        if name is not None and not known(name) and name not in _READ_DATA:", "        if False:",
+     "test_an_unknown_change_run_from_saves_is_refused[map-subprocess]", "unknown-function-value-trusted"),
+    ("                names.get(node.id) if isinstance(node, ast.Name) and node.id not in local else None)", "                None)",
+     "test_an_unknown_change_run_from_saves_is_refused[imported-call-value]", "imported-name-value-unread"),
+    ("        if data is not None:                              # a method on a module value: `os.sep.join(...)`",
+     "        if False:",
+     "test_a_read_only_audit_run_from_saves_stays_allowed[os-data]", "module-data-method-unknown"),
+    ('            if any(k.split(".")[0] == node.id for k in modules):     # `import lz4.block` binds `lz4`', "            if False:",
+     "test_a_read_only_lz4_save_parse_stays_allowed", "package-import-unbound"),
+    ('    "lz4.block.decompress", "lz4.frame.decompress"))', "    ))",
+     "test_a_read_only_lz4_save_parse_stays_allowed", "lz4-read-unknown"),
+    ("                return True\n            if f.attr in _READ_METHODS or f.attr in _JUDGED_METHODS:",
+     "                continue\n            if f.attr in _READ_METHODS or f.attr in _JUDGED_METHODS:",
+     "test_an_unknown_change_run_from_saves_is_refused[unknown-module]", "unknown-module-function-trusted"),
+]]
