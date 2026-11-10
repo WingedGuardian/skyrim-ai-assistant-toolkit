@@ -155,3 +155,46 @@ def test_stop_completes_when_a_helper_exits_by_itself(tree, world, capsys):
     cleanup = json.loads(line[len("stopped: "):])
     assert cleanup["helpers_exited"] == [11] and cleanup["helpers_stopped"] == []
     assert mod.load_state() is None
+
+
+# --- stop: the cleanup budget is not spent proving late helpers before any of them is terminated
+
+def test_many_late_helpers_are_all_terminated_within_the_budget(tree, world, monkeypatch):
+    """Souls control06 shape: each late helper's ownership proof used to run its own process census (one PowerShell
+    CIM query, ~2 s here), and the 15 s deadline was checked before the first termination, so with ~10 late helpers
+    nothing was ever terminated. One census per pass, and every pass terminates what it proved first."""
+    from test_vr_headless import proc
+    mod = tree["mod"]
+    launch_session(tree, world)
+    world.game_exits()
+    late = [proc(30 + i, "vrmonitor", str(tree["vr"] / "bin" / "vrmonitor.exe")) for i in range(10)]
+    world.procs += late
+    tree_read = mod.read_process_tree
+    calls = []
+
+    def slow_census():
+        calls.append(world.clock.now)
+        world.clock.now += 2                      # one CIM query
+        return [dict(p, ParentId=11) if p["Id"] >= 30 else p for p in tree_read()]
+
+    monkeypatch.setattr(mod, "read_process_tree", slow_census)
+    mod.stop_owned(mod.load_state())
+    assert sorted(x for x in world.terminated if x >= 30) == [p["Id"] for p in late]
+    assert len(calls) <= 2, "one census per cleanup pass, not one per helper"
+
+
+def test_a_census_slower_than_the_whole_budget_still_terminates_what_it_proved(tree, world, monkeypatch):
+    from test_vr_headless import proc
+    mod = tree["mod"]
+    launch_session(tree, world)
+    world.game_exits()
+    world.procs.append(proc(40, "vrmonitor", str(tree["vr"] / "bin" / "vrmonitor.exe")))
+    tree_read = mod.read_process_tree
+
+    def stalled_census():
+        world.clock.now += 16                     # the machine is loaded: one census outlasts the 15 s budget
+        return [dict(p, ParentId=11) if p["Id"] == 40 else p for p in tree_read()]
+
+    monkeypatch.setattr(mod, "read_process_tree", stalled_census)
+    mod.stop_owned(mod.load_state())
+    assert 40 in world.terminated

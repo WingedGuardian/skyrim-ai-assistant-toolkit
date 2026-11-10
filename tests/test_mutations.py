@@ -12710,3 +12710,10 @@ MUTATIONS += [pytest.param(path, anchor, replacement, _HX + test, id="helper-exi
      "            if terminate_verified(x[\"Id\"], x[\"StartTime\"]) and False:",
      "test_stop_completes_when_a_helper_exits_by_itself", "stop-ignores-exited"),
 ]]
+MUTATIONS += [pytest.param("tools/vr-headless.py", anchor, replacement, _HX + test, id="helper-exit-" + name)
+              for anchor, replacement, test, name in [
+    ("                if census is None:\n", "                if True:\n",
+     "test_many_late_helpers_are_all_terminated_within_the_budget", "census-per-helper"),
+    ("        if passes and time.monotonic() > deadline:\n", "        if time.monotonic() > deadline:\n",
+     "test_a_census_slower_than_the_whole_budget_still_terminates_what_it_proved", "deadline-before-first-pass"),
+]]
