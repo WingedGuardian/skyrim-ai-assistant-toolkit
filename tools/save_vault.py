@@ -165,10 +165,45 @@ def discover(project, extra=(), env=None):
     return list(unique.values())
 
 
+def config_root(env=None):
+    """The INI vault sits beside the save vault: <save vault>-config."""
+    root = default_root(env)
+    return root.with_name(root.name + "-config")
+
+
+def discover_config(project, env=None):
+    """The game's config folders (Documents/My Games/<edition>, as Windows reports Documents, plus SKYRIM_CONFIG_DIR):
+    the INIs there have no other copy anywhere (user ruling 2026-11-10: keep every version of them too)."""
+    env = dict(os.environ if env is None else env)
+    if env.get("SAVE_VAULT_CONFIG_FOLDERS"):
+        found = [Path(p) for p in env["SAVE_VAULT_CONFIG_FOLDERS"].split(os.pathsep) if p]
+    else:
+        from skyguard import mcp_rules, paths, save_sentinel
+        cfg = paths.read_install(str(project), env)
+        known = [] if env.get("SKYGUARD_NO_KNOWN_FOLDERS") == "1" else save_sentinel._known_documents()
+        docs = list(dict.fromkeys(mcp_rules._documents(env) + known))
+        found = [Path(d) / "My Games" / g for d in docs for g in paths.GAME_FOLDERS]
+        for value in paths._values(cfg, "SKYRIM_CONFIG_DIR") + [env.get("SKYRIM_CONFIG_DIR", "")]:
+            found += [Path(v) for v in value.split(os.pathsep) if v]
+    unique = {}
+    for folder in found:
+        try:
+            if folder.is_dir():
+                unique.setdefault(os.path.normcase(os.path.abspath(folder)), folder.absolute())
+        except OSError:
+            continue
+    return list(unique.values())
+
+
+INI_EXTS = (".ini",)
+
+
 # --------------------------------------------------------------------------- the vault
 
 class Vault:
-    def __init__(self, root, folders, is_busy=busy, clock=time.time, reserve_gb=None):
+    def __init__(self, root, folders, is_busy=busy, clock=time.time, reserve_gb=None, exts=EXTS):
+        """exts: the member suffixes of one kept item, in order (saves: .ess + .skse as a pair; INIs: .ini alone)."""
+        self.exts = tuple(exts)
         self.root = Path(root).absolute()
         self.folders = [Path(f).absolute() for f in folders]
         self.is_busy = is_busy
@@ -271,16 +306,19 @@ class Vault:
         return canonical(folder) + "|" + stem.casefold()
 
     def scan(self):
-        """({key: pair}, readable folders, stale .tmp names) from os.scandir alone."""
+        """({key: pair}, readable folders, stale .tmp names) from os.scandir alone. Unreadable folders: self.unreadable."""
         pairs, readable, stale = {}, set(), []
+        self.unreadable = []
         now = self.clock()
         for folder in self.folders:
             try:
                 with os.scandir(folder) as it:
                     entries = list(it)
             except OSError:
+                self.unreadable.append(str(folder))
                 continue
-            readable.add(canonical(folder))
+            ckey = canonical(folder)                               # once per folder (a directory handle only)
+            readable.add(ckey)
             tmp_age = {}
             for entry in entries:
                 low = entry.name.lower()
@@ -291,7 +329,7 @@ class Vault:
                         tmp_age[low[:-4]] = 0.0
             for entry in entries:
                 low = entry.name.lower()
-                ext = next((e for e in EXTS if low.endswith(e)), None)  # exact suffix: X.ess.tmp never matches
+                ext = next((e for e in self.exts if low.endswith(e)), None)  # exact suffix: X.ess.tmp never matches
                 if ext is None:
                     continue
                 try:
@@ -301,14 +339,15 @@ class Vault:
                 except OSError:
                     continue
                 stem = entry.name[:-len(ext)]
-                key = self.key_of(folder, stem)
-                pair = pairs.setdefault(key, {"folder": str(folder), "stem": stem, "members": {}, "tmp": False})
+                key = ckey + "|" + stem.casefold()
+                pair = pairs.setdefault(key, {"folder": str(folder), "ckey": ckey, "stem": stem, "members": {},
+                                              "tmp": False})
                 pair["members"][ext] = {"path": os.path.join(str(folder), entry.name), "size": st.st_size,
                                         "mtime_ns": st.st_mtime_ns, "mtime": st.st_mtime}
             for key, pair in pairs.items():
-                if canonical(pair["folder"]) != canonical(folder):
+                if pair["ckey"] != ckey:
                     continue
-                for e in EXTS:
+                for e in self.exts:
                     age = tmp_age.get((pair["stem"] + e).lower())
                     if age is None:
                         continue
@@ -318,7 +357,7 @@ class Vault:
                         stale.append(os.path.join(str(folder), pair["stem"] + e + ".tmp"))
         for pair in pairs.values():
             pair["sig"] = [[pair["members"][e]["size"], pair["members"][e]["mtime_ns"]] if e in pair["members"] else None
-                           for e in EXTS]
+                           for e in self.exts]
             pair["newest"] = max(m["mtime"] for m in pair["members"].values())
         return pairs, readable, stale
 
@@ -341,44 +380,68 @@ class Vault:
             return False
         if now - pair["newest"] < SETTLE_S:
             return False
-        if len(pair["members"]) < len(EXTS) and now - pair["newest"] < PAIR_GRACE_S:
+        if len(pair["members"]) < len(self.exts) and now - pair["newest"] < PAIR_GRACE_S:
             return False                                           # wait for the partner
         return True
 
     # ---- capture
-    def _same_volume(self, path):
+    def _same_volume(self, folder):
+        """A directory stat on each side (measured harmless to the game's replace); never the save itself."""
         try:
-            return os.stat(os.path.dirname(path)).st_dev == os.stat(self.root).st_dev
+            return os.stat(folder).st_dev == os.stat(self.root).st_dev
         except OSError:
             return False
 
-    def capture(self, key, pair):
-        """Keep one settled version of a pair; its event, or None if the files moved on (or it is already kept)."""
+    def _writing_now(self, pair):
+        """A .tmp sibling younger than TMP_LIVE_S: the game started saving this pair. Stats the .tmp NAME only."""
+        for ext in self.exts:
+            try:
+                st = os.stat(os.path.join(pair["folder"], pair["stem"] + ext + ".tmp"))
+            except OSError:
+                continue
+            if self.clock() - st.st_mtime < TMP_LIVE_S:
+                return True
+        return False
+
+    def capture(self, key, pair, ignore_tmp=False):
+        """Keep one settled version of a pair; its event, or None if the files moved on (or it is already kept).
+
+        The only open of a live save by its name is the os.link per member (unavoidable: a file is opened to be
+        named again). Right before it, a fresh look at the .tmp names (never the save) skips a pair the game has
+        started to save; the game writes that .tmp for many milliseconds before its replace, the link takes
+        microseconds. The store is handed the LINK as the member's original, so its own path resolution touches
+        only the link; the live paths are recorded in the event, and restore() writes from there."""
         with self._capture_lock():
             kept = self.kept()
             was = kept["pairs"].get(key)
             if was and was.get("sig") == pair["sig"] and not was.get("gone"):
                 return None                                        # another process kept it meanwhile
+            same_volume = self._same_volume(pair["folder"])
+            if not ignore_tmp and self._writing_now(pair):
+                return None
             links, members, held = [], [], []
             try:
                 # Name every member first (microseconds apart), so the pair cannot straddle one of the game's saves;
                 # check and hash only afterwards.
-                for ext in EXTS:
+                for ext in self.exts:
                     member = pair["members"].get(ext)
                     if member is None:
                         continue
                     link = self.root / "staging-links" / (uuid.uuid4().hex + "-" + Path(member["path"]).name)
                     links.append(link)
                     try:
-                        os.link(member["path"], link)                      # no handle stays on the live save
+                        if not same_volume:
+                            raise OSError("another volume")
+                        os.link(member["path"], link)
                         held.append((ext, member, link, False))
                     except OSError:
                         held.append((ext, member, link, True))
                 for ext, member, link, copied in held:
                     if copied:
-                        # Locked (the game cannot replace it either) or on another volume (refused while the game
-                        # runs): one whole-file read of the live save, then its own stat must still be the settled one.
-                        if not self._same_volume(member["path"]) and self.game_running():
+                        # Locked (the game cannot replace it either) or on another volume (only with the game
+                        # closed, asked again right here): one whole-file read of the live save, whose own stat must
+                        # still be the settled one afterwards.
+                        if not same_volume and self.is_busy():
                             raise Deferred("on another volume than the vault; waits until the game is closed")
                         durable.copy_verified(member["path"], link)
                         st = os.stat(member["path"])
@@ -386,14 +449,14 @@ class Vault:
                         st = os.stat(link)
                     if [st.st_size, st.st_mtime_ns] != [member["size"], member["mtime_ns"]]:
                         return None                                        # a newer write: the next pass takes it
-                for ext in EXTS:
+                for ext in self.exts:
                     entry = next(((m, l) for e, m, l, _ in held if e == ext), None)
                     if entry is None:
-                        members.append({"original": os.path.join(pair["folder"], pair["stem"] + ext), "missing": True,
-                                        "source": str(self.root / "staging-links" / (uuid.uuid4().hex + "-absent" + ext))})
+                        absent = str(self.root / "staging-links" / (uuid.uuid4().hex + "-absent" + ext))
+                        members.append({"original": absent, "missing": True, "source": absent})
                         continue
                     member, link = entry
-                    members.append({"original": member["path"], "source": str(link), "missing": False,
+                    members.append({"original": str(link), "source": str(link), "missing": False,
                                     "sha256": durable.digest(link), "size": member["size"]})
                 # The links are the version from here on. If the game replaces the live save meanwhile, the link
                 # keeps the old bytes, but on POSIX its change time moves (one fewer name) and the store's recheck
@@ -413,18 +476,20 @@ class Vault:
                         pass
             recs = {Path(r["path"]).suffix.lower(): r for r in manifest["groups"][0]["members"]}
             info = {}
-            for ext in EXTS:
+            for ext in self.exts:
                 rec = recs.get(ext)
                 info[ext[1:]] = None if rec is None or rec["missing"] else {
-                    "original": rec["path"], "sha256": rec["sha256"], "size": rec["size"],
+                    "original": pair["members"][ext]["path"], "sha256": rec["sha256"], "size": rec["size"],
                     "mtime_ns": pair["members"][ext]["mtime_ns"]}
-            missing = [e for e in EXTS if info[e[1:]] is None]
-            pair_sha = hashlib.sha256("|".join((info[e[1:]] or {}).get("sha256", "-") for e in EXTS).encode()).hexdigest()
-            event = self.record({"event": "version", "key": key, "folder": pair["folder"], "stem": pair["stem"],
-                                 "ess": info["ess"], "skse": info["skse"], "sig": pair["sig"], "pair_sha256": pair_sha,
-                                 "transaction": manifest["id"], "prev": (was or {}).get("id"),
-                                 "game_running": self.game_running(),
-                                 "note": ("co-save missing" if missing == [".skse"] else ".ess missing" if missing else "")})
+            missing = [e for e in self.exts if info[e[1:]] is None]
+            pair_sha = hashlib.sha256("|".join((info[e[1:]] or {}).get("sha256", "-") for e in self.exts).encode()).hexdigest()
+            note = ""
+            if missing:
+                note = "co-save missing" if missing == [".skse"] else ", ".join(m[1:] for m in missing) + " missing"
+            event = self.record(dict({"event": "version", "key": key, "folder": pair["folder"], "stem": pair["stem"],
+                                      "sig": pair["sig"], "pair_sha256": pair_sha, "transaction": manifest["id"],
+                                      "prev": (was or {}).get("id"), "game_running": self.game_running(), "note": note},
+                                     **{e[1:]: info[e[1:]] for e in self.exts}))
             kept["pairs"][key] = {"sig": pair["sig"], "id": event["id"], "folder": pair["folder"],
                                   "stem": pair["stem"], "gone": False}
             self._save_kept(kept)
@@ -461,15 +526,15 @@ class Vault:
         for _, key, pair in queue:
             if len(captured) >= limit or tried >= tries:
                 break
-            tried += 1
             try:
                 event = self.capture(key, pair)
             except Deferred:
-                deferred += 1
+                deferred += 1                                  # not a try: it must not starve same-volume pairs
                 continue
             except (OSError, PreservationFailed, TimeoutError) as exc:
                 errors.append("{}: {}".format(pair["stem"], exc))
                 event = None
+            tried += 1
             if event:
                 captured.append(event)
                 self.state["fails"].pop(key, None)
@@ -478,6 +543,11 @@ class Vault:
                 if not (kept_now and kept_now.get("sig") == pair["sig"]):
                     self.state["fails"][key] = self.state["fails"].get(key, 0) + 1
         vanished = self._vanished(pairs, readable) if only is None else []
+        kept_after = self.kept()["pairs"]
+        for k in list(self.state["fails"]):
+            # a pair that is gone, or kept as it is now (by any process), is no longer failing
+            if k not in pairs or (kept_after.get(k) or {}).get("sig") == pairs[k]["sig"]:
+                self.state["fails"].pop(k, None)
         self._save_state()
         pending = len(queue) - len(captured)
         failing = sorted(pairs[k]["stem"] if k in pairs else k.split("|")[-1]
@@ -485,7 +555,7 @@ class Vault:
         notes = ["stale tmp (ignored): " + p for p in stale[:10]]
         if deferred:
             notes.append("{} pair(s) on another volume wait for the game to close".format(deferred))
-        problem = "; ".join(errors)
+        problem = "; ".join(errors + ["folder unreadable: " + f for f in self.unreadable])
         if failing:
             problem = (problem + "; " if problem else "") + "{} pair(s) failed {}+ passes: {}".format(
                 len(failing), FAIL_REPORT, ", ".join(failing[:10]))
@@ -526,7 +596,7 @@ class Vault:
     def versions(self, name, folder=None):
         """Every stored version of a save, oldest first: watcher versions and imported legacy backups alike."""
         stem = name
-        for ext in EXTS:
+        for ext in self.exts:
             if stem.lower().endswith(ext):
                 stem = stem[:-len(ext)]
         want = canonical(folder) if folder else None
@@ -556,61 +626,77 @@ class Vault:
         return versions[-1]
 
     # ---- restore
+    @staticmethod
+    def _listed(folder):
+        """Lower-cased names in a folder, from one directory listing (no handle on any save)."""
+        try:
+            with os.scandir(folder) as it:
+                return {e.name.lower() for e in it}
+        except OSError:
+            return set()
+
     def restore(self, name, at=None, event_id=None, folder=None, to=None, as_stem=None, replace=False, apply=False):
-        """Dry run unless apply. A present pair needs replace (which keeps the current one first) or as_stem/to."""
+        """Dry run unless apply. Writes come from the verified stored copies to the live paths the event recorded.
+
+        A present pair needs replace (which keeps the current one as a vault version first) or as_stem / to. Anything
+        written into the save folder waits for the game to be closed; that check comes before any look at the saves."""
         event = self.choose(name, at, event_id, folder)
-        live = [Path(event["folder"]) / (event["stem"] + e) for e in EXTS]
-        present = [p for p in live if p.exists()]
+        live = [Path(event["folder"]) / (event["stem"] + e) for e in self.exts]
         if to:
-            plan = {"mode": "copy-to", "destination": str(Path(to) / "0"),
-                    "note": "written as <destination>/<save name>; nothing in the Saves folder changes"}
-        elif as_stem:
-            if any(c in as_stem for c in "/\\:") or as_stem in (".", ".."):
-                raise ValueError("--as takes a save NAME, not a path")
-            targets = [Path(event["folder"]) / (as_stem + e) for e in EXTS]
-            clash = [str(t) for t in targets if t.exists()]
-            if clash:
-                raise FileExistsError("already exists: " + ", ".join(clash))
-            plan = {"mode": "as", "targets": [str(t) for t in targets]}
-        elif present:
-            if not replace:
-                raise FileExistsError("{} is present; pass --replace (keeps the current pair first), --as or --to"
-                                      .format(", ".join(map(str, present))))
-            lacking = [str(p) for p, e in zip(live, EXTS) if p.exists() and event.get(e[1:]) is None]
-            if lacking:
-                raise FileExistsError("that version has no {}; replacing would leave the present one orphaned: {}. "
-                                      "Use --as or --to".format("co-save" if lacking[0].endswith(".skse") else ".ess",
-                                                                ", ".join(lacking)))
-            plan = {"mode": "replace", "targets": [str(p) for p in live]}
+            plan = {"mode": "copy-to", "targets": [str(Path(to) / (event["stem"] + e)) for e in self.exts]}
         else:
-            plan = {"mode": "put-back", "targets": [str(p) for p in live]}
+            if apply and self.is_busy():
+                raise PreservationFailed("the game (or SteamVR) is running, or that cannot be told: restore into the "
+                                         "save folder refused; use --to, or close the game")
+            names = self._listed(event["folder"])
+            if as_stem:
+                if any(c in as_stem for c in "/\\:") or as_stem in (".", ".."):
+                    raise ValueError("--as takes a save NAME, not a path")
+                targets = [Path(event["folder"]) / (as_stem + e) for e in self.exts]
+                clash = [str(x) for x in targets if x.name.lower() in names]
+                if clash:
+                    raise FileExistsError("already exists: " + ", ".join(clash))
+                plan = {"mode": "as", "targets": [str(x) for x in targets]}
+            else:
+                present = [x for x in live if x.name.lower() in names]
+                if present:
+                    if not replace:
+                        raise FileExistsError("{} is present; pass --replace (keeps the current pair first), --as or "
+                                              "--to".format(", ".join(map(str, present))))
+                    lacking = [str(x) for x, e in zip(live, self.exts) if x in present and event.get(e[1:]) is None]
+                    if lacking:
+                        raise FileExistsError("that version has no {}; replacing would leave the present one "
+                                              "orphaned: {}. Use --as or --to".format(
+                                                  "co-save" if lacking[0].endswith(".skse") else ".ess", ", ".join(lacking)))
+                    plan = {"mode": "replace", "targets": [str(x) for x in live]}
+                else:
+                    plan = {"mode": "put-back", "targets": [str(x) for x in live]}
         plan.update(version=event["id"], time=event["time"], transaction=event["transaction"], apply=apply,
                     legacy=bool(event.get("legacy")))
         if not apply:
             return plan
-        if plan["mode"] in ("replace", "put-back", "as") and self.is_busy():
-            raise PreservationFailed("the game (or SteamVR) is running, or that cannot be told: restore into the "
-                                     "save folder refused; use --to, or close the game")
         if plan["mode"] == "replace":
             key = self.key_of(event["folder"], event["stem"])
             pairs, _, _ = self.scan()
-            if key in pairs and self.due(key, pairs[key], self.clock(), self.kept(), force=True, ignore_tmp=True):
-                self.capture(key, pairs[key])                     # the current pair is kept before it is replaced
-                self._save_state()
-            plan["result"] = self.store.restore(event["transaction"], in_place=True)
-        elif plan["mode"] == "put-back":
-            plan["result"] = self.store.restore(event["transaction"], in_place=True)
-        elif plan["mode"] == "copy-to":
-            plan["result"] = self.store.restore(event["transaction"], destination=to)
-        else:
-            plan["result"] = self._publish_as(event, plan["targets"])
+            if key in pairs:
+                if self.due(key, pairs[key], self.clock(), self.kept(), force=True, ignore_tmp=True):
+                    self.capture(key, pairs[key], ignore_tmp=True)    # the current pair is kept before it is replaced
+                    self._save_state()
+                now_kept = self.kept()["pairs"].get(key) or {}
+                if now_kept.get("sig") != pairs[key]["sig"]:
+                    raise PreservationFailed("the current pair changed just now and is not kept yet; nothing was "
+                                             "replaced. Retry in a few seconds.")
+        if plan["mode"] == "copy-to":
+            Path(to).mkdir(parents=True, exist_ok=True)
+        plan["result"] = self._write(event, plan["targets"], overwrite=plan["mode"] == "replace")
         self.record({"event": "restored", "key": self.key_of(event["folder"], event["stem"]), "version": event["id"],
-                     "mode": plan["mode"], "targets": plan.get("targets") or [plan["destination"]]})
+                     "mode": plan["mode"], "targets": plan["targets"]})
         return plan
 
-    def _publish_as(self, event, targets):
+    def _write(self, event, targets, overwrite=False):
+        """Each stored member, hash-checked, staged beside its target, then published (no-clobber unless overwrite)."""
         published = []
-        for ext, target in zip(EXTS, targets):
+        for ext, target in zip(self.exts, targets):
             member = event.get(ext[1:])
             if member is None:
                 continue
@@ -619,7 +705,10 @@ class Vault:
                 info = durable.copy_verified(self.store.root / "blobs" / member["sha256"], part)
                 if info["sha256"] != member["sha256"]:
                     raise PreservationFailed("stored version failed verification")
-                durable.publish_new(part, target)
+                if overwrite:
+                    os.replace(part, target)
+                else:
+                    durable.publish_new(part, target)
                 published.append(str(target))
             finally:
                 part.unlink(missing_ok=True)
@@ -645,6 +734,9 @@ class Vault:
         Which records are done comes from kept.json (rebuilt from the import events), read and written under the
         capture lock, so a running watcher cannot make a second run import a record again."""
         manifest_path = Path(manifest_path)
+        if self.is_busy():
+            # each record's original names a live save, and the store resolves it (a handle on its name)
+            raise PreservationFailed("import-legacy waits until the game (and SteamVR) is closed")
         if not manifest_path.exists():
             return {"imported": 0, "skipped": 0, "failed": []}
         imported, skipped, failed = 0, 0, []
@@ -713,28 +805,34 @@ def watcher_status(root=None, now=None):
     if not beat.get("watched"):
         return False, "save vault: running but WATCHING NO SAVE FOLDER; check discovery (status --folders)"
     tail = "" if beat.get("ok") else "; PROBLEM: " + str(beat.get("error"))[:300]
+    notes = beat.get("notes") or []
+    if notes:
+        tail += "; note: {}{}".format(notes[0][:200], " (+{} more)".format(len(notes) - 1) if len(notes) > 1 else "")
     return bool(beat.get("ok")), "save vault: running ({} folders, last sweep {:.0f} s ago, {} pending){}".format(
         beat.get("watched"), age, beat.get("pending"), tail)
 
 
-def watch(vault_factory, stop=None):
+def watch(vault_factory, stop=None, *more_factories):
+    """One watcher for every vault (saves, and the config INIs): the first vault's watch.lock makes it the only one."""
     lower_priority()
-    vault = vault_factory()
+    factories = (vault_factory,) + tuple(more_factories)
+    vaults = [f() for f in factories]
     try:
-        with exclusive(vault.root / "status" / "watch.lock", 0):
-            vault.clean_staging()
+        with exclusive(vaults[0].root / "status" / "watch.lock", 0):
+            for vault in vaults:
+                vault.clean_staging()
             refreshed = time.monotonic()
             while not (stop and stop()):
-                try:
-                    if time.monotonic() - refreshed > FOLDER_REFRESH_S:
-                        vault = vault_factory()
-                        refreshed = time.monotonic()
-                    vault.sweep()
-                except Exception as exc:  # the watcher must outlive one bad pass; the heartbeat says what failed
+                if time.monotonic() - refreshed > FOLDER_REFRESH_S:
+                    vaults, refreshed = [f() for f in factories], time.monotonic()
+                for vault in vaults:
                     try:
-                        vault.heartbeat(False, -1, "{}: {}".format(type(exc).__name__, exc)[:2000])
-                    except OSError:
-                        pass
+                        vault.sweep()
+                    except Exception as exc:  # the watcher must outlive one bad pass; the heartbeat says what failed
+                        try:
+                            vault.heartbeat(False, -1, "{}: {}".format(type(exc).__name__, exc)[:2000])
+                        except OSError:
+                            pass
                 time.sleep(POLL_S)
     except TimeoutError:
         print("save vault: a watcher is already running")
@@ -789,6 +887,7 @@ def main(argv=None):
     ap.add_argument("--vault", help="vault folder (default SAVE_VAULT_DIR or %%LOCALAPPDATA%%/modding-agent-harness/...)")
     ap.add_argument("--project", default=str(HERE.parent), help="toolkit or game root (env file, .protect-saves search)")
     ap.add_argument("--folder", action="append", default=[], help="an extra save folder to watch (repeatable)")
+    ap.add_argument("--config", action="store_true", help="act on the INI vault (the config folders) instead of saves")
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("sweep"); s.add_argument("--now", action="store_true"); s.add_argument("--pair")
     sub.add_parser("watch")
@@ -802,26 +901,34 @@ def main(argv=None):
     sub.add_parser("import-legacy")
     sub.add_parser("install-task"); sub.add_parser("uninstall-task")
     a = ap.parse_args(argv)
-    root = Path(a.vault) if a.vault else default_root()
+    save_root = Path(a.vault) if a.vault else default_root()
+    ini_root = save_root.with_name(save_root.name + "-config")
+    root = ini_root if a.config else save_root
 
-    def make():
-        return Vault(root, discover(a.project, a.folder))
+    def make_saves():
+        return Vault(save_root, discover(a.project, a.folder))
 
+    def make_inis():
+        return Vault(ini_root, discover_config(a.project), exts=INI_EXTS)
+
+    make = make_inis if a.config else make_saves
     if a.cmd == "watch":
-        return watch(make)
+        return watch(make_saves, None, make_inis)
     if a.cmd == "install-task":
         extra = "".join('--folder "{}" '.format(f) for f in a.folder)
         return install_task('--project "{}" {}{}'.format(a.project, '--vault "{}" '.format(root) if a.vault else "", extra))
     if a.cmd == "uninstall-task":
         return subprocess.run(["schtasks", "/Delete", "/TN", TASK, "/F"]).returncode
     if a.cmd == "status" and a.folders:
-        for f in discover(a.project, a.folder):
+        for f in (discover_config(a.project) if a.config else discover(a.project, a.folder)):
             print(f)
         return 0
     if a.cmd == "status" and not a.name and not a.vanished:
-        alive, line = watcher_status(root)
+        alive, line = watcher_status(save_root)
+        ini_alive, ini_line = watcher_status(ini_root)
         print(line)
-        return 0 if alive else 1
+        print(ini_line.replace("save vault:", "INI vault:", 1))
+        return 0 if alive and ini_alive else 1
     vault = make()
     if a.cmd == "sweep":
         out = vault.sweep(force=a.now, only=a.pair)
@@ -839,8 +946,9 @@ def main(argv=None):
                     print(e["time"], e["stem"], "(last version", e["last"] + ")")
             return 0
         for e in vault.versions(a.name):
-            print(e["time"], e["id"], "legacy" if e.get("legacy") else "", "ess", (e.get("ess") or {}).get("sha256", "-")[:12],
-                  "skse", (e.get("skse") or {}).get("sha256", "-")[:12], e.get("note", ""))
+            print(e["time"], e["id"], "legacy" if e.get("legacy") else "",
+                  " ".join("{} {}".format(x[1:], (e.get(x[1:]) or {}).get("sha256", "-")[:12]) for x in vault.exts),
+                  e.get("note", ""))
         return 0
     if a.cmd == "restore":
         plan = vault.restore(a.name, at=parse_time(a.at) if a.at else None, event_id=a.id, folder=a.in_folder,

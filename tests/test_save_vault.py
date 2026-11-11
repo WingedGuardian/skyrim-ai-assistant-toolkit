@@ -106,6 +106,9 @@ def test_tmp_files_are_never_captured(bed):
     for name in ("Save1.ess.tmp", "Other.ess.tmp"):
         (bed["saves"] / name).write_bytes(b"partial")
         os.utime(bed["saves"] / name, (bed["clock"]() - 1, bed["clock"]() - 1))      # being written now
+    pairs, _, _ = bed["vault"].scan()
+    key = next(k for k, p in pairs.items() if p["stem"] == "Save1")
+    assert not bed["vault"].due(key, pairs[key], bed["clock"](), bed["vault"].kept())   # never queued
     out = bed["vault"].sweep()
     assert out["captured"] == []                            # Save1 is mid-write; Other.ess.tmp is no save
     assert not any(e["stem"].lower().startswith("other") for e in bed["vault"].events())
@@ -712,3 +715,227 @@ def test_an_old_tmp_file_is_never_kept_as_a_save(bed):
     os.utime(junk, (c() - 3600, c() - 3600))
     bed["vault"].sweep()
     assert not [e for e in bed["vault"].events() if e.get("stem", "").lower().startswith("other")]
+
+
+# ---- re-review 2026-11-10 (BLOCK on 0c7a8dd) and the INI vault
+
+def test_the_capture_resolves_no_live_save_name(bed, monkeypatch):
+    """The store is handed the staging link, so its path resolution (a handle on the name) never touches the save;
+    the one remaining open of a live name is os.link, once per member."""
+    import pathlib
+    s, v = bed["saves"], bed["vault"]
+    write_pair(s, "Save70", age=3600)
+    resolved, linked = [], []
+    real_resolve = pathlib.Path.resolve
+    monkeypatch.setattr(pathlib.Path, "resolve", lambda self, *a, **k: resolved.append(str(self)) or real_resolve(self, *a, **k))
+    real_link = save_vault.os.link
+    monkeypatch.setattr(save_vault.os, "link", lambda src, dst: linked.append(str(src)) or real_link(src, dst))
+    assert len(v.sweep()["captured"]) == 1
+    live = [str(s / "Save70.ess"), str(s / "Save70.skse")]
+    assert not [r for r in resolved if os.path.normcase(r) in map(os.path.normcase, live)]
+    assert sorted(map(os.path.normcase, linked)) == sorted(map(os.path.normcase, live))
+
+
+def test_a_pair_the_game_starts_saving_is_skipped_before_linking(bed, monkeypatch):
+    s, v, c = bed["saves"], bed["vault"], bed["clock"]
+    write_pair(s, "Save71", age=3600)
+    pairs, _, _ = v.scan()
+    tmp = s / "Save71.ess.tmp"
+    tmp.write_bytes(b"writing")
+    os.utime(tmp, (c() - 1, c() - 1))
+    linked = []
+    monkeypatch.setattr(save_vault.os, "link", lambda *a: linked.append(a))
+    key = next(iter(pairs))
+    assert v.capture(key, pairs[key]) is None and linked == []
+
+
+def test_another_volume_is_copied_never_linked(bed, monkeypatch):
+    s, v = bed["saves"], bed["vault"]
+    write_pair(s, "Save72", age=3600)
+    monkeypatch.setattr(Vault, "_same_volume", lambda self, folder: False)
+    linked = []
+    monkeypatch.setattr(save_vault.os, "link", lambda *a: linked.append(a))
+    assert len(v.sweep()["captured"]) == 1 and linked == []
+
+
+def test_deferred_pairs_do_not_starve_a_same_volume_folder(tmp_path):
+    far, near = tmp_path / "Far" / "Saves", tmp_path / "Near" / "Saves"
+    far.mkdir(parents=True)
+    near.mkdir(parents=True)
+    for n in range(save_vault.BUSY_TRIES + 1):
+        write_pair(far, "Far%d" % n, ess=bytes([70 + n]) * 300, age=100 + n)      # newest: first in the queue
+    write_pair(near, "Near", ess=b"N" * 300, age=7200)
+    v = Vault(tmp_path / "vault", [far, near], is_busy=lambda: True, clock=Clock(), reserve_gb=0)
+    v._same_volume = lambda folder: os.path.normcase(str(near)) == os.path.normcase(str(folder))
+    out = v.sweep()
+    assert [e["stem"] for e in out["captured"]] == ["Near"] and out["deferred"] == save_vault.BUSY_TRIES + 1
+
+
+def test_a_failure_count_clears_once_the_pair_is_kept_elsewhere_or_gone(bed, monkeypatch):
+    s, v, c = bed["saves"], bed["vault"], bed["clock"]
+    write_pair(s, "Bad", ess=b"B" * 300, age=7200)
+    write_pair(s, "Gone", ess=b"G" * 300, age=7200)
+    real = Vault.capture
+    monkeypatch.setattr(Vault, "capture", lambda self, key, pair, ignore_tmp=False: None)
+    for _ in range(save_vault.FAIL_REPORT):
+        c.tick(15)
+        v.sweep()
+    assert save_vault.watcher_status(bed["root"], now=c())[0] is False
+    monkeypatch.setattr(Vault, "capture", real)
+    other = Vault(bed["root"], [s], is_busy=lambda: False, clock=c, reserve_gb=0)
+    other.sweep(only="Bad")                                      # kept by another process
+    for p in s.glob("Gone.*"):
+        p.unlink()                                               # and the other one is deleted
+    monkeypatch.setattr(Vault, "capture", lambda self, key, pair, ignore_tmp=False: None)
+    c.tick(15)
+    v.sweep()
+    assert save_vault.watcher_status(bed["root"], now=c())[0] is True
+
+
+def test_an_unreadable_folder_is_reported(bed, tmp_path):
+    other = tmp_path / "Other" / "Saves"
+    other.mkdir(parents=True)
+    v = Vault(tmp_path / "vault2", [bed["saves"], other], is_busy=lambda: False, clock=bed["clock"], reserve_gb=0)
+    other.rmdir()
+    v.sweep()
+    alive, line = save_vault.watcher_status(tmp_path / "vault2", now=bed["clock"]())
+    assert alive is False and "folder unreadable" in line
+
+
+def test_restore_checks_the_game_before_looking_at_the_saves(bed, monkeypatch):
+    s, v = bed["saves"], bed["vault"]
+    write_pair(s, "Save73", age=3600)
+    v.sweep()
+    bed["state"]["busy"] = True
+
+    def looked(*a, **k):
+        raise AssertionError("listed the save folder before the game check")
+    monkeypatch.setattr(Vault, "_listed", staticmethod(looked))
+    with pytest.raises(save_vault.PreservationFailed):
+        v.restore("Save73", replace=True, apply=True)
+
+
+def test_replace_refuses_when_the_current_pair_could_not_be_kept(bed, monkeypatch):
+    s, v, c = bed["saves"], bed["vault"], bed["clock"]
+    write_pair(s, "Save74", ess=b"A" * 300, age=3600)
+    v.sweep()
+    old = v.versions("Save74")[-1]["id"]
+    (s / "Save74.ess").write_bytes(b"D" * 300)
+    os.utime(s / "Save74.ess", (c() - 3600, c() - 3600))
+    monkeypatch.setattr(Vault, "capture", lambda self, key, pair, ignore_tmp=False: None)
+    with pytest.raises(save_vault.PreservationFailed):
+        v.restore("Save74", event_id=old, replace=True, apply=True)
+    assert (s / "Save74.ess").read_bytes() == b"D" * 300           # nothing replaced
+
+
+def test_copy_to_writes_plain_names(bed, tmp_path):
+    s, v = bed["saves"], bed["vault"]
+    write_pair(s, "Save75", ess=b"T" * 300, age=3600)
+    v.sweep()
+    out = tmp_path / "out"
+    v.restore("Save75", to=str(out), apply=True)
+    assert (out / "Save75.ess").read_bytes() == b"T" * 300 and (out / "Save75.skse").exists()
+
+
+def test_legacy_import_waits_for_the_game(bed, tmp_path):
+    m = tmp_path / "manifest.jsonl"
+    m.write_text("", encoding="utf-8")
+    bed["state"]["busy"] = True
+    with pytest.raises(save_vault.PreservationFailed):
+        bed["vault"].import_legacy(m)
+
+
+def test_a_save_replaced_between_scan_and_link_is_not_kept_under_the_old_signature(bed):
+    s, v, c = bed["saves"], bed["vault"], bed["clock"]
+    write_pair(s, "Save76", ess=b"1" * 300, age=3600)
+    pairs, _, _ = v.scan()
+    key = next(iter(pairs))
+    game_save(s, "Save76", b"2" * 300)                          # replaced after the listing; its .tmp is gone again
+    assert v.capture(key, pairs[key]) is None
+    assert v.versions("Save76") == []
+
+
+def test_a_heartbeat_with_no_folders_is_not_ok(tmp_path):
+    v = Vault(tmp_path / "vault", [], is_busy=lambda: False, reserve_gb=0)
+    v.heartbeat(True, 0)
+    assert json.loads((tmp_path / "vault" / "status" / "heartbeat.json").read_text())["ok"] is False
+
+
+def test_busy_counts_an_empty_process_list_as_running(monkeypatch):
+    class R:
+        stdout = ""
+    monkeypatch.setattr(save_vault.subprocess, "run", lambda *a, **k: R())
+    assert save_vault.busy() is True
+
+
+def test_the_logon_task_names_its_user_and_escapes_paths():
+    xml = save_vault.task_xml("C:/P&Q/pythonw.exe", "C:/a<b>/save_vault.py", '--project "C:/x&y" ', "DOM\\me")
+    assert xml.count("<UserId>DOM\\me</UserId>") == 2
+    assert "P&amp;Q" in xml and "a&lt;b&gt;" in xml and "x&amp;y" in xml and "P&Q" not in xml
+
+
+def test_a_rebuilt_index_remembers_a_vanished_pair(bed):
+    s, v, c = bed["saves"], bed["vault"], bed["clock"]
+    write_pair(s, "Save77", age=3600)
+    v.sweep()
+    for p in s.glob("Save77.*"):
+        p.unlink()
+    for _ in range(save_vault.VANISH_MISSES):
+        c.tick(15)
+        v.sweep()
+    (bed["root"] / "status" / "kept.json").unlink()
+    again = Vault(bed["root"], [s], is_busy=lambda: False, clock=c, reserve_gb=0)
+    assert any(p.get("gone") for p in again.kept()["pairs"].values())
+
+
+def test_a_returning_pair_is_no_longer_gone(bed):
+    s, v, c = bed["saves"], bed["vault"], bed["clock"]
+    paths = write_pair(s, "Save78", age=3600)
+    data = [p.read_bytes() for p in paths]
+    v.sweep()
+    for p in paths:
+        p.unlink()
+    for _ in range(save_vault.VANISH_MISSES):
+        c.tick(15)
+        v.sweep()
+    for p, d in zip(paths, data):
+        p.write_bytes(d)
+        os.utime(p, (c() - 3600, c() - 3600))
+    c.tick(15)
+    v.sweep()
+    assert not any(p.get("gone") for p in v.kept()["pairs"].values())
+
+
+def test_every_version_of_an_ini_is_kept_and_can_be_put_back(tmp_path):
+    cfg = tmp_path / "My Games" / "Skyrim VR"
+    cfg.mkdir(parents=True)
+    c = Clock()
+    v = Vault(tmp_path / "ini-vault", [cfg], is_busy=lambda: False, clock=c, reserve_gb=0, exts=save_vault.INI_EXTS)
+    ini = cfg / "SkyrimPrefs.ini"
+    ini.write_text("[Display]\nfGamma=1.0\n")
+    os.utime(ini, (c() - 3600, c() - 3600))
+    v.sweep()
+    ini.write_text("[Display]\nfGamma=1.5\n")
+    os.utime(ini, (c() - 1800, c() - 1800))                      # a later write: a later mtime
+    v.sweep()
+    c.tick(SETTLE_S + 1)
+    v.sweep()
+    kept = v.versions("SkyrimPrefs")
+    assert len(kept) == 2 and kept[0]["note"] == ""
+    ini.unlink()
+    v.restore("SkyrimPrefs", event_id=kept[0]["id"], apply=True)
+    assert "fGamma=1.0" in ini.read_text()
+
+
+def test_one_watcher_sweeps_both_vaults(bed, tmp_path, monkeypatch):
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    (cfg / "Skyrim.ini").write_text("x")
+    os.utime(cfg / "Skyrim.ini", (bed["clock"]() - 3600, bed["clock"]() - 3600))
+    write_pair(bed["saves"], "Save79", age=3600)
+    ini = Vault(tmp_path / "ini-vault", [cfg], is_busy=lambda: False, clock=bed["clock"], reserve_gb=0,
+                exts=save_vault.INI_EXTS)
+    monkeypatch.setattr(save_vault.time, "sleep", lambda s: None)
+    calls = iter([False, True])
+    save_vault.watch(lambda: bed["vault"], lambda: next(calls), lambda: ini)
+    assert bed["vault"].versions("Save79") and ini.versions("Skyrim")
