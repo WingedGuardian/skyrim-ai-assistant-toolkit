@@ -457,7 +457,9 @@ def test_the_vault_never_deletes_what_it_stored():
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in (
                 "unlink", "rmtree", "remove", "rmdir", "removedirs"):
             offenders.append(ast.unparse(node))
-    allowed = {"link.unlink()", "part.unlink(missing_ok=True)"}
+    # the only removals: its own staging links and parts, and in a restore's rollback the file that restore itself
+    # just wrote, or (after a successful replace) the set-aside member already kept as a vault version
+    allowed = {"link.unlink()", "part.unlink(missing_ok=True)", "os.unlink(target)", "os.unlink(aside)"}
     assert set(offenders) <= allowed, offenders
 
 
@@ -1023,7 +1025,7 @@ def test_a_restore_that_fails_on_the_second_file_changes_neither(bed, monkeypatc
     assert not (s / "Save84.ess").exists() and not list(s.glob(".vault-*"))
 
 
-def test_a_publish_that_fails_midway_is_recorded(bed, monkeypatch):
+def test_a_publish_that_fails_midway_leaves_nothing_behind(bed, monkeypatch):
     s, v = bed["saves"], bed["vault"]
     write_pair(s, "Save85", age=3600)
     v.sweep()
@@ -1036,9 +1038,66 @@ def test_a_publish_that_fails_midway_is_recorded(bed, monkeypatch):
             raise OSError(5, "Access is denied")
         return real(part, target)
     monkeypatch.setattr(save_vault.durable, "publish_new", second_fails)
-    with pytest.raises(save_vault.PreservationFailed):
+    with pytest.raises(OSError):
         v.restore("Save85", apply=True)
-    assert [e for e in v.events() if e.get("event") == "restore-partial"]
+    assert not list(s.glob("Save85*")) and not list(s.glob(".vault-*"))
+
+
+def test_a_replace_that_fails_midway_puts_the_current_pair_back(bed, monkeypatch):
+    s, v, c = bed["saves"], bed["vault"], bed["clock"]
+    write_pair(s, "Save91", ess=b"1" * 300, skse=b"1" * 50, age=3600)
+    v.sweep()
+    old = v.versions("Save91")[-1]["id"]
+    for p, d in ((s / "Save91.ess", b"2" * 300), (s / "Save91.skse", b"2" * 50)):
+        p.write_bytes(d)
+        os.utime(p, (c() - 3600, c() - 3600))
+    real = save_vault.durable.publish_new
+
+    def second_fails(part, target):
+        if str(target).endswith(".skse"):
+            raise OSError(5, "Access is denied")
+        return real(part, target)
+    monkeypatch.setattr(save_vault.durable, "publish_new", second_fails)
+    with pytest.raises(OSError):
+        v.restore("Save91", event_id=old, replace=True, apply=True)
+    assert (s / "Save91.ess").read_bytes() == b"2" * 300 and (s / "Save91.skse").read_bytes() == b"2" * 50
+    assert not list(s.glob(".vault-*"))
+
+
+def test_to_a_save_folder_waits_for_the_game(bed):
+    s, v = bed["saves"], bed["vault"]
+    write_pair(s, "Save92", age=3600)
+    v.sweep()
+    bed["state"]["busy"] = True
+    with pytest.raises(save_vault.PreservationFailed):
+        v.restore("Save92", to=str(s), apply=True)
+
+
+def test_a_vault_that_recovers_on_refresh_takes_its_lock(bed, tmp_path, monkeypatch):
+    ini_root = tmp_path / "ini-vault"
+    tries = {"n": 0}
+
+    def flaky():
+        tries["n"] += 1
+        if tries["n"] == 1:
+            raise OSError("Documents unreachable")
+        return Vault(ini_root, [], is_busy=lambda: False, reserve_gb=0, exts=save_vault.INI_EXTS)
+    monkeypatch.setattr(save_vault, "FOLDER_REFRESH_S", -1)
+    monkeypatch.setattr(save_vault.time, "sleep", lambda s: None)
+    seen = {}
+
+    def stop():
+        if tries["n"] >= 2:
+            from modding_harness.locking import exclusive
+            try:
+                with exclusive(ini_root / "status" / "watch.lock", 0):
+                    seen["free"] = True
+            except TimeoutError:
+                seen["free"] = False
+            return True
+        return False
+    save_vault.watch(lambda: bed["vault"], stop, flaky)
+    assert seen == {"free": False}
 
 
 def test_a_corrupt_stored_copy_is_never_restored(bed):

@@ -649,6 +649,8 @@ class Vault:
         event = self.choose(name, at, event_id, folder)
         live = [Path(event["folder"]) / (event["stem"] + e) for e in self.exts]
         if to:
+            if apply and self.is_busy() and canonical(to) in {canonical(f) for f in self.folders + [Path(event["folder"])]}:
+                raise PreservationFailed("--to names a save folder: it waits until the game is closed")
             targets = [Path(to) / (event["stem"] + e) for e in self.exts]
             clash = [str(x) for x in targets if x.name.lower() in self._listed(to)]
             if clash:
@@ -721,20 +723,41 @@ class Vault:
                 info = durable.copy_verified(self.store.root / "blobs" / member["sha256"], part)
                 if info["sha256"] != member["sha256"]:
                     raise PreservationFailed("stored version failed verification")
-            for part, target in staged:
+            moved = []                                     # replace: the current members, set aside first
+            try:
+                if overwrite:
+                    for part, target in staged:
+                        if os.path.lexists(target):
+                            aside = Path(target).with_name(".vault-old-" + uuid.uuid4().hex)
+                            os.replace(target, aside)      # a locked save refuses here, before anything changed
+                            moved.append((aside, target))
+                for part, target in staged:
+                    durable.publish_new(part, target)          # no-clobber: the place is free (set aside or absent)
+                    published.append(str(target))
+            except OSError as exc:
+                # all or nothing: drop what this restore published, put back what it set aside
+                rolled = True
+                for target in published:
+                    try:
+                        os.unlink(target)                      # a file this restore itself just wrote
+                    except OSError:
+                        rolled = False
+                for aside, target in moved:
+                    try:
+                        os.replace(aside, target)
+                    except OSError:
+                        rolled = False
+                if not rolled:
+                    self.record({"event": "restore-partial", "version": event["id"], "published": published,
+                                 "set_aside": [str(a) for a, _ in moved], "error": str(exc)})
+                    raise PreservationFailed("restore failed and could not be fully undone ({}); the event log names "
+                                             "every file involved".format(exc)) from exc
+                raise
+            for aside, _ in moved:
                 try:
-                    if overwrite:
-                        os.replace(part, target)
-                    else:
-                        durable.publish_new(part, target)
-                except OSError as exc:
-                    if published:
-                        self.record({"event": "restore-partial", "version": event["id"], "published": published,
-                                     "failed": str(target), "error": str(exc)})
-                        raise PreservationFailed("restore stopped after {}: {} ({}); the event log names what was "
-                                                 "written".format(", ".join(published), target, exc)) from exc
-                    raise
-                published.append(str(target))
+                    os.unlink(aside)                       # the replaced members are kept as a vault version
+                except OSError:
+                    pass
         finally:
             for part, _ in staged:
                 part.unlink(missing_ok=True)
@@ -875,7 +898,14 @@ def watch(vault_factory, stop=None, *more_factories):
                         fresh = f()
                     except Exception:
                         continue                                   # keep the last good instance
-                    if vaults[i] is None or fresh.root == vaults[i].root:
+                    if vaults[i] is None:
+                        try:                                       # recovered: it gets its lock like the others
+                            locks.enter_context(exclusive(fresh.root / "status" / "watch.lock", 0))
+                        except TimeoutError:
+                            continue                               # another watcher owns it
+                        fresh.clean_staging()
+                        vaults[i] = fresh
+                    elif fresh.root == vaults[i].root:
                         vaults[i] = fresh
             for vault in vaults:
                 if vault is None:
