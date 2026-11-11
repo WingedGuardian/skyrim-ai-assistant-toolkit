@@ -289,7 +289,7 @@ class Vault:
             free = -1
         watched = len(self.folders)
         if watched == 0:
-            ok, error = False, (error + "; " if error else "") + "no save folder is watched"
+            ok, error = False, (error + "; " if error else "") + "no folder is watched"
         data = {"pid": os.getpid(), "last_sweep": self.clock(), "time": now_text(self.clock()), "ok": ok,
                 "pending": pending, "error": error, "notes": list(notes), "watched": watched,
                 "folders": [str(f) for f in self.folders], "free_bytes": free, "reserve_bytes": self.store.reserve}
@@ -305,12 +305,12 @@ class Vault:
     def key_of(folder, stem):
         return canonical(folder) + "|" + stem.casefold()
 
-    def scan(self):
+    def scan(self, folders=None):
         """({key: pair}, readable folders, stale .tmp names) from os.scandir alone. Unreadable folders: self.unreadable."""
         pairs, readable, stale = {}, set(), []
         self.unreadable = []
         now = self.clock()
-        for folder in self.folders:
+        for folder in (self.folders if folders is None else folders):
             try:
                 with os.scandir(folder) as it:
                     entries = list(it)
@@ -523,9 +523,15 @@ class Vault:
             limit = 1 if self.game_running() else len(queue)
         tries = BUSY_TRIES if self.game_running() else len(queue)
         captured, errors, deferred, tried = [], [], 0, 0
+        volume = {}
         for _, key, pair in queue:
             if len(captured) >= limit or tried >= tries:
                 break
+            if pair["folder"] not in volume:
+                volume[pair["folder"]] = self._same_volume(pair["folder"])
+            if not volume[pair["folder"]] and self.game_running():
+                deferred += 1                                  # one process check per pass, not one per pair
+                continue
             try:
                 event = self.capture(key, pair)
             except Deferred:
@@ -554,10 +560,10 @@ class Vault:
                          for k, n in self.state["fails"].items() if n >= FAIL_REPORT)
         notes = ["stale tmp (ignored): " + p for p in stale[:10]]
         if deferred:
-            notes.append("{} pair(s) on another volume wait for the game to close".format(deferred))
+            notes.append("{} item(s) on another volume wait for the game to close".format(deferred))
         problem = "; ".join(errors + ["folder unreadable: " + f for f in self.unreadable])
         if failing:
-            problem = (problem + "; " if problem else "") + "{} pair(s) failed {}+ passes: {}".format(
+            problem = (problem + "; " if problem else "") + "{} item(s) failed {}+ passes: {}".format(
                 len(failing), FAIL_REPORT, ", ".join(failing[:10]))
         self.heartbeat(not problem, pending, problem[:2000], notes)
         return {"captured": captured, "vanished": vanished, "pending": pending, "errors": errors,
@@ -643,7 +649,11 @@ class Vault:
         event = self.choose(name, at, event_id, folder)
         live = [Path(event["folder"]) / (event["stem"] + e) for e in self.exts]
         if to:
-            plan = {"mode": "copy-to", "targets": [str(Path(to) / (event["stem"] + e)) for e in self.exts]}
+            targets = [Path(to) / (event["stem"] + e) for e in self.exts]
+            clash = [str(x) for x in targets if x.name.lower() in self._listed(to)]
+            if clash:
+                raise FileExistsError("already exists: " + ", ".join(clash))
+            plan = {"mode": "copy-to", "targets": [str(x) for x in targets]}
         else:
             if apply and self.is_busy():
                 raise PreservationFailed("the game (or SteamVR) is running, or that cannot be told: restore into the "
@@ -676,16 +686,20 @@ class Vault:
         if not apply:
             return plan
         if plan["mode"] == "replace":
+            # The current pair is kept before it is replaced: scanned in the EVENT's folder (this run may watch other
+            # folders), and the replace refused unless that exact pair is now kept.
             key = self.key_of(event["folder"], event["stem"])
-            pairs, _, _ = self.scan()
-            if key in pairs:
-                if self.due(key, pairs[key], self.clock(), self.kept(), force=True, ignore_tmp=True):
-                    self.capture(key, pairs[key], ignore_tmp=True)    # the current pair is kept before it is replaced
-                    self._save_state()
-                now_kept = self.kept()["pairs"].get(key) or {}
-                if now_kept.get("sig") != pairs[key]["sig"]:
-                    raise PreservationFailed("the current pair changed just now and is not kept yet; nothing was "
-                                             "replaced. Retry in a few seconds.")
+            pairs, _, _ = self.scan(folders=[Path(event["folder"])])
+            if key not in pairs:
+                raise PreservationFailed("the present {} could not be read to keep it first; nothing was replaced"
+                                         .format(event["stem"]))
+            if self.due(key, pairs[key], self.clock(), self.kept(), force=True, ignore_tmp=True):
+                self.capture(key, pairs[key], ignore_tmp=True)    # the current pair is kept before it is replaced
+                self._save_state()
+            now_kept = self.kept()["pairs"].get(key) or {}
+            if now_kept.get("sig") != pairs[key]["sig"]:
+                raise PreservationFailed("the current pair changed just now and is not kept yet; nothing was "
+                                         "replaced. Retry in a few seconds.")
         if plan["mode"] == "copy-to":
             Path(to).mkdir(parents=True, exist_ok=True)
         plan["result"] = self._write(event, plan["targets"], overwrite=plan["mode"] == "replace")
@@ -694,23 +708,35 @@ class Vault:
         return plan
 
     def _write(self, event, targets, overwrite=False):
-        """Each stored member, hash-checked, staged beside its target, then published (no-clobber unless overwrite)."""
-        published = []
-        for ext, target in zip(self.exts, targets):
-            member = event.get(ext[1:])
-            if member is None:
-                continue
-            part = Path(target).with_name(".vault-" + uuid.uuid4().hex)
-            try:
+        """Every stored member is staged beside its target and hash-checked FIRST; only then are they published
+        (no-clobber unless overwrite), so a bad copy never leaves half a pair. A publish failing midway is recorded."""
+        staged, published = [], []
+        try:
+            for ext, target in zip(self.exts, targets):
+                member = event.get(ext[1:])
+                if member is None:
+                    continue
+                part = Path(target).with_name(".vault-" + uuid.uuid4().hex)
+                staged.append((part, target))
                 info = durable.copy_verified(self.store.root / "blobs" / member["sha256"], part)
                 if info["sha256"] != member["sha256"]:
                     raise PreservationFailed("stored version failed verification")
-                if overwrite:
-                    os.replace(part, target)
-                else:
-                    durable.publish_new(part, target)
+            for part, target in staged:
+                try:
+                    if overwrite:
+                        os.replace(part, target)
+                    else:
+                        durable.publish_new(part, target)
+                except OSError as exc:
+                    if published:
+                        self.record({"event": "restore-partial", "version": event["id"], "published": published,
+                                     "failed": str(target), "error": str(exc)})
+                        raise PreservationFailed("restore stopped after {}: {} ({}); the event log names what was "
+                                                 "written".format(", ".join(published), target, exc)) from exc
+                    raise
                 published.append(str(target))
-            finally:
+        finally:
+            for part, _ in staged:
                 part.unlink(missing_ok=True)
         return {"published": published}
 
@@ -761,6 +787,8 @@ class Vault:
                 else:
                     members.append({"original": original, "missing": True,
                                     "source": str(self.root / "staging-links" / (uuid.uuid4().hex + "-absent" + ext))})
+            if self.is_busy():
+                raise PreservationFailed("the game (or SteamVR) started; import-legacy stopped, run it again later")
             with self._capture_lock():
                 kept = self.kept()
                 if rid in kept["legacy"]:
@@ -813,30 +841,53 @@ def watcher_status(root=None, now=None):
 
 
 def watch(vault_factory, stop=None, *more_factories):
-    """One watcher for every vault (saves, and the config INIs): the first vault's watch.lock makes it the only one."""
+    """One watcher for every vault (saves, and the config INIs). Each vault's own watch.lock is held, so a second
+    watcher on any of them exits. A vault that fails to build or to refresh never stops the others."""
+    import contextlib
     lower_priority()
     factories = (vault_factory,) + tuple(more_factories)
-    vaults = [f() for f in factories]
-    try:
-        with exclusive(vaults[0].root / "status" / "watch.lock", 0):
+    vaults = []
+    for f in factories:
+        try:
+            vaults.append(f())
+        except Exception as exc:  # e.g. Documents briefly unreachable: the other vaults still run
+            print("save vault: one vault could not start: {}: {}".format(type(exc).__name__, exc))
+            vaults.append(None)
+    if all(v is None for v in vaults):
+        raise SystemExit("save vault: no vault could start")
+    with contextlib.ExitStack() as locks:
+        try:
             for vault in vaults:
+                if vault is not None:
+                    locks.enter_context(exclusive(vault.root / "status" / "watch.lock", 0))
+        except TimeoutError:
+            print("save vault: a watcher is already running")
+            return 0
+        for vault in vaults:
+            if vault is not None:
                 vault.clean_staging()
-            refreshed = time.monotonic()
-            while not (stop and stop()):
-                if time.monotonic() - refreshed > FOLDER_REFRESH_S:
-                    vaults, refreshed = [f() for f in factories], time.monotonic()
-                for vault in vaults:
+        refreshed = time.monotonic()
+        while not (stop and stop()):
+            if time.monotonic() - refreshed > FOLDER_REFRESH_S:
+                refreshed = time.monotonic()
+                for i, f in enumerate(factories):
                     try:
-                        vault.sweep()
-                    except Exception as exc:  # the watcher must outlive one bad pass; the heartbeat says what failed
-                        try:
-                            vault.heartbeat(False, -1, "{}: {}".format(type(exc).__name__, exc)[:2000])
-                        except OSError:
-                            pass
-                time.sleep(POLL_S)
-    except TimeoutError:
-        print("save vault: a watcher is already running")
-        return 0
+                        fresh = f()
+                    except Exception:
+                        continue                                   # keep the last good instance
+                    if vaults[i] is None or fresh.root == vaults[i].root:
+                        vaults[i] = fresh
+            for vault in vaults:
+                if vault is None:
+                    continue
+                try:
+                    vault.sweep()
+                except Exception as exc:  # the watcher must outlive one bad pass; the heartbeat says what failed
+                    try:
+                        vault.heartbeat(False, -1, "{}: {}".format(type(exc).__name__, exc)[:2000])
+                    except OSError:
+                        pass
+            time.sleep(POLL_S)
     return 0
 
 
@@ -916,7 +967,7 @@ def main(argv=None):
         return watch(make_saves, None, make_inis)
     if a.cmd == "install-task":
         extra = "".join('--folder "{}" '.format(f) for f in a.folder)
-        return install_task('--project "{}" {}{}'.format(a.project, '--vault "{}" '.format(root) if a.vault else "", extra))
+        return install_task('--project "{}" {}{}'.format(a.project, '--vault "{}" '.format(save_root) if a.vault else "", extra))
     if a.cmd == "uninstall-task":
         return subprocess.run(["schtasks", "/Delete", "/TN", TASK, "/F"]).returncode
     if a.cmd == "status" and a.folders:

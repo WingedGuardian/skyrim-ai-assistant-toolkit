@@ -939,3 +939,164 @@ def test_one_watcher_sweeps_both_vaults(bed, tmp_path, monkeypatch):
     calls = iter([False, True])
     save_vault.watch(lambda: bed["vault"], lambda: next(calls), lambda: ini)
     assert bed["vault"].versions("Save79") and ini.versions("Skyrim")
+
+
+# ---- review round 3 (BLOCK on 35374ac)
+
+def test_replace_keeps_the_current_pair_even_from_a_vault_that_does_not_watch_its_folder(bed, tmp_path):
+    s, c = bed["saves"], bed["clock"]
+    write_pair(s, "Save80", ess=b"A" * 300, age=3600)
+    bed["vault"].sweep()
+    old = bed["vault"].versions("Save80")[-1]["id"]
+    (s / "Save80.ess").write_bytes(b"E" * 300)
+    os.utime(s / "Save80.ess", (c() - 3600, c() - 3600))
+    elsewhere = tmp_path / "Elsewhere"
+    elsewhere.mkdir()
+    cli = Vault(bed["root"], [elsewhere], is_busy=lambda: False, clock=c, reserve_gb=0)   # restore without --folder
+    cli.restore("Save80", event_id=old, replace=True, apply=True)
+    import hashlib
+    assert hashlib.sha256(b"E" * 300).hexdigest() in {e["ess"]["sha256"] for e in cli.versions("Save80")}
+
+
+def test_replace_refuses_when_the_present_pair_cannot_be_read(bed):
+    s, v = bed["saves"], bed["vault"]
+    write_pair(s, "Save81", age=3600)
+    v.sweep()
+    old = v.versions("Save81")[-1]["id"]
+    for p in s.glob("Save81.*"):
+        p.unlink()
+    (s / "Save81.ess").mkdir()                                   # present by name, not a file the scan can keep
+    with pytest.raises(save_vault.PreservationFailed):
+        v.restore("Save81", event_id=old, replace=True, apply=True)
+
+
+def test_a_vault_that_fails_to_start_does_not_stop_the_other(bed, monkeypatch):
+    write_pair(bed["saves"], "Save82", age=3600)
+    monkeypatch.setattr(save_vault.time, "sleep", lambda s: None)
+    calls = iter([False, True])
+
+    def broken():
+        raise OSError("Documents unreachable")
+    save_vault.watch(lambda: bed["vault"], lambda: next(calls), broken)
+    assert bed["vault"].versions("Save82")
+
+
+def test_a_second_watcher_on_the_ini_vault_alone_also_blocks(bed, tmp_path):
+    ini_root = tmp_path / "ini-vault"
+    ini = Vault(ini_root, [], is_busy=lambda: False, reserve_gb=0, exts=save_vault.INI_EXTS)
+    write_pair(bed["saves"], "Save83", age=3600)
+    from modding_harness.locking import exclusive
+    calls = iter([False, True])                                  # one pass at most, should the lock be ignored
+    with exclusive(ini_root / "status" / "watch.lock", 0):
+        save_vault.watch(lambda: bed["vault"], lambda: next(calls), lambda: ini)
+    assert bed["vault"].versions("Save83") == []                 # it exited before sweeping anything
+
+
+def test_other_volume_pairs_cost_one_game_check_per_pass(tmp_path):
+    far = tmp_path / "Far" / "Saves"
+    far.mkdir(parents=True)
+    for n in range(10):
+        write_pair(far, "Far%d" % n, ess=bytes([65 + n]) * 300, age=3600 + n)
+    calls = []
+    v = Vault(tmp_path / "vault", [far], is_busy=lambda: calls.append(1) or True, clock=Clock(), reserve_gb=0)
+    v._same_volume = lambda folder: False
+    out = v.sweep()
+    assert out["deferred"] == 10 and len(calls) <= 2
+
+
+def test_a_restore_that_fails_on_the_second_file_changes_neither(bed, monkeypatch):
+    s, v = bed["saves"], bed["vault"]
+    write_pair(s, "Save84", ess=b"A" * 300, skse=b"a" * 50, age=3600)
+    v.sweep()
+    old = v.versions("Save84")[-1]["id"]
+    for p in s.glob("Save84.*"):
+        p.unlink()
+    real = save_vault.durable.copy_verified
+
+    def fail_on_skse(src, dst, deadline=None):
+        if str(dst).endswith(".skse") or ".vault-" in str(dst) and src.name == v.versions("Save84")[-1]["skse"]["sha256"]:
+            raise OSError(28, "No space left")
+        return real(src, dst, deadline)
+    monkeypatch.setattr(save_vault.durable, "copy_verified", fail_on_skse)
+    with pytest.raises(OSError):
+        v.restore("Save84", event_id=old, apply=True)
+    assert not (s / "Save84.ess").exists() and not list(s.glob(".vault-*"))
+
+
+def test_a_publish_that_fails_midway_is_recorded(bed, monkeypatch):
+    s, v = bed["saves"], bed["vault"]
+    write_pair(s, "Save85", age=3600)
+    v.sweep()
+    for p in s.glob("Save85.*"):
+        p.unlink()
+    real = save_vault.durable.publish_new
+
+    def second_fails(part, target):
+        if str(target).endswith(".skse"):
+            raise OSError(5, "Access is denied")
+        return real(part, target)
+    monkeypatch.setattr(save_vault.durable, "publish_new", second_fails)
+    with pytest.raises(save_vault.PreservationFailed):
+        v.restore("Save85", apply=True)
+    assert [e for e in v.events() if e.get("event") == "restore-partial"]
+
+
+def test_a_corrupt_stored_copy_is_never_restored(bed):
+    s, v = bed["saves"], bed["vault"]
+    write_pair(s, "Save86", age=3600)
+    v.sweep()
+    e = v.versions("Save86")[-1]
+    blob = v.store.root / "blobs" / e["ess"]["sha256"]
+    os.chmod(blob, 0o666)
+    blob.write_bytes(b"x" * 300)
+    for p in s.glob("Save86.*"):
+        p.unlink()
+    with pytest.raises(save_vault.PreservationFailed):
+        v.restore("Save86", apply=True)
+    assert not (s / "Save86.ess").exists()
+
+
+def test_copy_to_never_overwrites(bed, tmp_path):
+    s, v = bed["saves"], bed["vault"]
+    write_pair(s, "Save87", age=3600)
+    v.sweep()
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "Save87.skse").write_bytes(b"mine")
+    with pytest.raises(FileExistsError):
+        v.restore("Save87", to=str(out))
+    assert (out / "Save87.skse").read_bytes() == b"mine"
+
+
+def test_legacy_import_stops_when_the_game_starts(bed, tmp_path):
+    m1 = _legacy(tmp_path, bed["saves"], "Save88", b"P" * 300, "20261013-000000-eeeeee-0")
+    m2 = _legacy(tmp_path, bed["saves"], "Save89", b"Q" * 300, "20261013-000000-ffffff-0")
+    both = tmp_path / "both.jsonl"
+    both.write_text(m1.read_text() + m2.read_text(), encoding="utf-8")
+    answers = iter([False, False, True])                         # start check, record 1, record 2
+    v = Vault(bed["root"], [bed["saves"]], is_busy=lambda: next(answers), clock=bed["clock"], reserve_gb=0)
+    with pytest.raises(save_vault.PreservationFailed):
+        v.import_legacy(both)
+    assert [e["legacy_id"] for e in v.events() if e.get("event") == "import"] == ["20261013-000000-eeeeee-0"]
+
+
+def test_config_discovery_finds_the_edition_folders(tmp_path):
+    docs = tmp_path / "Docs"
+    (docs / "My Games" / "Skyrim VR").mkdir(parents=True)
+    (docs / "My Games" / "Oblivion").mkdir(parents=True)
+    found = save_vault.discover_config(tmp_path, env={"SKYGUARD_NO_KNOWN_FOLDERS": "1", "USERPROFILE": str(tmp_path),
+                                                      "HOME": str(tmp_path), "SKYRIM_DOCUMENTS": str(docs),
+                                                      "SKYRIM_CONFIG_DIR": str(docs / "My Games" / "Skyrim VR")})
+    assert docs / "My Games" / "Skyrim VR" in found and docs / "My Games" / "Oblivion" not in found
+
+
+def test_another_volume_waits_if_the_game_starts_during_the_pass(bed, monkeypatch):
+    s, v = bed["saves"], bed["vault"]
+    write_pair(s, "Save90", age=3600)
+    pairs, _, _ = v.scan()
+    key = next(iter(pairs))
+    monkeypatch.setattr(Vault, "_same_volume", lambda self, folder: False)
+    v._busy = False                                              # the pass began with the game closed
+    bed["state"]["busy"] = True                                  # and it started before the copy
+    with pytest.raises(save_vault.Deferred):
+        v.capture(key, pairs[key])
