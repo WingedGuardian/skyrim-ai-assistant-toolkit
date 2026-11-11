@@ -12975,10 +12975,31 @@ MUTATIONS += [pytest.param("tools/skyguard/run.py", anchor, replacement, "tests/
      'test_both_session_starts_show_the_vault_line[claude-session-kb-guard-payload0]', 'claude-not-wired'),
 ]]
 
+# setup.sh and the save vault's sign-in task (2026-11-11): registered only when asked for; a failure is exit 1.
+_SSV = "tests/test_setup_save_vault.py::"
+MUTATIONS += [
+    pytest.param("setup.sh", '        --save-vault-task) WANT_VAULT_TASK=yes; shift ;;',
+                 '        --save-vault-task) WANT_VAULT_TASK=no; shift ;;',
+                 _SSV + "test_the_flag_tries_to_register_and_a_failure_is_exit_1", id="ssv-flag-ignored"),
+    pytest.param("setup.sh", 'if [ "$WANT_VAULT_TASK" = yes ] && [ -n "$VAULT_TASK_RC" ] && [ "$VAULT_TASK_RC" != 0 ]; then',
+                 'if false; then',
+                 _SSV + "test_the_flag_tries_to_register_and_a_failure_is_exit_1", id="ssv-failure-exits-0"),
+    pytest.param("setup.sh", '    if [ "$WANT_VAULT_TASK" = yes ]; then\n        if [ -z "$PY_FOUND" ]; then\n            VAULT_TASK_RC=2',
+                 '    if true; then\n        if [ -z "$PY_FOUND" ]; then\n            VAULT_TASK_RC=2',
+                 _SSV + "test_setup_names_the_vault_and_registers_no_task_unasked", id="ssv-registers-unasked",
+                 marks=pytest.mark.skipif(sys.platform != "win32", reason="the sign-in task branch is Windows only")),
+]
+
 # Save vault (2026-11-10): one twin per guarded clause of tools/save_vault.py.
 MUTATIONS += [pytest.param("tools/save_vault.py", anchor, replacement, "tests/test_save_vault.py::" + test,
                            id="sv-" + name)
               for anchor, replacement, test, name in [
+    ('    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("HARNESS_FIXTURE_ROOT"):\n        raise SystemExit("install-task: refused',
+     '    if os.environ.get("HARNESS_FIXTURE_ROOT"):\n        raise SystemExit("install-task: refused',
+     'test_no_logon_task_is_registered_under_a_test_harness[PYTEST_CURRENT_TEST]', 'task-under-pytest'),
+    ('    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("HARNESS_FIXTURE_ROOT"):\n        raise SystemExit("install-task: refused',
+     '    if os.environ.get("PYTEST_CURRENT_TEST"):\n        raise SystemExit("install-task: refused',
+     'test_no_logon_task_is_registered_under_a_test_harness[HARNESS_FIXTURE_ROOT]', 'task-under-launcher'),
     ('        if now - self.state["seen"][key][1] < SETTLE_S:\n            return False',
      '        if False:\n            return False', 'test_a_changed_pair_waits_one_settle_period', 'settle-clock'),
     ('        if now - pair["newest"] < SETTLE_S:\n            return False',

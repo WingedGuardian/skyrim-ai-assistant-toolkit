@@ -876,6 +876,25 @@ def test_the_logon_task_names_its_user_and_escapes_paths():
     assert "P&amp;Q" in xml and "a&lt;b&gt;" in xml and "x&amp;y" in xml and "P&Q" not in xml
 
 
+@pytest.mark.parametrize("marker", ["PYTEST_CURRENT_TEST", "HARNESS_FIXTURE_ROOT"])
+def test_no_logon_task_is_registered_under_a_test_harness(monkeypatch, tmp_path, marker):
+    """setup.sh and the CLI are run by hundreds of tests; none may leave a real scheduled task on the machine."""
+    ran = []
+    monkeypatch.setenv("SAVE_VAULT_DIR", str(tmp_path / "vault"))     # a broken guard still writes nothing real
+    monkeypatch.setattr(save_vault.subprocess, "run", lambda *a, **k: ran.append(a) or pytest.fail("ran schtasks"))
+    for k in ("PYTEST_CURRENT_TEST", "HARNESS_FIXTURE_ROOT"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv(marker, "1")
+    with pytest.raises(SystemExit, match="refused under a test harness"):
+        save_vault.install_task('--project "x" ')
+    assert ran == []
+
+
+def test_a_stopped_watcher_line_says_how_to_start_it(tmp_path):
+    alive, line = save_vault.watcher_status(tmp_path / "none")
+    assert alive is False and "python tools/save_vault.py watch" in line and "schtasks /Run /TN SkyrimSaveVault" in line
+
+
 def test_a_rebuilt_index_remembers_a_vanished_pair(bed):
     s, v, c = bed["saves"], bed["vault"], bed["clock"]
     write_pair(s, "Save77", age=3600)

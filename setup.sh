@@ -31,10 +31,13 @@ usage() {
     echo "  --lock          also lock the vanilla masters and archives read-only (off unless you ask)"
     echo "  --save-lock     lock the saves against any delete or change (Windows; asked when neither flag is given)"
     echo "  --no-save-lock  leave save locking off without asking"
+    echo "  --save-vault-task     start the save vault's watcher at Windows sign-in (asked when neither flag is given)"
+    echo "  --no-save-vault-task  do not register it (each agent session still starts the watcher)"
 }
 AGENT_ARG="auto"
 WANT_LOCK=""
 WANT_SAVE_LOCK=""
+WANT_VAULT_TASK=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --agent)
@@ -46,6 +49,8 @@ while [ $# -gt 0 ]; do
         --lock) WANT_LOCK=1; shift ;;
         --save-lock) WANT_SAVE_LOCK=yes; shift ;;
         --no-save-lock) WANT_SAVE_LOCK=no; shift ;;
+        --save-vault-task) WANT_VAULT_TASK=yes; shift ;;
+        --no-save-vault-task) WANT_VAULT_TASK=no; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "setup.sh: unknown option '$1'. Nothing was changed." >&2; usage >&2; exit 2 ;;
     esac
@@ -1273,6 +1278,47 @@ else
     fi
 fi
 
+# --- The save vault (4.1): every version of every save and settings INI is kept, whatever changed it ---
+# Each Claude Code / Codex session start says whether the vault's watcher runs and starts it when it does not
+# (tools/skyguard/run.py). The logon task starts it at sign-in instead, so versions are also kept while no agent
+# session is open. Registered only when asked for: the flag, or a yes at a real terminal. save_vault.py itself
+# refuses to register a task under a test harness.
+VAULT_TASK_RC=""
+echo ""
+echo "Save vault: every version of every save and settings INI is kept outside the game folder; nothing asks first."
+echo "  State and history: python tools/save_vault.py status [SAVE]    Restore: python tools/save_vault.py restore SAVE"
+if [ -z "$SL_WINDOWS" ]; then
+    if [ "$WANT_VAULT_TASK" = yes ]; then
+        echo "  !! --save-vault-task: the sign-in task needs Windows. Not registered."
+        VAULT_TASK_RC=3
+    fi
+    echo "  Its watcher starts with each Claude Code or Codex session (or run: python tools/save_vault.py watch)."
+else
+    if [ -z "$WANT_VAULT_TASK" ] && [ -t 0 ]; then
+        echo "  Its watcher starts with each Claude Code or Codex session. A sign-in task starts it with Windows instead,"
+        echo "  so saves are also kept while no agent session is open. No administrator rights are needed; remove it"
+        echo "  any time with python tools/save_vault.py uninstall-task."
+        read -r -p "Start the save vault at sign-in? (Y/n) " VT_ANSWER || VT_ANSWER="n"
+        case "$VT_ANSWER" in n|N|no|NO|No) WANT_VAULT_TASK=no ;; *) WANT_VAULT_TASK=yes ;; esac
+    fi
+    if [ "$WANT_VAULT_TASK" = yes ]; then
+        if [ -z "$PY_FOUND" ]; then
+            VAULT_TASK_RC=2
+            echo "  !! SIGN-IN TASK NOT REGISTERED: it needs Python 3.10+. Install it and re-run: bash setup.sh --save-vault-task"
+        else
+            MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $PY_FOUND -B "$PY_ROOT/tools/save_vault.py" --project "$PY_ROOT" \
+                install-task && VAULT_TASK_RC=0 || VAULT_TASK_RC=$?
+            if [ "$VAULT_TASK_RC" != 0 ]; then
+                echo "  !! SIGN-IN TASK NOT REGISTERED (exit $VAULT_TASK_RC, above). The watcher still starts with each agent session."
+            else
+                echo "  Sign-in task registered and started (SkyrimSaveVault). Remove: python tools/save_vault.py uninstall-task"
+            fi
+        fi
+    else
+        echo "  Sign-in task: not registered. python tools/save_vault.py install-task (or bash setup.sh --save-vault-task) adds it."
+    fi
+fi
+
 # --- Which agent ends up configured, said plainly ---
 CLAUDE_STATE="not configured"
 if [ -f "$GAME_DIR/CLAUDE.md" ] && ! grep -q "$DOC_PLACEHOLDERS" "$GAME_DIR/CLAUDE.md"; then CLAUDE_STATE="configured"; fi
@@ -1461,6 +1507,9 @@ if [ -n "$WANT_LOCK" ] && [ "$LOCK_RC" != 0 ]; then
     SETUP_RC=1
 fi
 if [ "$WANT_SAVE_LOCK" = yes ] && [ -n "$SAVE_LOCK_RC" ] && [ "$SAVE_LOCK_RC" != 0 ]; then
+    SETUP_RC=1
+fi
+if [ "$WANT_VAULT_TASK" = yes ] && [ -n "$VAULT_TASK_RC" ] && [ "$VAULT_TASK_RC" != 0 ]; then
     SETUP_RC=1
 fi
 exit "$SETUP_RC"

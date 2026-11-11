@@ -841,6 +841,11 @@ class Vault:
 
 # --------------------------------------------------------------------------- liveness, watcher, task
 
+TASK = "SkyrimSaveVault"
+START_HINT = ("start it: python tools/save_vault.py watch (or, with the Windows logon task installed: "
+              "schtasks /Run /TN " + TASK + ")")
+
+
 def watcher_status(root=None, now=None):
     """(alive, one line) from the heartbeat; what session start, hook-canary and skydoctor print."""
     path = Path(root or default_root()) / "status" / "heartbeat.json"
@@ -848,11 +853,11 @@ def watcher_status(root=None, now=None):
     try:
         beat = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return False, "save vault: NOT RUNNING (no heartbeat at {}); start it: save_vault.py watch".format(path)
+        return False, "save vault: NOT RUNNING (no heartbeat at {}); {}".format(path, START_HINT)
     age = now - float(beat.get("last_sweep", 0))
     if age > STALE_S:
-        return False, "save vault: NOT RUNNING (last sweep {:.0f} s ago, {}); restart: save_vault.py watch".format(
-            age, beat.get("time"))
+        return False, "save vault: NOT RUNNING (last sweep {:.0f} s ago, {}); {}".format(
+            age, beat.get("time"), START_HINT)
     if not beat.get("watched"):
         return False, "save vault: running but WATCHING NO SAVE FOLDER; check discovery (status --folders)"
     tail = "" if beat.get("ok") else "; PROBLEM: " + str(beat.get("error"))[:300]
@@ -921,9 +926,6 @@ def watch(vault_factory, stop=None, *more_factories):
     return 0
 
 
-TASK = "SkyrimSaveVault"
-
-
 def task_xml(python, script, args, user):
     return """<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
@@ -945,6 +947,8 @@ def task_xml(python, script, args, user):
 
 
 def install_task(args_text):
+    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("HARNESS_FIXTURE_ROOT"):
+        raise SystemExit("install-task: refused under a test harness (it would register a real logon task)")
     if os.name != "nt":
         raise SystemExit("install-task: Windows only (on Linux run `save_vault.py watch` from a systemd --user unit)")
     py = Path(sys.executable)
