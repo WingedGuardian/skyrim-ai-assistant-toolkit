@@ -12938,6 +12938,43 @@ MUTATIONS += [pytest.param(path, anchor, replacement,
      '        elif False:\n            bind(n.arg)', 'parameter-rebinding-unread'),
 ]]
 
+# Save vault at session start (2026-11-11): one twin per clause of run._vault_note, and one per wiring site.
+MUTATIONS += [pytest.param("tools/skyguard/run.py", anchor, replacement, "tests/test_session_vault_note.py::" + test,
+                           id="svn-" + name)
+              for anchor, replacement, test, name in [
+    ('    if not (own and tool.is_file()) or env.get("SKYGUARD_SAVE_VAULT", "").strip().lower() == "off":',
+     '    if not tool.is_file() or env.get("SKYGUARD_SAVE_VAULT", "").strip().lower() == "off":',
+     'test_nothing_for_a_project_that_is_not_this_toolkit', 'any-project'),
+    ('    if not (own and tool.is_file()) or env.get("SKYGUARD_SAVE_VAULT", "").strip().lower() == "off":',
+     '    if not (own and tool.is_file()):', 'test_the_vault_switch_silences_the_line_and_the_start', 'switch-ignored'),
+    ('    in_test = bool(env.get("PYTEST_CURRENT_TEST") or ', '    in_test = bool(None or ',
+     'test_under_the_test_harness_no_watcher_starts_and_no_real_heartbeat_is_read[PYTEST_CURRENT_TEST]',
+     'ignores-pytest'),
+    (' or env.get("HARNESS_FIXTURE_ROOT"))   # no opt-in', ' or None)   # no opt-in',
+     'test_under_the_test_harness_no_watcher_starts_and_no_real_heartbeat_is_read[HARNESS_FIXTURE_ROOT]',
+     'ignores-launcher'),
+    ('    if in_test and not env.get("SAVE_VAULT_DIR"):\n        return ""', '    if False:\n        return ""',
+     'test_under_the_test_harness_no_watcher_starts_and_no_real_heartbeat_is_read[PYTEST_CURRENT_TEST]',
+     'reads-the-real-heartbeat-in-tests'),
+    ('    if stopped and not in_test and not sweep_off:', '    if stopped and not sweep_off:',
+     'test_under_the_test_harness_no_watcher_starts_and_no_real_heartbeat_is_read[PYTEST_CURRENT_TEST]',
+     'starts-in-tests'),
+    ('    if stopped and not in_test and not sweep_off:', '    if stopped and not in_test:',
+     'test_the_sweep_switch_also_stops_the_watcher_start', 'starts-despite-the-sweep-switch'),
+    ('    if stopped and not in_test and not sweep_off:', '    if not in_test and not sweep_off:',
+     'test_a_running_vault_is_one_line_and_starts_nothing', 'starts-a-running-vault'),
+    ('    stopped = "NOT RUNNING" in line ', '    stopped = "NOT RUNNING" in line + ini_line ',
+     'test_an_ini_vault_down_alone_is_shown_and_left_to_the_running_watcher', 'ini-down-restarts'),
+    ('    if ini_alive != alive:', '    if False:',
+     'test_a_vault_with_a_problem_is_reported_and_not_restarted', 'ini-line-dropped'),
+    ('        out = _vault_note(a.project) + out\n        _session_snapshot(a.project, req.source',
+     '        _session_snapshot(a.project, req.source',
+     'test_both_session_starts_show_the_vault_line[codex-session-start-payload1]', 'codex-not-wired'),
+    ('        out = _vault_note(a.project) + out\n        _session_snapshot(a.project, "" if p["empty"]',
+     '        _session_snapshot(a.project, "" if p["empty"]',
+     'test_both_session_starts_show_the_vault_line[claude-session-kb-guard-payload0]', 'claude-not-wired'),
+]]
+
 # Save vault (2026-11-10): one twin per guarded clause of tools/save_vault.py.
 MUTATIONS += [pytest.param("tools/save_vault.py", anchor, replacement, "tests/test_save_vault.py::" + test,
                            id="sv-" + name)

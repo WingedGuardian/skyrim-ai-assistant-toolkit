@@ -164,6 +164,52 @@ def _disk_note(project) -> str:
     return note + "\n" if note else ""
 
 
+def _vault_note(project) -> str:
+    """The save vault's watcher, in one line (two when the INI vault differs), and the watcher started DETACHED when
+    it is not running: an upgraded install gets its vault at the next session start, with no setup run. Only for the
+    installed toolkit's own save_vault.py and never under the test harness (the sweep's markers and its switch, with
+    no opt-in, plus SKYGUARD_SAVE_VAULT=off): a test must never start a watcher on the real vault. A second watcher
+    exits by itself (watch.lock). Never raises: the vault must not cost the session its banner."""
+    tool = Path(__file__).resolve().parents[1] / "save_vault.py"
+    try:
+        own = (Path(project).resolve() / "tools" / "save_vault.py") == tool
+    except OSError:
+        own = False
+    env = os.environ
+    if not (own and tool.is_file()) or env.get("SKYGUARD_SAVE_VAULT", "").strip().lower() == "off":
+        return ""
+    in_test = bool(env.get("PYTEST_CURRENT_TEST") or env.get("HARNESS_FIXTURE_ROOT"))   # no opt-in: never in a test
+    if in_test and not env.get("SAVE_VAULT_DIR"):
+        return ""                              # a test reads no heartbeat but one it placed itself
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("skyguard_save_vault", tool)
+        vault = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(vault)
+        alive, line = vault.watcher_status(vault.default_root())
+        ini_alive, ini_line = vault.watcher_status(vault.config_root())
+    except Exception as e:  # noqa: BLE001
+        return "save vault: its state could not be read ({}); check: python tools/save_vault.py status\n".format(
+            e.__class__.__name__)
+    lines = [line]
+    if ini_alive != alive:
+        lines.append(ini_line.replace("save vault:", "INI vault:", 1))
+    stopped = "NOT RUNNING" in line            # an INI vault that is down alone is retried by the running watcher
+    sweep_off = env.get("SKYGUARD_HOUSEKEEP_SWEEP", "").strip().lower() == "off"
+    if stopped and not in_test and not sweep_off:
+        try:
+            import subprocess
+            flags = 0x00000008 | 0x00000200 | 0x08000000 if os.name == "nt" else 0   # detached, new group, no window
+            subprocess.Popen([sys.executable, "-B", str(tool), "--project", str(project), "watch"], cwd=str(project),
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             close_fds=True, creationflags=flags, start_new_session=os.name != "nt")
+            lines.append("save vault: started the watcher now; confirm with python tools/save_vault.py status. "
+                         "Until it runs, a changed save has no kept earlier version.")
+        except Exception:  # noqa: BLE001
+            lines.append("save vault: the watcher could not be started; run python tools/save_vault.py watch")
+    return "\n".join(lines) + "\n"
+
+
 def _recovery_deadline() -> float:
     """Task 15: a recovery snapshot or a save backup ends this far before the engine budget's watchdog."""
     return _T0 + _engine_budget() - SNAPSHOT_MARGIN
@@ -225,6 +271,7 @@ def _codex(a, raw: str) -> int:
     if a.role == "session-start":
         _session_line(a, req.session_id, source=req.source, transcript=req.transcript_path)
         out, status, code = session.run_status(a.project, req.source, a.bash, audit, root=a.root_win or a.root)
+        out = _vault_note(a.project) + out
         _session_snapshot(a.project, req.source, audit)
         out = session.with_charter(_disk_note(a.project) + out, a.project, req.session_id)
         _telemetry(a, Verdict("allow", "", "", status, code))
@@ -389,6 +436,7 @@ def main(argv=None) -> int:
     else:
         out, status, code = session.run_status(a.project, "" if p["empty"] else p["source"], a.bash, audit,
                                               root=a.root_win or a.root)
+        out = _vault_note(a.project) + out
         _session_snapshot(a.project, "" if p["empty"] else p["source"], audit)
         out = session.with_charter(_disk_note(a.project) + out, a.project, p["session_id"])
         _telemetry(a, Verdict(status=status, code=code))
