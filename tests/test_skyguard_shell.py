@@ -415,3 +415,28 @@ def test_rule_trace_records_the_rule_id(tmp_path):
     a = audit.Audit(str(tmp_path))
     shell_rules.decide("", r, a)
     assert a.fired == [("S-INERT-NOCMD", "deny")]
+
+
+# ---- restored in 4.1 (kept behaviour; the reads of the retired save plan are taken out)
+@pytest.mark.parametrize("cid,layout,cmd,decision,text", CORPUS, ids=[c[0] for c in CORPUS])
+def test_port_matches_recorded_bash_verdict(tmp_path, monkeypatch, cid, layout, cmd, decision, text):
+    # Every row was recorded from the bash hooks under Git Bash on Windows, where `/c/...` is drive C:. A POSIX host
+    # reads it natively since 4ebdd1c, so pin the recording host (CI run 39145224156: dialect-msys-1/9 flipped).
+    monkeypatch.setattr(paths, "POSIX_HOST", False)
+    r = paths.roots("/x/install", "", LAYOUT_ENV[layout])
+    v = shell_rules.decide(cmd, r, audit.Audit(str(tmp_path)), shell="bash")      # every row is a Bash tool payload
+    if v.decision == "allow" and v.context:
+        got = ("advise", v.context)
+    elif v.decision == "allow":
+        got = ("allow", "")
+    else:
+        got = (v.decision, v.reason)
+    if cid in SUPERSEDED:
+        pytest.skip("deliberately re-specified by an intended row (tests/guard_corpus/intended.jsonl)")
+    # A rule a later Plan 5 task REWROTE or REMOVED keeps its frozen row's decision, not its text.
+    frozen = json.loads((REPO / "tests" / "guard_corpus" / "legacy_rules.json").read_text(encoding="utf-8"))
+    rewritten = [t for t, rid in frozen.items() if rid in rules.REMOVED or not rules.RULES[rid]["legacy"]]
+    if text and any(text == t.replace("{c}", cmd) for t in rewritten):
+        assert got[0] == decision
+    else:
+        assert got == (decision, text)

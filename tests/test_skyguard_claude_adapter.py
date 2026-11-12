@@ -375,3 +375,20 @@ def test_run_judges_monitor_in_the_unknown_dialect(tmp_path):
     assert json.loads(bash.stdout) == {}
     # To bash the registry delete is here-document text; the PowerShell reading sees a command (S-REGISTRY).
     assert json.loads(mon.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+# ---- restored in 4.1 (kept behaviour; the reads of the retired save plan are taken out)
+def test_run_passes_the_shell_dialect(tmp_path):
+    """Wiring proof: here-document text that holds a Bethesda registry delete is allowed when the engine is told the
+    dialect is bash, but refused under the unknown dialect (bash AND PowerShell: the PowerShell reading runs it).
+    run.py must therefore be passing shell."""
+    bs = chr(92)
+    cmd = "cat <<'EOF'\nreg delete \"HKLM" + bs + "SOFTWARE" + bs + "Bethesda Softworks" + bs + "Skyrim VR\" /f\nEOF"
+    sys.path.insert(0, str(REPO / "tools"))
+    from skyguard import audit as audit_mod, paths, shell_rules
+    roots = paths.roots(str(tmp_path), "", {})
+    unknown = shell_rules.decide(cmd, roots, audit_mod.Audit(str(tmp_path)), shell=None, env={})
+    bash = shell_rules.decide(cmd, roots, audit_mod.Audit(str(tmp_path)), shell="bash", env={})
+    assert unknown.decision == "deny" and bash.decision == "allow"
+    r = _run("protect-bash", json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}}), tmp_path)
+    assert r.returncode == 0 and json.loads(r.stdout) == {}

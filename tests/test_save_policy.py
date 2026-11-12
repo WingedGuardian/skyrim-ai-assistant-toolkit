@@ -9,7 +9,6 @@
 
 Every test uses fake saves in tmp_path. No real save is read or written.
 """
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -19,12 +18,11 @@ import pytest
 from conftest import REPO
 
 sys.path.insert(0, str(REPO / "tools"))
-from skyguard import (audit as audit_mod, backup, codes, engine, mcp_rules, paths, recovery, rules,  # noqa: E402
+from skyguard import (audit as audit_mod, backup, engine, mcp_rules, paths, recovery, rules,  # noqa: E402
                       shell_rules, snapcli, snapshot, write_rules)
 from skyguard import save_store
-from modding_harness import approval as scoped_approval, durable, preservation, workspace
+from modding_harness import approval as scoped_approval, workspace
 from skyguard.adapters import codex  # noqa: E402
-from skyguard.verdict import Verdict  # noqa: E402
 
 NOTE = "Note: the guard backs up {} before this runs (restore: tools/skyguard.sh snapshot list --kind save)."
 
@@ -165,14 +163,6 @@ def saved(project):
                     records.append(dict(src=member["path"], snap="core-" + manifest["id"],
                                         group=group["logical_save"], sha256=member["sha256"], missing=missing))
     return records
-
-
-def stems(v):
-    return sorted({saves._split(t.path)[1] for t in v.saves.change.targets}) if v.saves else []
-
-
-def ops(v):
-    return sorted({t.op for t in v.saves.change.targets}) if v.saves else []
 
 
 # ================================================================ what counts as a save change (judge)
@@ -407,3 +397,22 @@ ASKERS = {
     "git-discard": lambda S, I: "git checkout -- Data/Plugin.esp ; ",
 }
 
+
+# ---- restored in 4.1 (kept behaviour; the reads of the retired save plan are taken out)
+@pytest.mark.parametrize("cmd", ["cp {S1} /tmp/out/", "sha256sum {S1} {S2} {S3}", "cat {S1}", "ls -la {dir}",
+                                 "Get-FileHash {S1}", "Copy-Item {S1} C:/Temp/out.ess"],
+                         ids=["copy-out", "hash", "read", "list", "ps-hash", "ps-copy-out"])
+def test_reading_hashing_listing_and_copying_out_are_free(inst, cmd):
+    text = cmd.format(S1=inst.p("Save1.ess"), S2=inst.p("Save2.ess"), S3=inst.p("Save3.ess"), dir='"' + inst.S + '"')
+    v = inst.shell(text, shell="powershell" if cmd[0].isupper() else "bash")
+    assert (v.decision, v.reason, v.context) == ("allow", "", "")
+
+
+def test_an_existing_save_outside_the_settings_folder_is_free(inst, tmp_path):
+    """Only saves in the settings folder are judged (writes.is_save): a copy elsewhere is the user's own scratch."""
+    (tmp_path / "work").mkdir()
+    (tmp_path / "work" / "Out.ess").write_bytes(b"a scratch copy")
+    v = inst.shell('cp /tmp/x "{}"'.format((tmp_path / "work" / "Out.ess").as_posix()))
+    assert (v.decision, v.context) == ("allow", "")
+    w = write_rules.decide((tmp_path / "work" / "Out.ess").as_posix(), inst.audit, roots=inst.roots)
+    assert (w.decision, w.context) == ("allow", "")

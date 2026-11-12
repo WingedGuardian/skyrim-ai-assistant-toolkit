@@ -4358,8 +4358,8 @@ def _t11curl(case):
 _T11_CLAUSES = [
     # (id, file, find, replace, test that must go red)
     # S-DEVBENCH-CRASH: one mutation per route, then per clause
-    ("rule-S-DEVBENCH-CRASH-mcp", _MC, "    hit = judge(parts[-1], args, roots, None, env, found=found)",
-     "    hit = None", _t11row("t11-mcp-smp-reset")),
+    ("rule-S-DEVBENCH-CRASH-mcp", _MC, "    hit = judge(parts[-1], args, roots, None, env)\n",
+     "    hit = None\n", _t11row("t11-mcp-smp-reset")),
     ("rule-S-DEVBENCH-CRASH-curl", _MC, "            calls = _web_call(e, command)", "            calls = []",
      _t11row("t11-curl-smp-reset")),
     ("rule-S-DEVBENCH-CRASH-cli", _MC, "            calls = _cli_call(e, command)", "            calls = []",
@@ -11235,8 +11235,8 @@ MUTATIONS += [pytest.param(f, find, rep, test, id=i) for i, f, find, rep, test i
      _RNG + "test_a_direct_native_write_is_denied[unproven-args]"),
     ("rule-S-RESAVER-NATIVE-DIRECT-ignores-launchers", _SRN, "        if program in RESAVER_NATIVE_LAUNCHERS:",
      "        if False:", _RNG + "test_a_direct_native_write_is_denied[gui-via-start]"),
-    ("rule-S-RESAVER-NATIVE-DIRECT-not-wired", _SRN, "    native = resaver_native_direct(command, parsed)\n    if native:",
-     '    native = ""\n    if native:', _RNG + "test_a_direct_native_write_is_denied[structured-apply]"),
+    ("rule-S-RESAVER-NATIVE-DIRECT-not-wired", _SRN, "    native = resaver_native_direct(command, parsed)          #",
+     '    native = ""          #', _RNG + "test_a_direct_native_write_gets_the_note[structured-apply]"),
     ("rule-S-RESAVER-NATIVE-DIRECT-shadowed", "tools/skyguard/engine.py",
      'NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-RESAVER-NATIVE-DIRECT",))', "",
      _RNG + "test_the_rule_is_never_shadowed"),

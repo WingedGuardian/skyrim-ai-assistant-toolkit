@@ -373,3 +373,14 @@ def test_a_root_write_in_interpreter_code_is_noted():
 def test_a_write_in_data_keeps_its_own_note_and_gets_no_root_note():
     got, fired = decide('echo x > "' + INSTALL + '/Data/notes.txt"')
     assert fired == {"S-WRITE-INSTALL"}
+
+
+# ---- restored in 4.1 (kept behaviour; the reads of the retired save plan are taken out)
+@pytest.mark.parametrize("shell,direct,var", _VAR_PAIRS, ids=_VAR_IDS)
+def test_a_same_command_literal_target_is_judged_as_its_literal(shell, direct, var):
+    if "Saves/" in direct:          # 4.1: no rule decides on a save; both forms are judged alike (allowed)
+        assert decide(var, cwd="C:/w", shell=shell) == decide(direct, cwd="C:/w", shell=shell), var
+    else:
+        want = decide(direct, cwd="C:/w", shell=shell)
+        assert want[0][0] != "allow", ("the direct form must be caught, or this pair proves nothing", direct)
+        assert decide(var, cwd="C:/w", shell=shell) == want, var

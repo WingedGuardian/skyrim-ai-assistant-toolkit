@@ -10,7 +10,7 @@ import pytest
 from conftest import REPO
 
 sys.path.insert(0, str(REPO / "tools"))
-from skyguard import audit, codes, engine, paths  # noqa: E402
+from skyguard import audit, engine, paths  # noqa: E402
 from skyguard.request import Request  # noqa: E402
 
 EXT, CO = ".ess", ".skse"
@@ -39,10 +39,6 @@ def box(tmp_path_factory):
                       cwd=cwd or inst.as_posix(), session_id="s", tool_name="Bash")
         return engine.evaluate_shell(req, roots, audit.Audit(inst.as_posix()))
     yield judge
-
-
-def _pairs(v):
-    return len(saves._existing(saves.count(v.saves.change))) if v.saves is not None else 0
 
 
 # ---- piped input and member calls reach what the earlier stage names
@@ -182,3 +178,30 @@ def test_literal_python_copies_of_a_plugin_are_read_as_cp_is(box, code):
     """Seen in every spelling, and judged as `cp` into Data is: advice, because copying a built plugin in is routine."""
     v = box('python -c "{}"'.format(code.format(B="$B")))
     assert v.decision == "allow" and "X.esp" in v.context, v
+
+
+# ---- restored in 4.1 (kept behaviour; the reads of the retired save plan are taken out)
+@pytest.mark.parametrize("cmd,shell,want", [
+    ("Move-Item -Path $S/a$E,$S/b$E -Destination $B/bk", "powershell", 2),
+    ("Set-Content $S/a$E,$S/b$E x", "powershell", 2),
+    ("rm -f $S/{a,b}$E", "bash", 2),
+    ("Set-Content -Path $B/other/x.txt -Value a,b,c", "powershell", 0),
+    ("cp $B/other/notes.txt $S/", "bash", 0),
+    ("cp $B/bk/*.txt $S/", "bash", 0),
+    ("tar -xf $B/x.tar -C $B/other", "bash", 0),
+    ("cp $B/bk/* $B/other/", "bash", 0),
+    ("rm -f $B/other/{x,y}.txt", "bash", 0),
+    ("echo {a,b}", "bash", 0),
+    ("echo '{a,b,c}$E'", "bash", 0),
+    ("Get-ChildItem $S | Select-Object Name", "powershell", 0),
+    ("Get-ChildItem $B/other | Clear-Content", "powershell", 0),
+    ("Get-ChildItem $B/other | % Delete", "powershell", 0),
+    ("Get-ChildItem $S | ForEach-Object Name", "powershell", 0),
+    ("f() { cd /tmp; }; f; ls", "bash", 0),
+    ("f() ( ls ); f", "bash", 0),
+    ("g() { cd \"$1\"; ls; }; g /tmp", "bash", 0),
+    ("w() { local f=\"$1\"; shift; printf '%s' \"$1\" > \"$B/other/$f\"; }; w a.txt hi", "bash", 0),
+], ids=lambda x: x[:42] if isinstance(x, str) else str(x))
+def test_ordinary_commands_stay_allowed(box, cmd, shell, want):
+    v = box(cmd, shell)
+    assert v.decision == "allow", v          # `want` (saves counted) went with the save plan in 4.1

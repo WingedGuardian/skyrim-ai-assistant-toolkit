@@ -179,3 +179,9 @@ def test_an_apply_patch_delete_by_absolute_posix_path_is_denied_on_a_posix_host(
     audit = Audit(GAME)
     v = engine.pre_tool(codex.to_request(raw, "linux"), GAME, _roots, audit)
     assert (v.decision, {rid for rid, _ in audit.fired}) == ("deny", {"S-DEL-INSTALL"})
+
+
+# ---- restored in 4.1 (kept behaviour; the reads of the retired save plan are taken out)
+def test_a_powershell_plugin_overwrite_is_seen_on_a_posix_host(posix):
+    """The guard SEES a PowerShell write under a POSIX install (it was shown on a save until 4.1)."""
+    assert _claude("PowerShell", "Set-Content '{}/Data/Mine.esp' x".format(GAME)) == ("deny", {"S-WRITE-PLUGIN"})

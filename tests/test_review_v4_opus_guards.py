@@ -279,3 +279,13 @@ def test_a_delete_and_a_rename_of_one_name_do_not_share_a_destination(world):
 def test_a_path_destination_is_read_like_a_string_one(world, code, want):
     assert judge(world, 'python -c "' + code + '"')[0] == want
 
+
+# ---- restored in 4.1 (kept behaviour; the reads of the retired save plan are taken out)
+def test_a_whitelisted_folder_climbed_out_of_is_not_whitelisted(world):
+    install, config, roots = world
+    a = audit.Audit("")
+    a.raw = lambda line: None
+    inside = install + "/.claude/backups/x.ini"
+    assert write_rules.decide(inside, a, roots=roots, cwd=install, env=os.environ).context == ""       # whitelisted
+    path = install + "/.claude/backups/../../Data/SKSE/Plugins/x.ini"                               # climbed out
+    assert "x.ini" in write_rules.decide(path, a, roots=roots, cwd=install, env=os.environ).context

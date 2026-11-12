@@ -414,3 +414,96 @@ def test_a_readable_body_is_not_second_guessed_by_the_text():
 def test_the_console_tool_name_is_case_insensitive_on_the_wire():
     assert shell("curl -s http://127.0.0.1:8921/api/tool/Console -d 'command=smp reset'")[1] == {"S-DEVBENCH-CRASH"}
 
+
+# ---- restored in 4.1 (kept behaviour; the reads of the retired save plan are taken out)
+def save_exists(name, roots, env):
+    """True/False: whether the FIRST existing Saves folder (mcp_rules.saves_folder) holds <name>.ess; None: no folder.
+    The rules read no save since 4.1; the lookup is what the save store and the sentinel still use."""
+    folder = mcp_rules.saves_folder(roots, env)
+    if folder is None:
+        return None
+    try:
+        return (name + ".ess").casefold() in {n.casefold() for n in os.listdir(folder)}
+    except OSError:
+        return None
+
+
+def test_save_exists_is_unknown_without_a_saves_folder(tmp_path):
+    r = paths.roots("C:/t11/x", "", {"SKYRIM_CONFIG_DIR": tmp_path.as_posix()})
+    assert save_exists("Existing", r, ENV0) is None
+    assert save_exists("Existing", paths.roots("C:/t11/x", "", {}), ENV0) is None
+
+
+def test_save_exists_reads_the_saves_folder_case_insensitively(cfg):
+    r = _roots("saves", cfg)
+    assert save_exists("Existing", r, ENV0) is True
+    assert save_exists("EXISTING", r, ENV0) is True
+    assert save_exists("Fresh", r, ENV0) is False
+
+
+def test_the_first_existing_saves_folder_wins(tmp_path, cfg):
+    """A declared config dir with no Saves folder is skipped; the first one that HAS a Saves folder is the only one read."""
+    def configured(*directories):
+        # Build both comparison and physical I/O roots through the production
+        # constructor; replacing just config_dirs leaves the physical roots stale.
+        config = paths.PathsConfig({}, {"SKYRIM_CONFIG_DIR": directories}, ())
+        return paths.roots("C:/t11/x", "", config)
+
+    empty = tmp_path / "other"
+    (empty / "Saves").mkdir(parents=True)
+    r = paths.roots("C:/t11/x", "", {"SKYRIM_CONFIG_DIR": empty.as_posix()})
+    assert save_exists("Existing", r, ENV0) is False
+    r = configured(tmp_path.as_posix() + "/none", empty.as_posix(), cfg)
+    assert save_exists("Existing", r, ENV0) is False               # `other` has a Saves folder: it wins
+    r = configured(tmp_path.as_posix() + "/none", cfg, empty.as_posix())
+    assert save_exists("Existing", r, ENV0) is True                # `none` skipped, `cfg` wins
+
+
+def test_a_declared_config_dir_outranks_documents(tmp_path, cfg):
+    env = _home(tmp_path)
+    other = tmp_path / "cfg2" / "Saves"
+    other.mkdir(parents=True)
+    r = paths.roots("C:/t11/x", "", {"SKYRIM_CONFIG_DIR": (tmp_path / "cfg2").as_posix()})
+    assert save_exists("Existing", r, env) is False
+
+
+def test_documents_is_the_fallback_when_no_config_dir_has_saves(tmp_path):
+    env = _home(tmp_path)
+    r = paths.roots("C:/t11/x", "", {})
+    assert save_exists("Existing", r, env) is True
+    assert save_exists("Fresh", r, env) is False
+    assert save_exists("Existing", r, ENV0) is None
+
+
+@pytest.mark.parametrize("game", ["Skyrim VR", "Skyrim Special Edition", "Skyrim"])
+def test_every_game_folder_name_is_searched(tmp_path, game):
+    assert save_exists("Existing", paths.roots("C:/t11/x", "", {}), _home(tmp_path, game)) is True
+
+
+def test_vr_outranks_the_other_game_folders(tmp_path):
+    env = _home(tmp_path, "Skyrim")
+    (tmp_path / "Documents" / "My Games" / "Skyrim VR" / "Saves").mkdir(parents=True)
+    assert save_exists("Existing", paths.roots("C:/t11/x", "", {}), env) is False
+
+
+@pytest.mark.parametrize("game", ["Skyrim Special Edition GOG", "Skyrim Special Edition EPIC"])
+def test_the_gog_and_epic_se_folders_are_documents_fallbacks(tmp_path, game):
+    """GOG and Epic SE/AE keep their saves under their own My Games folder (SKSE64's SAVE_FOLDER_NAME): a DevBench
+    save over an existing save there must still be recognised as one."""
+    env = _home(tmp_path, game)
+    r = paths.roots("C:/t11/x", "", {})
+    assert save_exists("Existing", r, env) is True
+
+
+@pytest.mark.parametrize("key", ["HOME", "OneDrive", "OneDriveConsumer", "OneDriveCommercial"])
+def test_a_redirected_documents_is_found(tmp_path, key):
+    env = _home(tmp_path)
+    env = {key: env["USERPROFILE"]}
+    assert save_exists("Existing", paths.roots("C:/t11/x", "", {}), env) is True
+
+
+def test_an_empty_documents_variable_is_not_read_relative_to_the_cwd(tmp_path, monkeypatch):
+    _home(tmp_path)                                           # Documents/My Games/Skyrim VR/Saves under tmp_path
+    monkeypatch.chdir(tmp_path)
+    env = {"USERPROFILE": "", "OneDrive": ""}
+    assert save_exists("Existing", paths.roots("C:/t11/x", "", {}), env) is None
