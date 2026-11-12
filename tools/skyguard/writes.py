@@ -996,8 +996,6 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
         for dst, srcs in copy_targets(e):
             # The destination as written AND where it resolves (`cp a.ini x.ini` run inside Data/SKSE/Plugins).
             a_dst = targets.resolve_operand(e, dst, cwd, env)
-            if is_save(a_dst, roots):
-                continue                    # a save replaced: no rule and no note (the save vault)
             kind = file_class(dst, a_dst or "")
             if kind == "plugin" and any(s.lower() in NULL_TARGETS for s in srcs):
                 plugin.append(_name(dst))                           # cp /dev/null X.esp truncates it: a write

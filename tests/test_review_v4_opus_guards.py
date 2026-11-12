@@ -295,3 +295,12 @@ def test_git_bash_xcopy_switches_are_switches(world):
     """`//E` is how Git Bash spells an xcopy switch MSYS must not rewrite: a switch, never the destination (it was
     shown on a copy into Saves until 4.1; a plugin copied into Data gets its note the same way)."""
     assert "S-COPY-PLUGIN" in judge(world, "xcopy bk/x.esp '<I>/Data' //E //Y", cwd="C:/Temp")[1]
+
+
+@ROOTED_ON_A_DRIVE
+def test_a_piped_copy_onto_a_plugin_is_seen(world):
+    """`Get-Item x | Copy-Item -Destination <plugin>`: the source arrives through the pipe, the copy is still read."""
+    bs = chr(92)
+    cmd = "Get-Item C:" + bs + "Temp" + bs + "x.esp | Copy-Item -Destination '<I>/Data/x.esp'"
+    assert "S-COPY-PLUGIN" in judge(world, cmd, "powershell", "C:/Temp")[1]
+

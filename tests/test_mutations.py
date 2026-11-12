@@ -3335,7 +3335,7 @@ MUTATIONS += [
     # R7 now lives in the parser: a heredoc body fed to a shell is commands. Treat every body as data and the
     # ReSaver run inside `bash <<'EOF'` must stop asking (the Task 5 entry names the parser test; this one the rule).
     pytest.param("tools/skyguard/shellparse.py", "if self.bodies and program in ALL_SHELLS and self.recurse:",
-                 "if False:", "tests/test_skyguard_shell.py::test_resaver_rows[t04-bash-heredoc]",
+                 "if False:", "tests/test_shellparse.py::test_t04_rows_come_out_as_executed_commands[t04-bash-heredoc]",
                  id="rule-S-RESAVER-APPLY-heredoc-consumer"),
 ]
 # Task 4 fix rounds 2-3: a hook that answers after its timeout is dropped, so each cause of superlinear matching is
@@ -4414,11 +4414,9 @@ _T11_CLAUSES = [
      _T11 + "test_a_command_that_names_neither_is_not_scanned"),
     ("rule-S-DEVBENCH-CRASH-wired", _SHR, '    if dev and dev[0] == "S-DEVBENCH-CRASH":', "    if False:",
      _t11row("t11-curl-smp-reset")),
-    ("rule-S-DEVBENCH-CRASH-outranks-ask", _MC, '            if hit[0] == "S-DEVBENCH-CRASH":\n                return hit',
-     '            if False:\n                return hit', _T11 + "test_a_deny_outranks_an_ask_in_one_command"),
+    ("rule-S-DEVBENCH-CRASH-outranks-ask", _MC, '            if hit is not None:             # judge()',
+     '            if False:             # judge()', _T11 + "test_a_deny_outranks_an_ask_in_one_command"),
     # S-DEVBENCH-SAVE
-    ("rule-S-DEVBENCH-SAVE-name-slash", _MC, "_BAD_NAME = re.compile(r'[/" + BS * 2, "_BAD_NAME = re.compile(r'[" + BS * 2,
-     _t11row("t11-mcp-save-path-name")),
     # rt-fix-b: `.` and `..` are now emptied by the trailing-dot strip (Windows drops trailing dots), so their own
     # clause was dead and is gone; the strip is what the [dot] / [dotdot] cases now guard.
     ("rule-S-DEVBENCH-SAVE-roots", "tools/skyguard/run.py", 'v = engine.evaluate_mcp(p["tool_name"], p["mcp_input"], audit, roots=roots)',
@@ -4500,9 +4498,9 @@ _T11_R1 = [
     ("rule-S-DEVBENCH-CRASH-unreadable-case", _MC, '|$)""", re.IGNORECASE)', '|$)""")', _t11u("case")),
     # (rule-S-DEVBENCH-SAVE-asks-every-save retired by the save policy, said so: a NEW name reported as a hit is counted
     # again by saves.count, which finds no file and backs nothing up -- the verdict cannot change, an equivalent mutant.)
-    ("rule-S-DEVBENCH-SAVE-saves-folder", _MC, '[os.path.join(d, "Saves") for d', "[d for d", _t11row("t11-mcp-save-existing")),
+    ("rule-S-DEVBENCH-SAVE-saves-folder", _MC, '[os.path.join(d, "Saves") for d', "[d for d", _T11 + "test_the_first_existing_saves_folder_wins"),
     ("rule-S-DEVBENCH-SAVE-config-dirs", _MC, '    cands = [os.path.join(d, "Saves") for d in roots.physical_config_dirs or roots.config_dirs]', "    cands = []",
-     _t11row("t11-mcp-save-existing")),
+     _T11 + "test_the_first_existing_saves_folder_wins"),
     ("rule-S-DEVBENCH-SAVE-first-wins", _MC, "    return next((c for c in cands if os.path.isdir(c)), None)",
      "    return next((c for c in reversed(cands) if os.path.isdir(c)), None)", _T11 + "test_the_first_existing_saves_folder_wins"),
     ("rule-S-DEVBENCH-SAVE-skips-missing", _MC, "    return next((c for c in cands if os.path.isdir(c)), None)",
@@ -4510,7 +4508,7 @@ _T11_R1 = [
     ("rule-S-DEVBENCH-SAVE-config-outranks-documents", _MC, "    for docs in _documents(env):\n        cands += [",
      "    for docs in _documents(env):\n        cands = [", _T11 + "test_a_declared_config_dir_outranks_documents"),
     ("rule-S-DEVBENCH-SAVE-documents-fallback", _MC, "    for docs in _documents(env):", "    for docs in []:",
-     _t11row("t11-mcp-save-docs-existing")),
+     _T11 + "test_documents_is_the_fallback_when_no_config_dir_has_saves"),
     ("rule-S-DEVBENCH-SAVE-game-folders", _MC, "for g in paths.GAME_FOLDERS]", 'for g in ("Skyrim VR",)]',
      _T11 + "test_every_game_folder_name_is_searched[Skyrim Special Edition]"),
     ("rule-S-DEVBENCH-SAVE-game-folder-base", _MC, "for g in paths.GAME_FOLDERS]", 'for g in ("Skyrim VR", "Skyrim Special Edition")]',
@@ -6467,8 +6465,7 @@ _RTB_CLAUSES = [
     # --- S-SAVE-BACKUP (the save policy, 2026-10-13; was S-WRITE-SAVE's ask): a write, copy or move onto a save in
     # the settings folder is a save change, backed up first. Each route that finds one, and the wiring that judges it.
     ("rule-S-SAVE-BACKUP-write", _WR, "            if is_save(a, roots):", "            if False:", _rtb("save-redirect")),
-    ("rule-S-SAVE-BACKUP-copy-onto", _WR, "            if is_save(a_dst, roots):", "            if False:", _rtb("save-cp")),
-    ("rule-S-SAVE-BACKUP-cosave", _WR, 'SAVE_EXTS = (".ess", ".skse")', 'SAVE_EXTS = (".ess",)', _rtb("save-cosave")),
+    ("rule-S-SAVE-BACKUP-cosave", _WR, 'SAVE_EXTS = (".ess", ".skse")', 'SAVE_EXTS = (".ess",)', "tests/test_save_policy.py::test_sed_on_a_save_is_no_crlf_refusal[cosave]"),
     ("rule-S-SAVE-BACKUP-settings-folder-only", _WR, '.endswith(SAVE_EXTS) and targets.zone(abs_path, roots) == "config"',
      ".endswith(SAVE_EXTS)", "tests/test_save_policy.py::test_an_existing_save_outside_the_settings_folder_is_free"),
     # --- S-MOVE-ROOT: moving the install or its folders away
@@ -6547,10 +6544,9 @@ _RTB_CLAUSES = [
      '    for s in ([args.get("command")] if isinstance(args, dict) and isinstance(args.get("command"), str) else []):',
      _rtb("mcp-unknown-key")),
     ("rule-S-DEVBENCH-CRASH-nested-object", _MC, "    elif isinstance(obj, dict):", "    elif False:", _rtb("mcp-nested")),
-    ("rule-S-DEVBENCH-SAVE-scenario-steps", _MC, "        for stool, sargs in _steps(args):", "        for stool, sargs in ():",
-     _rtb("mcp-scenario-step-save")),
-    ("rule-S-DEVBENCH-SAVE-scenario-console-step", _MC, '        if isinstance(step.get("console"), str):', "        if False:",
-     _rtb("mcp-scenario-console-save")),
+    # (4.1: the scenario-step and JSON-RPC unpacking twins went with the DevBench save rule. The crash refusal reads
+    # every string of a call whatever its shape, so those mutants changed no decision: equivalent, not survivors.
+    # The unpacking itself is now redundant; simplifying it is a release-review item.)
     ("rule-S-DEVBENCH-CRASH-server-separators", _MC, 're.sub(r"[-_.' + BS + 's]", "", server.lower())', "server.lower()",
      _T11 + "test_any_devbench_server_name_is_judged[dev-bench]"),
     ("rule-S-DEVBENCH-CRASH-server-case", _MC, '"", server.lower())', '"", server)',
@@ -6560,8 +6556,6 @@ _RTB_CLAUSES = [
      _rtb("curl-query-string")),
     ("rule-S-DEVBENCH-CRASH-mcp-endpoint", _MC, "        if _MCP_ENDPOINT.search(u):", "        if False:",
      _rtb("curl-mcp-jsonrpc")),
-    ("rule-S-DEVBENCH-SAVE-mcp-jsonrpc-params", _MC, "        if rpc and isinstance(args, dict):", "        if False:",
-     _rtb("curl-mcp-jsonrpc-save")),
     ("rule-S-DEVBENCH-CRASH-mcp-prefilter", _MC, '_SHELL_WORDS = ("api/tool", "devbench", "/mcp")',
      '_SHELL_WORDS = ("api/tool", "devbench")', _rtb("curl-mcp-body")),
     ("rule-S-DEVBENCH-CRASH-wget-program", _MC, '_WEB_PROGRAMS = frozenset(("curl", "wget", ', '_WEB_PROGRAMS = frozenset(("curl", ',
@@ -6961,7 +6955,7 @@ _P5F_CLAUSES = [
     ("p5f-expands-misses-backtick", _DL, ' or "`" in word or bool(', " or bool(", _MDEL + "test_expands[`pwd`/x-True]"),
     ("p5f-copy-item-pipe-source-dropped", "tools/skyguard/writes.py",
      '        return [(dst[0] if dst else ".", src)] if src or e.stdin_from == "pipe" else []',
-     '        return [(dst[0] if dst else ".", src)] if src else []', _p5f("pipe-copy-onto-save")),
+     '        return [(dst[0] if dst else ".", src)] if src else []', "tests/test_review_v4_opus_guards.py::test_a_piped_copy_onto_a_plugin_is_seen"),
     # D2: the documented ask count drifts from the registry again (core.md, README, safety-philosophy).
     ("p5f-core-md-ask-count-stale", "agent/instructions/core.md", "### ASKS THE USER -- four rules",
      "### ASKS THE USER -- five rules", _DOCS + "[core]"),

@@ -416,3 +416,13 @@ def test_an_existing_save_outside_the_settings_folder_is_free(inst, tmp_path):
     assert (v.decision, v.context) == ("allow", "")
     w = write_rules.decide((tmp_path / "work" / "Out.ess").as_posix(), inst.audit, roots=inst.roots)
     assert (w.decision, w.context) == ("allow", "")
+
+
+@pytest.mark.parametrize("name,want", [("Save1.skse", "allow"), ("Save1.ess", "allow"), ("notes.txt", "deny")],
+                         ids=["cosave", "save", "other-file"])
+def test_sed_on_a_save_is_no_crlf_refusal(inst, name, want):
+    """A save (either member of the pair) is no rule's business since 4.1; another file in Saves still gets the
+    S-SED-CRLF refusal. So SAVE_EXTS still decides something: dropping `.skse` from it refuses the co-save."""
+    v = inst.shell("sed -i 's/a/b/' " + inst.p(name))
+    assert v.decision == want, v
+

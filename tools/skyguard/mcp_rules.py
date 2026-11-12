@@ -65,7 +65,6 @@ _KEY_TEXT = r'"%s"\s*:\s*"((?:[^"\\]|\\.)*)"'
 # `smp reset` with nothing after it, as it reads in a body whose structure the guard cannot parse: it is followed by a
 # quote (plain, escaped or doubled), a bracket, a separator or the end.
 _TEXT_BARE_RESET = re.compile(r"""\bsmp\s+reset\s*(?:["'`)}\\\];,&|<>]|$)""", re.IGNORECASE)
-_BAD_NAME = re.compile(r'[/\\:*?"<>|\x00-\x1f]')
 
 Hit = Tuple[str, dict]            # (rule id, message fields)
 
@@ -357,7 +356,6 @@ def scan_shell(command: str, parsed, roots, env=None) -> Optional[Hit]:
     low = unquote(command).lower()
     if not any(w in low for w in _SHELL_WORDS) and not ("api" in low and "tool" in low):
         return None
-    ask: Optional[Hit] = None
     opaque = False
     memo: dict = {}
     for e in parsed.execs:
@@ -372,12 +370,9 @@ def scan_shell(command: str, parsed, roots, env=None) -> Optional[Hit]:
             calls = _cli_call(e, command)
         for tool, args in calls:
             hit = judge(tool, args, roots, memo, env)
-            if hit is None:
-                continue
-            if hit[0] == "S-DEVBENCH-CRASH":
+            if hit is not None:             # judge() returns only the crash refusal since 4.1 (no save ask)
                 return hit
-            ask = ask or hit
     textual = not parsed.ok or opaque or bool(_DOTNET_WEB.search(command))
     if textual and _TEXT_RESET.search(command) and _TEXT_ENDPOINT.search(_norm_text(command)):
         return ("S-DEVBENCH-CRASH", {"op": "smp reset"})
-    return ask
+    return None
