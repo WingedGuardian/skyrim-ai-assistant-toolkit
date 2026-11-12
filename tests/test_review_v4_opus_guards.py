@@ -289,3 +289,9 @@ def test_a_whitelisted_folder_climbed_out_of_is_not_whitelisted(world):
     assert write_rules.decide(inside, a, roots=roots, cwd=install, env=os.environ).context == ""       # whitelisted
     path = install + "/.claude/backups/../../Data/SKSE/Plugins/x.ini"                               # climbed out
     assert "x.ini" in write_rules.decide(path, a, roots=roots, cwd=install, env=os.environ).context
+
+
+def test_git_bash_xcopy_switches_are_switches(world):
+    """`//E` is how Git Bash spells an xcopy switch MSYS must not rewrite: a switch, never the destination (it was
+    shown on a copy into Saves until 4.1; a plugin copied into Data gets its note the same way)."""
+    assert "S-COPY-PLUGIN" in judge(world, "xcopy bk/x.esp '<I>/Data' //E //Y", cwd="C:/Temp")[1]

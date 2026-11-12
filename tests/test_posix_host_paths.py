@@ -185,3 +185,8 @@ def test_an_apply_patch_delete_by_absolute_posix_path_is_denied_on_a_posix_host(
 def test_a_powershell_plugin_overwrite_is_seen_on_a_posix_host(posix):
     """The guard SEES a PowerShell write under a POSIX install (it was shown on a save until 4.1)."""
     assert _claude("PowerShell", "Set-Content '{}/Data/Mine.esp' x".format(GAME)) == ("deny", {"S-WRITE-PLUGIN"})
+
+
+def test_a_powershell_install_write_is_placed_on_a_posix_host(posix):
+    """Where it LANDS decides this note (a plugin is refused by name alone), so the POSIX root must be known."""
+    assert _claude("PowerShell", "Set-Content '{}/Data/notes.txt' x".format(GAME)) == ("allow", {"S-WRITE-INSTALL"})
