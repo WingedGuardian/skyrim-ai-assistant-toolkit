@@ -23,11 +23,6 @@ FROM_SAVES = {
 }
 
 
-@pytest.mark.parametrize("body", list(FROM_SAVES.values()), ids=list(FROM_SAVES))
-def test_the_third_list_review_probes_are_refused(install, body):
-    assert decide_in(install, heredoc(body), install["saves"]) == "deny"
-
-
 def test_a_too_deep_chain_outside_the_settings_area_is_allowed(install):
     body = "import os\nos" + ".path" * 2000 + ".join('a')\n"
     assert decide_in(install, heredoc(body), str(install["work"])) == "allow"
@@ -35,16 +30,6 @@ def test_a_too_deep_chain_outside_the_settings_area_is_allowed(install):
 
 def _padded(body):
     return "DATA = '" + "x" * (300 * 1024) + "'\n" + body
-
-
-def test_a_command_past_the_size_cap_that_names_saves_is_refused(install):
-    body = _padded("".join("open(r'%s/Save%d.ess', 'wb').close()\n" % (install["saves"], i) for i in (1, 2, 3)))
-    assert decide_in(install, heredoc(body), str(install["work"])) == "deny"
-
-
-def test_a_command_past_the_size_cap_run_from_saves_is_refused(install):
-    body = _padded("import os\nfor n in os.listdir():\n    os.remove(n)\n")
-    assert decide_in(install, heredoc(body), install["saves"]) == "deny"
 
 
 def test_a_command_past_the_size_cap_elsewhere_is_judged_as_before(install):

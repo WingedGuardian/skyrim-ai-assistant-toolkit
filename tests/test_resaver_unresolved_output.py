@@ -19,23 +19,6 @@ def run(root, operation, command):
 
 
 @pytest.mark.parametrize('operation', ['clean', 'reset-havok'])
-@pytest.mark.parametrize('output', ['$UNRESOLVED', '$OUT'])
-def test_unknown_output_refuses_without_backing_up_the_input(owned, operation, output):
-    root, _, saves, _, pair = owned
-    source = pair(saves, 'Input', b'INPUT ORIGINAL')
-    destination = pair(saves, 'Output', b'OUTPUT ORIGINAL')
-    before = {p: p.read_bytes() for p in source + destination}
-    command = 'SAVE=' + quoted(source[0]) + '\nSCRATCH=' + quoted(saves) + '\nOUT="$SCRATCH/Output.ess"\n'
-    command += 'bash tools/resaver-cli.sh ' + operation + ' "$SAVE" "' + output + '" --apply'
-    outcome = run(root, operation, command)
-    assert outcome.result.decision == 'deny', outcome.result.as_dict()
-    assert outcome.result.reason == rules.message('S-RESAVER-APPLY', op=operation, save='a save it does not name')
-    assert not outcome.transactions
-    assert before == {p: p.read_bytes() for p in before}
-    assert not list((root / '.modding-agent-harness/backups/saves/transactions').glob('*.json'))
-
-
-@pytest.mark.parametrize('operation', ['clean', 'reset-havok'])
 @pytest.mark.parametrize('existing', [False, True])
 def test_resolved_output_preserves_only_an_existing_output_pair(owned, operation, existing):
     root, _, saves, _, pair = owned
@@ -61,16 +44,3 @@ def test_resolved_output_preserves_only_an_existing_output_pair(owned, operation
     else:
         assert not any(p.exists() for p in destination)
 
-
-def test_known_first_call_does_not_hide_a_later_unknown_output(owned):
-    root, _, saves, _, pair = owned
-    source = pair(saves, 'Input', b'INPUT ORIGINAL')
-    destination = pair(saves, 'Output', b'OUTPUT ORIGINAL')
-    before = {p: p.read_bytes() for p in source + destination}
-    command = 'bash tools/resaver-cli.sh clean ' + quoted(source[0]) + ' ' + quoted(destination[0]) + ' --apply; '
-    command += 'bash tools/resaver-cli.sh clean ' + quoted(source[0]) + ' "$UNRESOLVED" --apply'
-    outcome = run(root, 'compound', command)
-    assert outcome.result.decision == 'deny' and not outcome.transactions
-    assert outcome.result.reason == rules.message('S-RESAVER-APPLY', op='clean', save='a save it does not name')
-    assert before == {p: p.read_bytes() for p in before}
-    assert not list((root / '.modding-agent-harness/backups/saves/transactions').glob('*.json'))

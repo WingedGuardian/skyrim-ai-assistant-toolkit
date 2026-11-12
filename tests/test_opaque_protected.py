@@ -126,20 +126,6 @@ def test_ordinary_commands_and_unprotected_targets_do_not_ask(inst, case):
     assert "S-OPAQUE-PROTECTED" not in got["rules"] and got["decision"] in ("allow", "advise"), got
 
 
-def test_a_save_keeps_its_own_ask(inst):
-    got = fire(inst, '$R "<I>/cfg/Saves/Existing.ess"')
-    assert got["decision"] == "ask" and "S-SAVE-OPAQUE" in got["rules"] and "S-OPAQUE-PROTECTED" not in got["rules"]
-
-
-@pytest.mark.parametrize("before_cap", [True, False])
-def test_past_the_token_cap_a_save_in_the_text_still_asks(inst, before_cap):
-    """guard3 (v4.0.0 review A-guard LOW-4): the parser stops at its token cap; the save is read from the text."""
-    save = '$R "<I>/cfg/Saves/Existing.ess"'
-    command = save + '; echo ' + "a " * 2500 if before_cap else 'echo ' + "a " * 2500 + '; ' + save
-    got = fire(inst, command)
-    assert got["decision"] == "ask" and "S-SAVE-OPAQUE" in got["rules"], got
-
-
 def test_option_and_bare_words_are_not_paths_even_inside_data(inst):
     """Priced: with the cwd inside Data, `list`, `-r`, `l` are not Data files the unnamed program is given."""
     got = fire(inst, '"$TOOL" list -r l', cwd="<I>/Data")

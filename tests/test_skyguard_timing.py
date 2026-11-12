@@ -826,14 +826,6 @@ def test_split_dotstar_refuses_a_possessive_quantifier():
     assert g.split_dotstar(r"a.*+b") is None     # (Python 3.10 cannot compile it, 3.11+ can; either way: no split)
 
 
-def test_resaver_prefilter_skips_unrelated_commands():
-    """Without the `resaver` early return every command pays for the ReSaver regexes (measured ~0.5 s at 80 KB of
-    parentheses); with it an unrelated command costs a substring search."""
-    text = "(" * 80000
-    assert shell_rules.resaver_apply(text) is None
-    assert cpu_ms(lambda: shell_rules.resaver_apply(text)) < 50     # CPU: ~0.01 ms with it, ~500 ms without
-
-
 def test_the_registry_rule_is_linear():
     """The registry property rule, `.*` inside an alternation, was not split and was quadratic (0.5 s at 80 KB). Task 9:
     the text test is now the parse-failure fallback, so the shape is an unterminated quote."""

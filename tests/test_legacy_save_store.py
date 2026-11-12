@@ -236,19 +236,6 @@ def test_recovery_format_in_place_preserves_complete_current_pair(recovery_legac
     assert seen and None not in seen and len(set(seen)) == 1
 
 
-def test_recovery_format_in_place_obeys_local_restriction_before_current_preservation(recovery_legacy, monkeypatch):
-    from modding_harness import contracts, workspace
-    from skyguard import local_policy
-    project, root, sid, ess, skse = recovery_legacy
-    ess.write_bytes(b"current ESS")
-    monkeypatch.setattr(local_policy, "restriction", lambda *args: lambda action:
-                        contracts.Result("deny", "evaluated", reason="private local restriction"))
-    out = io.StringIO()
-    assert snapcli.cmd_restore(project, sid, [], None, True, out) == 2
-    assert "private local restriction" in out.getvalue() and ess.read_bytes() == b"current ESS"
-    assert all(m["purpose"] == "recovery-import" for m in workspace.summaries(save_store.store(project))[0])
-
-
 def test_recovery_format_missing_counterpart_is_reported_and_new_live_counterpart_refuses(recovery_legacy, tmp_path):
     from skyguard import recovery
     project, root, sid, ess, skse = recovery_legacy

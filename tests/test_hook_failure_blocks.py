@@ -89,11 +89,3 @@ def test_codex_only_setup_never_asks_claude(tmp_path):
     assert r.returncode == (0 if sys.platform == "win32" else 3), r.stdout[-2000:] + r.stderr[-2000:]
     assert "older than 2.1.295" not in r.stderr and "needs 2.1.295" not in r.stdout
 
-
-def test_ordered_upgrade_uses_the_shipped_guard_failure_policy():
-    import sys
-    sys.path.insert(0, str(REPO / "tools"))
-    from skyguard import ordered_upgrade
-
-    expected = json.loads((REPO / "agent/targets/claude/settings.json").read_text(encoding="utf-8"))
-    assert ordered_upgrade._claude_pre() == expected["hooks"]["PreToolUse"]

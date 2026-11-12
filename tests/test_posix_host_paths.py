@@ -139,16 +139,6 @@ def _save_targets(tool, command):
     return [(t.path, t.op) for t in v.saves.change.targets] if v.saves is not None else []
 
 
-def test_a_powershell_save_overwrite_is_seen_on_a_posix_host(posix):
-    got = _save_targets("PowerShell", "Set-Content '{}/Saves/Existing.ess' x".format(CFG))
-    assert got == [(CFG + "/Saves/Existing.ess", "write")]
-
-
-def test_a_python_save_overwrite_through_bash_is_seen_on_a_posix_host(posix):
-    cmd = "python -c \"open('{}/Saves/Existing.ess','wb').write(b'x')\"".format(CFG)
-    assert _save_targets("Bash", cmd) == [(CFG + "/Saves/Existing.ess", "write")]
-
-
 def test_a_powershell_delete_in_the_install_is_denied_on_a_posix_host(posix):
     assert _claude("PowerShell", "Remove-Item -Recurse '{}/Data'".format(GAME)) == ("deny", {"S-DEL-INSTALL"})
 

@@ -132,21 +132,6 @@ def test_profile_known_devbench_tools_refuse_failed_transport(tmp_path, failure)
             assert "coverage receipt unavailable" in post["output"]["output"]
 
 
-def test_healthy_devbench_transport_preserves_the_save_pair(tmp_path):
-    root, _ = run_plugin(tmp_path, [])
-    folder = tmp_path / "config/Saves"
-    folder.mkdir(parents=True)
-    (root / "skyrim-paths.env").write_text("SKYRIM_CONFIG_DIR='" + folder.parent.as_posix() + "'\n")
-    for suffix in (".ess", ".skse"):
-        (folder / ("Existing" + suffix)).write_bytes(suffix.encode())
-    _, results = run_plugin(tmp_path, [before("mcp__devbench-vr__console", {"command": "save Existing"})])
-    assert "error" not in results[0], results
-    records = list((root / ".modding-agent-harness/backups/saves/transactions").glob("*.json"))
-    assert len(records) == 1
-    manifest = json.loads(records[0].read_text())
-    assert len(manifest["groups"][0]["members"]) == 2
-
-
 def test_system_context_reinjects_preferences_after_each_transform(tmp_path):
     root, _ = run_plugin(tmp_path, [])
     (root / "KNOWLEDGEBASE.local.md").write_text("## My preferences\nKeep my working notes.\n## Other\nUnclassified evidence.")

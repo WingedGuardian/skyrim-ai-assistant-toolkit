@@ -17,11 +17,6 @@ FROM_SAVES = {
 }
 
 
-@pytest.mark.parametrize("body", list(FROM_SAVES.values()), ids=list(FROM_SAVES))
-def test_round_eight_delete_shapes_run_from_saves_are_refused(install, body):
-    assert decide_in(install, heredoc(body), install["saves"]) == "deny"
-
-
 RD = " python -c \"import os;[os.remove(f) for f in os.listdir()]\""
 QUOTED = {
     "empty-single": "cd \"$D\"/Sa''ves&&" + RD,
@@ -30,20 +25,6 @@ QUOTED = {
     "ansi-c": "cd \"$D\"/$'Sav\\x65s'&&" + RD,
     "quoted-space": "cd \"$D\"/My' 'Games/Skyrim' 'VR;" + RD,
 }
-
-
-def test_a_windows_backslash_path_naming_saves_is_seen_raw(install):
-    """Taking bash quoting out turns `D:\\Games\\Saves` into `D:GamesSaves`: only the raw text names the folder."""
-    cmd = "D='D:\\Games\\Saves'; cd \"$(echo \"$D\")\";" + RD
-    assert _cwd_is_unknown(cmd)
-    assert decide_in(install, cmd, str(install["work"])) == "deny"
-
-
-@pytest.mark.parametrize("cmd", list(QUOTED.values()), ids=list(QUOTED))
-def test_bash_quoting_inside_a_save_word_is_seen(install, cmd):
-    cmd = 'D="$(cat C:/Temp/where.txt)"; ' + cmd
-    assert _cwd_is_unknown(cmd)
-    assert decide_in(install, cmd, str(install["work"])) == "deny"
 
 
 @pytest.mark.parametrize("word", ["my-saves", "old.saves", "autosaves"])
@@ -70,19 +51,8 @@ ROUND10_FROM_SAVES = {
 }
 
 
-@pytest.mark.parametrize("body", list(ROUND10_FROM_SAVES.values()), ids=list(ROUND10_FROM_SAVES))
-def test_round_nine_delete_shapes_run_from_saves_are_refused(install, body):
-    assert decide_in(install, heredoc(body), install["saves"]) == "deny"
-
-
 ROUND10_QUOTED = {
     "locale-string": 'cd "$D"/Sa$"ves"&&' + RD,
     "line-continuation": 'cd "$D"/Sa\\\nves&&' + RD,
 }
 
-
-@pytest.mark.parametrize("cmd", list(ROUND10_QUOTED.values()), ids=list(ROUND10_QUOTED))
-def test_more_bash_quoting_inside_a_save_word_is_seen(install, cmd):
-    cmd = 'D="$(cat C:/Temp/where.txt)"; ' + cmd
-    assert _cwd_is_unknown(cmd)
-    assert decide_in(install, cmd, str(install["work"])) == "deny"

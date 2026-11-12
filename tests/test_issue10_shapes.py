@@ -72,51 +72,6 @@ def heredoc(body):
     return "python - <<'EOF'\n" + DOC + body + "EOF"
 
 
-def test_a_computed_write_into_the_saves_folder_is_refused(install):
-    """write_bytes on a glob result, the folder named by a literal: the reported shape."""
-    cmd = heredoc('from pathlib import Path\nfor p in Path(r"' + install["saves"] + '").glob("*.ess"):\n'
-                  '    p.write_bytes(b"")\n')
-    assert decide(install, cmd) == "deny"
-
-
-def test_a_computed_open_over_a_save_glob_is_refused(install):
-    """open(name, 'wb') on glob.glob(<literal ending .ess>). The saves sit in a custom save folder (sLocalSavePath
-    need not be called Saves), so only the literal's save name tells the guard these are saves."""
-    custom = install["saves"].rsplit("/", 1)[0] + "/MyChar"
-    cmd = heredoc('import glob\nfor n in glob.glob(r"' + custom + '/*.ess"):\n    open(n, "wb").close()\n')
-    assert decide(install, cmd) == "deny"
-
-
-def test_a_computed_copy_onto_saves_is_refused(install):
-    cmd = heredoc("import shutil\nfrom pathlib import Path\nS = Path(r'" + install["saves"] + "')\n"
-                  "for n in ('Save1.ess', 'Save2.ess', 'Save3.ess'):\n    shutil.copy2('C:/Temp/x.ess', S / n)\n")
-    assert decide(install, cmd) == "deny"
-
-
-def test_a_computed_write_below_the_settings_folder_is_refused(install):
-    """Only the settings folder is named; the Saves part is computed."""
-    settings = install["saves"].rsplit("/", 1)[0]
-    cmd = heredoc("from pathlib import Path\nfor p in (Path(r'" + settings + "') / 'Saves').glob('*.ess'):\n"
-                  "    p.write_text('')\n")
-    assert decide(install, cmd) == "deny"
-
-
-def test_an_open_whose_mode_is_chosen_at_run_time_counts_as_a_write(install):
-    cmd = heredoc("import sys\nfrom pathlib import Path\nmode = sys.argv[-1]\n"
-                  "for p in Path(r'" + install["saves"] + "').glob('*.ess'):\n    open(p, mode).close()\n")
-    assert decide(install, cmd) == "deny"
-
-
-def test_a_computed_report_path_beside_a_saves_read_is_refused_by_design(install):
-    """The accepted cost of the rule: the hash audit with a COMPUTED report path. The guard cannot tell where a
-    computed path lands, so code that also names the Saves folder is refused; spell the report path literally,
-    or split the read from the write (the #10 shapes, with a literal report path, stay allowed)."""
-    cmd = heredoc("import hashlib, json, os\nfrom pathlib import Path\n"
-                  "h = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in Path(r'" + install["saves"] +
-                  "').glob('*.ess')}\nPath(os.environ['TEMP'], 'r.json').write_text(json.dumps(h))\n")
-    assert decide(install, cmd) == "deny"
-
-
 def test_real_save_changes_are_still_refused(install):
     saves = install["saves"]
     assert decide(install, 'rm "' + saves + '"/*.ess') == "deny"

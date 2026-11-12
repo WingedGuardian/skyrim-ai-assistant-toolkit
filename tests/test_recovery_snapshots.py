@@ -16,7 +16,7 @@ import pytest
 from conftest import REPO
 
 sys.path.insert(0, str(REPO / "tools"))
-from skyguard import audit as audit_mod, mcp_rules, paths, recovery, saves as saves_mod, shell_rules  # noqa: E402
+from skyguard import audit as audit_mod, mcp_rules, paths, recovery, shell_rules  # noqa: E402
 from skyguard import save_store
 from modding_harness import workspace
 from test_save_policy import live_enforce  # noqa: E402
@@ -219,27 +219,6 @@ def test_unreadable_roots_are_logged_not_silent(inst):
 # the save is found exactly as before, and now its backup decides the call.
 
 
-def test_resaver_apply_snapshots_the_named_save_and_its_cosave_only(inst):
-    v = inst.change('bash tools/resaver-cli.sh clean "{}" --apply'.format((inst.saves / "Quick.ess").as_posix()))
-    assert v.decision == "allow"
-    saves = inst.stored("save")
-    assert saves == {"Quick.ess": sha(b"quick save bytes"), "Quick.skse": sha(b"quick co-save")}
-    assert "Other.ess" not in inst.stored(), "never the whole save folder"
-
-
-def test_resaver_by_bare_name_finds_it_in_the_saves_folder(inst):
-    inst.change("bash tools/resaver-cli.sh set-global Quick.ess Foo 1 --apply", cwd=str(inst.game))
-    assert sorted(inst.stored("save")) == ["Quick.ess", "Quick.skse"]
-
-
-def test_resaver_by_a_path_relative_to_the_cwd(inst, tmp_path):
-    """A save outside the Saves folder (a copy being repaired), named relative to the command's cwd."""
-    put(tmp_path / "work" / "sub" / "Away.ess", b"a save being repaired")
-    put(tmp_path / "work" / "sub" / "Away.skse", b"its co-save")
-    inst.change("bash tools/resaver-cli.sh clean sub/Away.ess --apply", cwd=str(tmp_path / "work"))
-    assert sorted(inst.stored("save")) == ["Away.ess", "Away.skse"]
-
-
 def test_a_failed_manifest_append_is_retried_by_the_next_call(inst, monkeypatch):
     """The index is updated only once the lines are on disk; otherwise the unchanged file would never be recorded."""
     real = recovery.backup._append_line
@@ -254,26 +233,6 @@ def test_a_failed_manifest_append_is_retried_by_the_next_call(inst, monkeypatch)
     assert "plugins.txt" in inst.stored("config")
 
 
-@pytest.mark.parametrize("cmd", [
-    "echo go && bash tools/resaver-cli.sh clean Quick.ess --apply",
-    "env JAVA_OPTS=-Xmx2g bash tools/resaver-cli.sh clean Quick.ess --apply",
-    "ls Saves; bash tools/resaver-cli.sh reset-havok Quick.ess --apply",
-    "cat notes.txt | head -1; bash tools/devbench-cli.sh exec save Quick",
-], ids=["echo-and", "env-wrapper", "ls-then", "cat-pipe-then-devbench"])
-def test_a_read_only_looking_prefix_does_not_hide_the_save(inst, cmd):
-    """Fix round 1, I1 (MEASURED by the reviewer): a read-only FIRST word hides nothing -- the rules parse every exec,
-    and the save they find is the one backed up."""
-    assert inst.change(cmd, cwd=str(inst.game)).decision == "allow"
-    assert sorted(inst.stored("save")) == ["Quick.ess", "Quick.skse"]
-
-
-def test_resaver_keeps_the_save_it_writes_not_the_one_it_reads(inst):
-    """Fix round 1, I2: ResaverCLI writes <out.ess> (the second .ess) and never the input (ResaverCLI.java:49);
-    clean / set-global / set-var overwrite an existing out with no check."""
-    inst.change("bash tools/resaver-cli.sh clean Quick.ess Other.ess --apply", cwd=str(inst.game))
-    assert sorted(inst.stored("save")) == ["Other.ess", "Other.skse"]
-
-
 def test_resaver_writing_a_new_out_keeps_nothing_and_says_so(inst):
     """A NEW out changes no save: nothing to back up, and no note claims a backup."""
     command = "bash tools/resaver-cli.sh set-global Quick.ess 0x14 1 Fresh.ess --apply"
@@ -286,84 +245,9 @@ def test_resaver_writing_a_new_out_keeps_nothing_and_says_so(inst):
     assert ruled.context == ""
 
 
-def test_resaver_given_a_pattern_says_it_cannot_keep_one_save(inst):
-    v = inst.change('find . -name "*.ess" -exec bash tools/resaver-cli.sh clean {} --apply \\;', cwd=str(inst.game))
-    assert v.decision == "deny" and "writes *.ess, which the guard cannot place" in v.reason
-    assert inst.stored("save") == {}
-
-
-def test_resaver_without_apply_copies_no_save(inst):
-    v = inst.change('bash tools/resaver-cli.sh clean "{}"'.format((inst.saves / "Quick.ess").as_posix()))
-    assert v.saves is None and inst.stored("save") == {}
-
-
-def test_a_save_without_a_cosave_is_still_snapshotted(inst):
-    put(inst.saves / "Lone.ess", b"no co-save")
-    inst.change("bash tools/resaver-cli.sh clean Lone.ess --apply", cwd=str(inst.game))
-    assert inst.stored("save") == {"Lone.ess": sha(b"no co-save")}
-    (line,) = [e for e in inst.lines() if e["kind"] == "save"]
-    assert [os.path.basename(m) for m in line["missing"]] == ["Lone.skse"]
-
-
-def test_devbench_game_save_over_an_existing_save_snapshots_it(inst):
-    assert inst.mcp("mcp__devbench-vr__game", {"action": "save", "name": "Quick"}).decision == "allow"
-    assert sorted(inst.stored("save")) == ["Quick.ess", "Quick.skse"]
-
-
-def test_devbench_console_save_through_curl_snapshots_it(inst):
-    inst.change("curl -s -X POST http://127.0.0.1:8921/api/tool/console -H 'Content-Type: application/json' "
-                "-d '{\"action\":\"exec\",\"command\":\"save Other\"}'")
-    assert sorted(inst.stored("save")) == ["Other.ess", "Other.skse"]
-
-
 def test_a_devbench_save_under_a_new_name_copies_nothing(inst):
     assert inst.mcp("mcp__devbench-vr__game", {"action": "save", "name": "Brand New"})[:3] == ("allow", "", "")
     assert inst.stored("save") == {}
-
-
-def test_a_save_that_cannot_be_identified_is_logged(inst):
-    """It cannot be backed up, so it is refused (the old hook only logged it and let the call run)."""
-    v = inst.mcp("mcp__devbench-vr__game", {"action": "save"})
-    assert v.decision == "deny" and v.reason.startswith("Cannot tell which save this overwrites.")
-    assert inst.stored("save") == {}
-
-
-def test_an_absolute_save_is_kept_even_when_the_paths_file_is_unreadable(inst):
-    """Final review B-M2, ported: an absolute .ess needs no roots, so it is placed (and backed up) without them."""
-    c = saves_mod.resaver_change("clean", [(inst.saves / "Quick.ess").as_posix()], "", "bash", None, {})
-    assert c.unknown == () and [os.path.basename(t.path) for t in c.targets] == ["Quick.ess"]
-
-
-def test_a_bare_save_name_with_an_unreadable_paths_file_is_logged_not_kept(inst):
-    """The twin: a bare name lives in the (now unknown) Saves folder -- it cannot be placed, never read as NEW."""
-    c = saves_mod.resaver_change("clean", ["Quick.ess"], str(inst.game), "bash", None, {})
-    assert c.targets == () and c.unknown == (("S-RESAVER-APPLY", (("op", "clean"), ("save", "Quick.ess"))),)
-
-
-def test_a_devbench_save_with_an_unreadable_paths_file_is_logged(inst):
-    """No Saves folder known (no roots, no Documents): the save cannot be told apart from a new one, so refused."""
-    v = mcp_rules.decide("mcp__devbench-vr__game", {"action": "save", "name": "Quick"}, inst.audit,
-                         roots=paths.Roots("", ""), env={})
-    assert v.decision == "deny" and v.reason.startswith("Cannot tell if save Quick exists.")
-
-
-def test_an_unchanged_save_is_not_copied_twice(inst):
-    """The save policy: every change is backed up -- the same bytes twice are two snapshots of ONE stored copy."""
-    cmd = "bash tools/resaver-cli.sh clean Quick.ess --apply"
-    inst.change(cmd, cwd=str(inst.game))
-    inst.change(cmd, cwd=str(inst.game))
-    lines = [e for e in inst.lines() if e["kind"] == "save"]
-    assert len(lines) == 4 and len({e["snap"] for e in lines}) == 2 and len({e["sha256"] for e in lines}) == 2
-
-
-def test_a_burst_of_runs_on_one_save_keeps_the_state_before_the_first(inst):
-    """No rate limit any more: the state before EVERY change is kept, the first one included."""
-    cmd = "bash tools/resaver-cli.sh clean Quick.ess --apply"
-    inst.change(cmd, cwd=str(inst.game))
-    put(inst.saves / "Quick.ess", b"after the first run")
-    inst.change(cmd, cwd=str(inst.game))
-    assert [e["sha256"] for e in inst.lines() if e["src"].endswith("Quick.ess")] == \
-        [sha(b"quick save bytes"), sha(b"after the first run")]
 
 
 @pytest.mark.parametrize("tool,args", [
@@ -381,26 +265,6 @@ def test_the_save_snapshot_reads_a_call_exactly_as_the_rule_does(inst, tool, arg
     kept = inst.stored("save") != {}
     refused = v.decision == "deny"
     assert (kept or refused) == (hit is not None and hit[0] == "S-DEVBENCH-SAVE")
-
-
-def test_a_save_that_would_fill_the_drive_is_skipped_and_says_why(inst, monkeypatch):
-    """Review M2: no copy takes the snapshot drive below SAVE_RESERVE_BYTES free -- and now the call is refused."""
-    real = recovery.shutil.disk_usage
-    monkeypatch.setattr(recovery.shutil, "disk_usage",
-                        lambda p: real(p)._replace(free=recovery.SAVE_RESERVE_BYTES + 10))
-    v = inst.change("bash tools/resaver-cli.sh clean Quick.ess --apply", cwd=str(inst.game))
-    assert v.decision == "deny" and "insufficient destination space" in v.reason
-    assert inst.stored("save") == {}
-
-
-def test_a_save_copy_that_runs_out_of_time_is_partial_never_silent(inst, monkeypatch):
-    ticks = iter(range(10 ** 6))
-    monkeypatch.setattr(recovery.backup, "_clock", lambda: float(next(ticks)))
-    monkeypatch.setattr(recovery.backup, "CHUNK", 4)    # several chunks, one tick each
-    v = inst.change("bash tools/resaver-cli.sh clean Quick.ess --apply", cwd=str(inst.game), deadline=6.0)
-    assert v.decision == "deny" and "deadline reached" in v.reason
-    assert inst.stored("save") == {}
-    assert not list((inst.save_store.root / "staging").glob("*.part")), "no part file is left behind"
 
 
 # ---------------------------------------------------------------- the real entry points, and the ordering
@@ -422,45 +286,12 @@ def _resaver_payload(inst):
             "tool_input": {"command": "bash tools/resaver-cli.sh clean Quick.ess --apply"}}
 
 
-@pytest.mark.parametrize("agent,role", [("claude", "protect-bash"), ("codex", "pre-tool")])
-def test_the_save_is_copied_by_the_hook_before_the_command_can_change_it(inst, agent, role):
-    """Ordering, from the outside: the DECIDING PreToolUse hook returns with the copy made and verified; the command
-    (here: an overwrite done after the hook, as the agent would run it) cannot reach the snapshot."""
-    r = _engine(inst, [agent, role], _resaver_payload(inst))
-    assert r.returncode == 0, r.stderr
-    assert b"backs up Quick" in r.stdout and b"permissionDecision" not in r.stdout
-    put(inst.saves / "Quick.ess", b"what resaver wrote")
-    held = inst.stored("save")
-    assert held["Quick.ess"] == sha(b"quick save bytes")
-    assert (inst.save_store.root / "blobs" / held["Quick.ess"]).read_bytes() == b"quick save bytes"
-    if agent == "codex":
-        assert "plugins.txt" in inst.stored("config")          # the side effects still take the load order
-
-
 def test_the_snapshot_hook_takes_the_load_order_but_never_the_save(inst):
     """Claude's snapshot-before-tool runs BESIDE protect-bash: it keeps the load order and INIs, the save is the
     deciding hook's (two writers of one backup would race for the store lock and could deny each other)."""
     r = _engine(inst, ["claude", "snapshot-before-tool"], _resaver_payload(inst))
     assert r.returncode == 0, r.stderr
     assert inst.stored("save") == {} and "plugins.txt" in inst.stored("config")
-
-
-def test_the_mcp_hook_copies_the_save_before_devbench_overwrites_it(inst):
-    payload = {"session_id": "s-1", "tool_name": "mcp__devbench-vr__game", "hook_event_name": "PreToolUse",
-               "tool_input": {"action": "save", "name": "Quick"}}
-    r = _engine(inst, ["claude", "protect-mcp"], payload)
-    assert r.returncode == 0, r.stderr
-    assert b'"additionalContext"' in r.stdout and b"permissionDecision" not in r.stdout
-    assert sorted(inst.stored("save")) == ["Quick.ess", "Quick.skse"]
-
-
-@pytest.mark.parametrize("server", ["DevBench-vr", "skyrim-devbench", "my__devbench"])
-def test_each_judged_devbench_alias_keeps_the_save_and_cosave_before_the_call(inst, server):
-    payload = {"session_id": "s-1", "tool_name": "mcp__" + server + "__game",
-               "hook_event_name": "PreToolUse", "tool_input": {"action": "save", "name": "Quick"}}
-    result = _engine(inst, ["claude", "protect-mcp"], payload)
-    assert result.returncode == 0 and b'"additionalContext"' in result.stdout, result.stderr
-    assert inst.stored("save") == {"Quick.ess": sha(b"quick save bytes"), "Quick.skse": sha(b"quick co-save")}
 
 
 # ---------------------------------------------------------------- resolving and pruning

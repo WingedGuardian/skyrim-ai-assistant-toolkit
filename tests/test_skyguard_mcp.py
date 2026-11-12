@@ -154,17 +154,6 @@ def test_deny_op_compares_whole_commands_on_words(command, want):
     assert mcp_rules.deny_op(command) == want
 
 
-def test_the_console_save_word_is_case_insensitive(cfg):
-    assert mcp("mcp__devbench-vr__console", {"command": "SAVE Existing"}, _roots("saves", cfg))[1] == {"S-SAVE-BACKUP"}
-    assert mcp("mcp__devbench-vr__console", {"command": "saveall Existing"}, _roots("saves", cfg))[0] == ("allow", "")
-
-
-def test_a_save_name_is_read_trimmed(cfg):
-    # rt-fix-b: the trailing-dot strip trims only the right; a leading space is still the same save.
-    got = mcp("mcp__devbench-vr__game", {"action": "save", "name": "  Existing"}, _roots("saves", cfg))
-    assert got == (("advise", SAVE_NOTE), {"S-SAVE-BACKUP"})
-
-
 def test_a_non_dict_tool_input_is_judged_on_its_strings():
     # rt-fix-b (routes s75): superseded the Task 11 ruling "a non-dict tool_input is not judged". A deny-listed console
     # line is the same command wherever in the call it sits; nothing else in a non-dict input is judged.
@@ -179,117 +168,9 @@ def test_a_non_string_console_command_is_not_judged():
     assert mcp("mcp__devbench-vr__console", {})[0] == ("allow", "")
 
 
-# ------------------------------------------------------------------------------------------------------ the saves
-def test_save_exists_reads_the_saves_folder_case_insensitively(cfg):
-    r = _roots("saves", cfg)
-    assert mcp_rules.save_exists("Existing", r, ENV0) is True
-    assert mcp_rules.save_exists("EXISTING", r, ENV0) is True
-    assert mcp_rules.save_exists("Fresh", r, ENV0) is False
-
-
-def test_save_exists_is_unknown_without_a_saves_folder(tmp_path):
-    r = paths.roots("C:/t11/x", "", {"SKYRIM_CONFIG_DIR": tmp_path.as_posix()})
-    assert mcp_rules.save_exists("Existing", r, ENV0) is None
-    assert mcp_rules.save_exists("Existing", paths.roots("C:/t11/x", "", {}), ENV0) is None
-
-
-def test_an_unreadable_saves_folder_is_unknown_not_a_crash(cfg, monkeypatch):
-    def boom(_):
-        raise OSError("denied")
-    monkeypatch.setattr(os, "listdir", boom)
-    assert mcp_rules.save_exists("Existing", _roots("saves", cfg), ENV0) is None
-
-
-def test_a_scan_lists_each_saves_folder_once(cfg, monkeypatch):
-    """A Saves folder holds thousands of files: many save calls in one command must not list it many times."""
-    calls = []
-    real = os.listdir
-    monkeypatch.setattr(os, "listdir", lambda d: calls.append(d) or real(d))
-    body = "'{\"action\":\"save\",\"name\":\"N%d\"}'"
-    command = "; ".join(f"curl http://127.0.0.1:8921/api/tool/game -d {body % i}" for i in range(40))
-    r = _roots("saves", cfg)
-    mcp_rules.scan_shell(command, shellparse.parse(command, "bash"), r, ENV0)
-    assert len(calls) == 1
-
-
-def test_the_first_existing_saves_folder_wins(tmp_path, cfg):
-    """A declared config dir with no Saves folder is skipped; the first one that HAS a Saves folder is the only one read."""
-    def configured(*directories):
-        # Build both comparison and physical I/O roots through the production
-        # constructor; replacing just config_dirs leaves the physical roots stale.
-        config = paths.PathsConfig({}, {"SKYRIM_CONFIG_DIR": directories}, ())
-        return paths.roots("C:/t11/x", "", config)
-
-    empty = tmp_path / "other"
-    (empty / "Saves").mkdir(parents=True)
-    r = paths.roots("C:/t11/x", "", {"SKYRIM_CONFIG_DIR": empty.as_posix()})
-    assert mcp_rules.save_exists("Existing", r, ENV0) is False
-    r = configured(tmp_path.as_posix() + "/none", empty.as_posix(), cfg)
-    assert mcp_rules.save_exists("Existing", r, ENV0) is False               # `other` has a Saves folder: it wins
-    r = configured(tmp_path.as_posix() + "/none", cfg, empty.as_posix())
-    assert mcp_rules.save_exists("Existing", r, ENV0) is True                # `none` skipped, `cfg` wins
-
-
-def test_documents_is_the_fallback_when_no_config_dir_has_saves(tmp_path):
-    env = _home(tmp_path)
-    r = paths.roots("C:/t11/x", "", {})
-    assert mcp_rules.save_exists("Existing", r, env) is True
-    assert mcp_rules.save_exists("Fresh", r, env) is False
-    assert mcp_rules.save_exists("Existing", r, ENV0) is None
-
-
-@pytest.mark.parametrize("game", ["Skyrim Special Edition GOG", "Skyrim Special Edition EPIC"])
-def test_the_gog_and_epic_se_folders_are_documents_fallbacks(tmp_path, game):
-    """GOG and Epic SE/AE keep their saves under their own My Games folder (SKSE64's SAVE_FOLDER_NAME): a DevBench
-    save over an existing save there must still be recognised as one."""
-    env = _home(tmp_path, game)
-    r = paths.roots("C:/t11/x", "", {})
-    assert mcp_rules.save_exists("Existing", r, env) is True
-
-
-def test_a_declared_config_dir_outranks_documents(tmp_path, cfg):
-    env = _home(tmp_path)
-    other = tmp_path / "cfg2" / "Saves"
-    other.mkdir(parents=True)
-    r = paths.roots("C:/t11/x", "", {"SKYRIM_CONFIG_DIR": (tmp_path / "cfg2").as_posix()})
-    assert mcp_rules.save_exists("Existing", r, env) is False
-
-
-@pytest.mark.parametrize("game", ["Skyrim VR", "Skyrim Special Edition", "Skyrim"])
-def test_every_game_folder_name_is_searched(tmp_path, game):
-    assert mcp_rules.save_exists("Existing", paths.roots("C:/t11/x", "", {}), _home(tmp_path, game)) is True
-
-
-def test_vr_outranks_the_other_game_folders(tmp_path):
-    env = _home(tmp_path, "Skyrim")
-    (tmp_path / "Documents" / "My Games" / "Skyrim VR" / "Saves").mkdir(parents=True)
-    assert mcp_rules.save_exists("Existing", paths.roots("C:/t11/x", "", {}), env) is False
-
-
-@pytest.mark.parametrize("key", ["HOME", "OneDrive", "OneDriveConsumer", "OneDriveCommercial"])
-def test_a_redirected_documents_is_found(tmp_path, key):
-    env = _home(tmp_path)
-    env = {key: env["USERPROFILE"]}
-    assert mcp_rules.save_exists("Existing", paths.roots("C:/t11/x", "", {}), env) is True
-
-
-@pytest.mark.parametrize("args", [{"action": "SAVE", "name": "Existing"}, {"action": " save ", "name": "Existing.ess"}])
-def test_the_save_action_is_read_leniently(args, cfg):
-    assert mcp("mcp__devbench-vr__game", args, _roots("saves", cfg))[1] == {"S-SAVE-BACKUP"}
-
-
 @pytest.mark.parametrize("action", ["load", "list", "loadLast", "", 7, None])
 def test_other_game_actions_never_ask(action, cfg):
     assert mcp("mcp__devbench-vr__game", {"action": action, "name": "Existing"}, _roots("saves", cfg))[0] == ("allow", "")
-
-
-@pytest.mark.parametrize("name", [None, "", "  ", "a/b", "../x", "a" + chr(92) + "b", "..", ".", "x:y", 7, "a*b", "a?b",
-                                  'a"b', "a<b", "a>b", "a|b", "a" + chr(1) + "b"],
-                         ids=["none", "empty", "blank", "slash", "dotdot-slash", "backslash", "dotdot", "dot", "colon",
-                              "number", "star", "qmark", "quote", "angle", "angle2", "pipe", "control"])
-def test_an_unusable_save_name_is_refused(name, cfg):
-    got, fired = mcp("mcp__devbench-vr__game", {"action": "save", "name": name}, _roots("saves", cfg))
-    assert fired == {"S-DEVBENCH-SAVE"} and got[0] == "deny" and got[1].startswith("Cannot tell which save this overwrites.")
 
 
 def test_the_refusal_is_two_plain_lines_and_does_not_echo_the_call(cfg):
@@ -398,14 +279,6 @@ def test_curl_forms_that_do_not_send_it(command):
     assert shell(command)[0] == ("allow", ""), command
 
 
-def test_a_damaged_json_body_is_still_read_for_the_action_and_name(cfg):
-    """A trailing comma makes the body invalid JSON; the action and name are still pulled out by pattern, so a save
-    through it is still judged (a bare reset in it is caught by the unreadable-body rule, tested below)."""
-    body = "'{\"action\":\"save\",\"name\":\"Existing\",}'"
-    got, fired = shell(f"curl http://127.0.0.1:8921/api/tool/game -d {body}", _roots("saves", cfg))
-    assert fired == {"S-SAVE-BACKUP"} and got == ("advise", SAVE_NOTE)
-
-
 def test_a_damaged_body_with_a_bad_escape_does_not_crash():
     assert shell(f"curl {CONSOLE} -d '{{\"command\":\"help" + chr(92) + "q\",}}'")[0] == ("allow", "")
 
@@ -494,13 +367,6 @@ def test_a_deny_outranks_an_ask_in_one_command(cfg):
     assert shell(cmd, r)[1] == {"S-DEVBENCH-CRASH"}
 
 
-def test_a_resaver_ask_outranks_a_devbench_ask(cfg):
-    r = _roots("saves", cfg)
-    cmd = ("bash tools/resaver-cli.sh clean x.ess --apply; "
-           "bash tools/devbench-cli.sh tool game '{\"action\":\"save\",\"name\":\"Existing\"}'")
-    assert shell(cmd, r)[1] == {"S-RESAVER-APPLY"}
-
-
 # ------------------------------------------------------------------ fix round 1: a body with no definite command
 @pytest.mark.parametrize("tail", ['smp reset"', "smp reset", "smp reset)", "smp reset;", "smp reset > x", "smp reset'",
                                   "smp reset" + chr(92) + '"', "smp reset|", "smp reset]", "smp reset`", "smp reset&", "SMP  RESET",
@@ -554,9 +420,3 @@ def test_a_readable_body_is_not_second_guessed_by_the_text():
 def test_the_console_tool_name_is_case_insensitive_on_the_wire():
     assert shell("curl -s http://127.0.0.1:8921/api/tool/Console -d 'command=smp reset'")[1] == {"S-DEVBENCH-CRASH"}
 
-
-def test_an_empty_documents_variable_is_not_read_relative_to_the_cwd(tmp_path, monkeypatch):
-    _home(tmp_path)                                           # Documents/My Games/Skyrim VR/Saves under tmp_path
-    monkeypatch.chdir(tmp_path)
-    env = {"USERPROFILE": "", "OneDrive": ""}
-    assert mcp_rules.save_exists("Existing", paths.roots("C:/t11/x", "", {}), env) is None

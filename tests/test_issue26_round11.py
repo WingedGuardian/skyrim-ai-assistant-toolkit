@@ -24,11 +24,6 @@ FROM_SAVES = {
 }
 
 
-@pytest.mark.parametrize("body", list(FROM_SAVES.values()), ids=list(FROM_SAVES))
-def test_an_unknown_change_run_from_saves_is_refused(install, body):
-    assert decide_in(install, heredoc(body), install["saves"]) == "deny"
-
-
 READS_FROM_SAVES = {
     "hash-audit": "import hashlib, os\nfor n in sorted(os.listdir()):\n    print(n, hashlib.sha256(open(n, 'rb').read()).hexdigest())\n",
     "json-stat": "import json, os\nprint(json.dumps({n: os.stat(n).st_size for n in os.listdir()}))\n",

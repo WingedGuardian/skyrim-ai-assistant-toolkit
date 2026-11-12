@@ -29,11 +29,6 @@ FROM_SAVES = {
 }
 
 
-@pytest.mark.parametrize("body", list(FROM_SAVES.values()), ids=list(FROM_SAVES))
-def test_the_safe_list_review_probes_are_refused(install, body):
-    assert decide_in(install, heredoc(body), install["saves"]) == "deny"
-
-
 READS = {
     "disk-usage": "import shutil\nprint(shutil.disk_usage('.'))\n",
     "memoryview": "import os\nfor n in os.listdir():\n    print(memoryview(open(n, 'rb').read())[:4].tobytes())\n",

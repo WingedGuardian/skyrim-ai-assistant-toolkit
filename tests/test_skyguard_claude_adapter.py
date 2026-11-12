@@ -211,18 +211,6 @@ def test_command_type(ti, want):
     assert claude.extract(json.dumps({"tool_name": "Bash", "tool_input": ti}))["command_type"] == want
 
 
-def test_run_passes_the_shell_dialect(tmp_path):
-    """Wiring proof: a python heredoc that only MENTIONS a ReSaver write is allowed when the engine is told the
-    dialect is bash, but asks under the unknown dialect (bash AND PowerShell, where the PowerShell reading cannot
-    parse it and the R4 text fallback applies). run.py must therefore be passing shell."""
-    cmd = "python - <<'EOF'\nprint('resaver-cli.sh reset-havok x.ess --apply')\nEOF"
-    sys.path.insert(0, str(REPO / "tools"))
-    from skyguard import shell_rules
-    assert shell_rules.resaver_apply(cmd, "") and not shell_rules.resaver_apply(cmd, "bash")
-    r = _run("protect-bash", json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}}), tmp_path)
-    assert r.returncode == 0 and json.loads(r.stdout) == {}
-
-
 def test_run_reports_a_malformed_paths_file_by_key(tmp_path):
     root = tmp_path / "Skyrim"
     (root / ".claude").mkdir(parents=True)

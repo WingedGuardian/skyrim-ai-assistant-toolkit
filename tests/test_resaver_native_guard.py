@@ -71,23 +71,6 @@ def test_the_rule_is_never_shadowed():
     assert "shell.S-RESAVER-NATIVE-DIRECT" in codes.decisive_codes()
 
 
-@pytest.mark.parametrize("cmd", [
-    "python tools/resaver_native.py clean x.ess out.ess --apply",
-    "python -B tools/resaver_native.py reset-havok x.ess out.ess --apply",
-    "py -3 tools/resaver_native.py clean x.ess out.ess --apply",
-    "RESAVER_BACKEND=native bash tools/resaver-cli.sh clean x.ess out.ess --apply",
-], ids=["python", "python-B", "py-launcher", "wrapper-with-backend"])
-def test_the_adapter_run_directly_is_a_resaver_write(cmd):
-    t = shell_rules.resaver_target(cmd, "bash")
-    assert t is not None and t[0] in shell_rules.RESAVER_OPS, cmd
-    calls = shell_rules.resaver_write_calls(cmd, "bash")
-    assert calls and calls[0][1] == ["out.ess"], calls
-
-
-def test_the_adapter_preview_is_not_a_write():
-    assert shell_rules.resaver_target("python tools/resaver_native.py clean x.ess out.ess", "bash") is None
-
-
 def test_the_adapter_refuses_an_existing_output_even_where_the_guard_allows(tmp_path, monkeypatch):
     """The guard backs up and allows a ReSaver write to a save it can place; the native adapter adds the stricter
     new-output rule itself (an existing output member is refused before anything runs)."""

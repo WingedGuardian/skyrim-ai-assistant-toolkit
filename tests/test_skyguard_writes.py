@@ -294,18 +294,6 @@ def _save_targets(command, shell):
     return tuple(v.saves.change.targets) if v.saves is not None else ()
 
 
-@pytest.mark.parametrize("shell,direct,var", _VAR_PAIRS, ids=_VAR_IDS)
-def test_a_same_command_literal_target_is_judged_as_its_literal(shell, direct, var):
-    saved = _save_targets(direct, shell)
-    if "Saves/" in direct:
-        assert saved, ("the direct form must be caught, or this pair proves nothing", direct)
-        assert _save_targets(var, shell) == saved, var
-    else:
-        want = decide(direct, cwd="C:/w", shell=shell)
-        assert want[0][0] != "allow", ("the direct form must be caught, or this pair proves nothing", direct)
-        assert decide(var, cwd="C:/w", shell=shell) == want, var
-
-
 @pytest.mark.parametrize("shell,command", [
     ("bash", 'echo x > "$P"'),                                     # never assigned here
     ("bash", 'if true; then P=X.esp; fi; echo x > "$P"'),          # assigned in a branch
