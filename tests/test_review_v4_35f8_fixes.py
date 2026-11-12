@@ -158,6 +158,13 @@ def test_a_named_settings_file_is_no_bulk_save_change_however_it_is_copied(world
     assert judge(world, command, os.path.dirname(world[0]))[0] == "allow"
 
 
+@pytest.mark.parametrize("command", ["rsync -e ssh a.ini b/", "rsync -e /usr/bin/ssh -R a.ini b/"])
+def test_rsyncs_remote_shell_value_is_no_copied_file(command):
+    """rsync -e takes a value (the remote shell); it is not a source the copy places in the destination. Since 4.1
+    the bulk-save check that once showed this is retired; copy_targets still feeds the plugin-copy rule."""
+    assert [writes.copy_targets(e) for e in shellparse.parse(command, "bash").execs] == [[("b/", ("a.ini",))]]
+
+
 def test_to_rsync_t_keeps_times_and_names_no_destination(world):
     assert [writes.copy_targets(e) for e in shellparse.parse("rsync -t a.ini b/", "bash").execs] == [[("b/", ("a.ini",))]]
 

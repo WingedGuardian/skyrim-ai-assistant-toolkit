@@ -418,6 +418,23 @@ def test_an_existing_save_outside_the_settings_folder_is_free(inst, tmp_path):
     assert (w.decision, w.context) == ("allow", "")
 
 
+def test_sed_on_a_save_copy_inside_the_install_is_still_refused(inst):
+    """Only a save in the settings folder is exempt (writes.is_save). A .ess elsewhere in the install is an install
+    file like any other: sed -i without -b on it keeps its S-SED-CRLF refusal."""
+    copy = inst.game / "Data" / "Copy.ess"
+    copy.write_bytes(b"x")
+    assert inst.shell("sed -i 's/a/b/' \"{}\"".format(copy.as_posix())).decision == "deny"
+
+
+def test_a_write_to_a_save_copy_inside_the_install_keeps_its_install_note(inst):
+    """The Write tool's save exemption (write_rules.decide) is the settings folder's saves only: a .ess in Data still
+    gets the install-area note."""
+    copy = inst.game / "Data" / "Copy.ess"
+    copy.write_bytes(b"x")
+    w = write_rules.decide(copy.as_posix(), inst.audit, roots=inst.roots)
+    assert w.decision == "allow" and "inside the live Skyrim install" in w.context, w
+
+
 @pytest.mark.parametrize("name,want", [("Save1.skse", "allow"), ("Save1.ess", "allow"), ("notes.txt", "deny")],
                          ids=["cosave", "save", "other-file"])
 def test_sed_on_a_save_is_no_crlf_refusal(inst, name, want):

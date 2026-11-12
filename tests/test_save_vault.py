@@ -509,6 +509,20 @@ def test_a_young_file_waits_even_on_first_sight(bed):
     assert v.sweep()["captured"] == []
 
 
+def _patch_live_links(bed, monkeypatch, fake):
+    """Replace os.link for links FROM the saves folder only. The store publishes with os.link on POSIX
+    (durable.publish_new: link, then unlink the .part), and save_vault.os is the one os module, so a blanket patch
+    broke or counted the store's own publish: CI 43158003086, Linux only (Windows publishes by rename)."""
+    real_link = save_vault.os.link
+    saves = os.path.normcase(str(bed["saves"])) + os.sep
+
+    def link(src, dst, *a, **k):
+        if os.path.normcase(str(src)).startswith(saves):
+            return fake(src, dst)
+        return real_link(src, dst, *a, **k)
+    monkeypatch.setattr(save_vault.os, "link", link)
+
+
 def test_a_locked_save_is_kept_by_copy(bed, monkeypatch):
     """os.link fails on a locked save (deny WA); the copy's own mtime is new, so the live file's stat decides."""
     s, v = bed["saves"], bed["vault"]
@@ -516,7 +530,7 @@ def test_a_locked_save_is_kept_by_copy(bed, monkeypatch):
 
     def no_link(*a, **k):
         raise PermissionError(5, "Access is denied")
-    monkeypatch.setattr(save_vault.os, "link", no_link)
+    _patch_live_links(bed, monkeypatch, no_link)
     out = v.sweep()
     assert len(out["captured"]) == 1, out                 # the sweep's own errors, if any, say why (Linux CI)
     [e] = out["captured"]
@@ -529,7 +543,7 @@ def test_another_volume_waits_while_the_game_runs(bed, monkeypatch):
 
     def no_link(*a, **k):
         raise OSError(17, "cross-device")
-    monkeypatch.setattr(save_vault.os, "link", no_link)
+    _patch_live_links(bed, monkeypatch, no_link)
     monkeypatch.setattr(Vault, "_same_volume", lambda self, path: False)
     bed["state"]["busy"] = True
     out = v.sweep()
@@ -750,7 +764,7 @@ def test_the_capture_resolves_no_live_save_name(bed, monkeypatch):
     monkeypatch.setattr(pathlib.Path, "resolve", lambda self, *a, **k: (
         _by_the_harness() or resolved.append(str(self))) and False or real_resolve(self, *a, **k))
     real_link = save_vault.os.link
-    monkeypatch.setattr(save_vault.os, "link", lambda src, dst: linked.append(str(src)) or real_link(src, dst))
+    _patch_live_links(bed, monkeypatch, lambda src, dst: linked.append(str(src)) or real_link(src, dst))
     assert len(v.sweep()["captured"]) == 1
     live = [str(s / "Save70.ess"), str(s / "Save70.skse")]
     assert not [r for r in resolved if os.path.normcase(r) in map(os.path.normcase, live)]
@@ -775,7 +789,7 @@ def test_another_volume_is_copied_never_linked(bed, monkeypatch):
     write_pair(s, "Save72", age=3600)
     monkeypatch.setattr(Vault, "_same_volume", lambda self, folder: False)
     linked = []
-    monkeypatch.setattr(save_vault.os, "link", lambda *a: linked.append(a))
+    _patch_live_links(bed, monkeypatch, lambda *a: linked.append(a))
     out = v.sweep()
     assert len(out["captured"]) == 1 and linked == [], out
 

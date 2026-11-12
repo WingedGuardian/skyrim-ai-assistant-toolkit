@@ -4416,11 +4416,9 @@ _T11_CLAUSES = [
      _t11row("t11-curl-smp-reset")),
     ("rule-S-DEVBENCH-CRASH-outranks-ask", _MC, '            if hit is not None:             # judge()',
      '            if False:             # judge()', _T11 + "test_a_deny_outranks_an_ask_in_one_command"),
-    # S-DEVBENCH-SAVE
-    # rt-fix-b: `.` and `..` are now emptied by the trailing-dot strip (Windows drops trailing dots), so their own
-    # clause was dead and is gone; the strip is what the [dot] / [dotdot] cases now guard.
-    ("rule-S-DEVBENCH-SAVE-roots", "tools/skyguard/run.py", 'v = engine.evaluate_mcp(p["tool_name"], p["mcp_input"], audit, roots=roots)',
-     'v = engine.evaluate_mcp(p["tool_name"], p["mcp_input"], audit)', "tests/test_guard_corpus.py::test_intended_rows_reproduce"),
+    # (4.1: rule-S-DEVBENCH-SAVE-roots went with the DevBench save rule. The MCP judge reads no root since then
+    # (mcp_rules.judge docstring), so dropping roots= from run.py's evaluate_mcp call changed no decision: an equivalent
+    # mutant, CI 43158003086. The unused roots plumbing is a release-review simplification item.)
     # S-INERT-NOINPUT
     ("rule-S-INERT-NOINPUT-empty", _MC, '    if name == "" or name == "unknown":', '    if name == "unknown":',
      _T11 + "test_an_empty_payload_is_refused_not_allowed"),
@@ -6467,7 +6465,7 @@ _RTB_CLAUSES = [
     ("rule-S-SAVE-BACKUP-write", _WR, "            if is_save(a, roots):", "            if False:", _rtb("save-redirect")),
     ("rule-S-SAVE-BACKUP-cosave", _WR, 'SAVE_EXTS = (".ess", ".skse")', 'SAVE_EXTS = (".ess",)', "tests/test_save_policy.py::test_sed_on_a_save_is_no_crlf_refusal[cosave]"),
     ("rule-S-SAVE-BACKUP-settings-folder-only", _WR, '.endswith(SAVE_EXTS) and targets.zone(abs_path, roots) == "config"',
-     ".endswith(SAVE_EXTS)", "tests/test_save_policy.py::test_an_existing_save_outside_the_settings_folder_is_free"),
+     ".endswith(SAVE_EXTS)", "tests/test_save_policy.py::test_sed_on_a_save_copy_inside_the_install_is_still_refused"),
     # --- S-MOVE-ROOT: moving the install or its folders away
     # Merge (2026-10-05): a root moved OUT of its zone now reaches S-MOVE-ROOT through the delete branch too, so this
     # clause is pinned by a move that stays in its zone (no delete hit): Saves renamed beside itself.
@@ -6531,7 +6529,7 @@ _RTB_CLAUSES = [
     ("rule-S-SAVE-BACKUP-edit-cosave", _WR, 'SAVE_EXTS = (".ess", ".skse")', 'SAVE_EXTS = (".ess",)', _rtb("write-cosave")),
     ("rule-S-SAVE-BACKUP-edit-settings-folder-only", _WRR, "        if is_save(a, roots):",
      "        if a is not None and a.lower().endswith(('.ess', '.skse')):",
-     "tests/test_save_policy.py::test_an_existing_save_outside_the_settings_folder_is_free"),
+     "tests/test_save_policy.py::test_a_write_to_a_save_copy_inside_the_install_keeps_its_install_note"),
     # --- Claude Write with a non-string file_path is no path (W-INERT-NOPATH)
     ("rule-W-INERT-NOPATH-non-string-file-path", "tools/skyguard/adapters/claude.py",
      '        return _sub(fp) if isinstance(fp, str) else ""', "        return _sub(fp)", _rtb("write-path-list")),
@@ -9095,7 +9093,7 @@ MUTATIONS[:] = [pytest.param(*p.values[:3], _FAST_ECHO, marks=p.marks, id=p.id) 
 # they are.
 _FAST_IR = "tests/test_guard_corpus.py::test_intended_rows_reproduce_in_process"
 _RETARGET_IR = ("corpus-intended-text-exact", "rule-S-DEL-UNKNOWN-DIR-whole-folder", "rule-S-SHELL-UNREAD-denies",
-                "rule-S-SHELL-UNREAD-pipe-into-shell", "rule-W-INSTALL-wired", "rule-S-DEVBENCH-SAVE-roots",
+                "rule-S-SHELL-UNREAD-pipe-into-shell", "rule-W-INSTALL-wired",
                 "merge-engine-drops-cwd", "merge-engine-write-drops-roots")
 assert sorted(p.id for p in MUTATIONS if p.values[3] == "tests/test_guard_corpus.py::test_intended_rows_reproduce") \
     == sorted(_RETARGET_IR)
@@ -10096,7 +10094,7 @@ MUTATIONS += [pytest.param(src, a, b, test, id=name) for name, src, a, b, test i
      'tools/skyguard/shellparse.py',
      '            ws, vals = _expand_braces(d, ws, vals)\n',
      '            pass\n',
-     'tests/test_review_v4_guard_gaps.py::test_ordinary_commands_stay_allowed'),
+     'tests/test_review_v4_guard_gaps.py::test_a_quoted_brace_stays_one_word'),
     ('gap-quoted-brace-expanded',
      'tools/skyguard/shellparse.py',
      ' or not _unquoted_brace(w.raw):\n',
@@ -11812,7 +11810,7 @@ MUTATIONS += [pytest.param(path, anchor, replacement, test, id="f35-" + name) fo
     ("tools/mod-install.py", '        plan = replace_unedited_mod_data(plan, previous_install(records_dir() / "{}.files.txt".format(name)))\n', '        pass\n',
      "tests/test_mod_install.py::test_mo2_update_replaces_unedited_mod_data_and_the_plan_says_so", "mod-data-replaced"),
     ("tools/skyguard/writes.py", 'elif w in (_RSYNC_VALUED if p == "rsync" else _CP_VALUED):', 'elif w in _CP_VALUED:',
-     _F35 + "test_a_named_settings_file_is_no_bulk_save_change_however_it_is_copied[rsync -e /usr/bin/ssh -R a.ini '<C>/']", "rsync-rsh-value"),
+     _F35 + "test_rsyncs_remote_shell_value_is_no_copied_file[rsync -e /usr/bin/ssh -R a.ini b/]", "rsync-rsh-value"),
     ("tools/skyguard/writes.py", 'len(argv) and p != "rsync":', 'len(argv):',
      _F35 + "test_to_rsync_t_keeps_times_and_names_no_destination", "rsync-t-is-times"),
     ("tools/skyguard/shellparse.py", '            if c in "WX":\n', '            if c == "?":\n',
