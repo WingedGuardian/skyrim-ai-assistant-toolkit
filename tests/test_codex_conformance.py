@@ -139,23 +139,21 @@ def _derived():
             out.append(_variant(f, "derived:{}:Remove-Item".format(label), rm,
                                 {"verdict": "deny", "code": "shell.S-DEL-INSTALL"}))   # Plan 5: S-DEL-INSTALL replaced DENY_INSTALL
 
-            # The save policy (user ruling 2026-10-13): ReSaver --apply on a save the hook can place is backed up and
-            # verified by the hook, then allowed -- on Codex too, where the old ask could only refuse. One it cannot
-            # place (a wildcard) cannot be backed up, so it is refused.
+            # ReSaver --apply on a save, named or by a pattern, is allowed on Codex too (4.1: no rule decides on a save (the save vault keeps every version)).
             def resaver(p):
                 p["tool_input"]["command"] = "bash tools/resaver-cli.sh reset-havok save.ess --apply"
             out.append(_variant(f, "derived:{}:resaver-apply".format(label), resaver,
-                                {"verdict": "advise", "code": "shell.S-SAVE-BACKUP"}, _seed_save))
+                                {"verdict": "allow"}, _seed_save))
 
             def resaver_pattern(p):
                 p["tool_input"]["command"] = "bash tools/resaver-cli.sh reset-havok '*.ess' --apply"
             out.append(_variant(f, "derived:{}:resaver-apply-pattern".format(label), resaver_pattern,
-                                {"verdict": "deny", "code": "shell.S-RESAVER-APPLY", "reason_prefix": "Blocked: ReSaver"}))
+                                {"verdict": "allow"}))
     return out
 
 
 def _seed_save(root: Path) -> None:
-    """A save and its co-save in the cwd, where ReSaver resolves `save.ess` (the save policy backs both up)."""
+    """A save and its co-save in the cwd, where ReSaver resolves `save.ess`."""
     for ext, body in (("ess", b"save"), ("skse", b"cosave")):
         (root / ("save." + ext)).write_bytes(body)
 

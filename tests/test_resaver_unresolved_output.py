@@ -1,15 +1,14 @@
 """An unresolved ReSaver output must not receive preservation credit for its readable input."""
-import json
 import sys
 
 import pytest
 
 from conftest import REPO
-from test_save_physical_paths import owned, quoted
+from test_save_physical_paths import quoted
 
 sys.path.insert(0, str(REPO / 'tools'))
 from modding_harness import contracts
-from skyguard import portable, rules
+from skyguard import portable
 
 
 def run(root, operation, command):
@@ -20,7 +19,8 @@ def run(root, operation, command):
 
 @pytest.mark.parametrize('operation', ['clean', 'reset-havok'])
 @pytest.mark.parametrize('existing', [False, True])
-def test_resolved_output_preserves_only_an_existing_output_pair(owned, operation, existing):
+def test_a_resolved_output_is_allowed_and_nothing_is_changed_or_backed_up(owned, operation, existing):
+    """4.1: no rule decides on a save and no hook backs one up (the save vault keeps every version)."""
     root, _, saves, _, pair = owned
     source = pair(saves, 'Input', b'INPUT ORIGINAL')
     destination = tuple(saves / ('Output' + ext) for ext in ('.ess', '.skse'))
@@ -32,15 +32,8 @@ def test_resolved_output_preserves_only_an_existing_output_pair(owned, operation
     command += 'bash tools/resaver-cli.sh ' + operation + ' "$SAVE" "$OUT" --apply'
     outcome = run(root, operation, command)
     assert outcome.result.decision == 'allow', outcome.result.as_dict()
-    assert len(outcome.transactions) == int(existing)
+    assert outcome.transactions == ()
     assert before == {p: p.read_bytes() for p in before}
-    if existing:
-        store = root / '.modding-agent-harness/backups/saves'
-        record = json.loads((store / 'transactions' / (outcome.transactions[0] + '.json')).read_bytes())
-        members = [m for group in record['groups'] for m in group['members']]
-        assert len(members) == 2 and {m['path'].replace('\\', '/').rsplit('/', 1)[1] for m in members} == {'Output.ess', 'Output.skse'}
-        for member in members:
-            assert (store / 'blobs' / member['sha256']).read_bytes() in [p.read_bytes() for p in destination]
-    else:
+    if not existing:
         assert not any(p.exists() for p in destination)
 

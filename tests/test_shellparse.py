@@ -752,12 +752,65 @@ def _t4_rows():
     return [r for r in rows if r["task"] == "T4"]
 
 
+# The T4 rows whose ReSaver --apply the parser must expose as an executed command: the rows that were refused
+# before 4.1 (frozen from the corpus at a37935e, when they still said deny). No rule decides on a save since 4.1,
+# but the parser's reading of what runs is unchanged and still has to be right.
+_T4_DETECTED = frozenset((
+    "t04-apply",
+    "t04-apply-chain",
+    "t04-apply-env",
+    "t04-apply-subst",
+    "t04-bang",
+    "t04-bash-c",
+    "t04-bash-heredoc",
+    "t04-bin-bash-heredoc",
+    "t04-brace",
+    "t04-cat-pipe-bash",
+    "t04-clean",
+    "t04-command",
+    "t04-cont-apply",
+    "t04-cont-op",
+    "t04-do",
+    "t04-dot",
+    "t04-elif",
+    "t04-else",
+    "t04-env",
+    "t04-eval",
+    "t04-exec",
+    "t04-find-exec",
+    "t04-find-execdir",
+    "t04-heredoc-dash-delim",
+    "t04-heredoc-in-comment",
+    "t04-herestring",
+    "t04-java",
+    "t04-java-cp",
+    "t04-java-exe-fullpath",
+    "t04-java-quoted-jar",
+    "t04-nice",
+    "t04-nohup",
+    "t04-quoted-prog",
+    "t04-resavercli-exe",
+    "t04-set-global",
+    "t04-set-var",
+    "t04-sh-c-single",
+    "t04-source",
+    "t04-subshell",
+    "t04-sudo",
+    "t04-then",
+    "t04-time",
+    "t04-timeout",
+    "t04-wrap-chain",
+    "t04-xargs",
+    "t04-xargs-stdin",
+    "t04-zsh-c",
+    "t04-quoted-spaces", "t04-heredoc-sh-s",
+))
+
+
 @pytest.mark.parametrize("row", _t4_rows(), ids=[r["id"] for r in _t4_rows()])
 def test_t04_rows_come_out_as_executed_commands(row):
-    """Every T4 intended row's decision, reproduced from execs alone: the shapes Task 6 re-bases ReSaver onto. Since
-    the save policy (2026-10-13) a detected --apply is refused when the save cannot be placed and allowed when
-    a new output resolves through an absolute path or a known preceding cd. Policy and detection are separate."""
-    detected = row["decision"] == "deny" or row["id"] in ("t04-quoted-spaces", "t04-heredoc-sh-s")
+    """Every T4 row's ReSaver --apply, detected (or not) from execs alone: the shapes Task 6 re-bases ReSaver onto."""
+    detected = row["id"] in _T4_DETECTED
     assert _resaver_from_parser(row["payload"]["tool_input"]["command"]) is detected
 
 

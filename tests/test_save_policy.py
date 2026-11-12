@@ -368,7 +368,7 @@ def sp_installs(tmp_path_factory):
 
 def test_there_are_save_policy_rows():
     assert len(SP_ROWS) >= 25
-    assert {r["decision"] for r in SP_ROWS} == {"allow", "advise", "deny"}
+    assert {r["decision"] for r in SP_ROWS} == {"allow", "deny"}
 
 
 @pytest.mark.parametrize("row", SP_ROWS, ids=[r["id"] for r in SP_ROWS])

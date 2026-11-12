@@ -83,7 +83,7 @@ ROWS = [
     ("rt-codex-patch-delete-ini", "apply_patch", _patch("*** Delete File: <config>/Skyrim.ini"), None,
      "deny", {"S-DEL-CONFIG"}, DEL_CONFIG.format("Skyrim.ini")),
     ("rt-codex-patch-delete-save", "apply_patch", _patch("*** Delete File: <config>/Saves/Existing.ess"), None,
-     "allow", {"S-SAVE-BACKUP"}, SAVE_NOTE.format("Existing")),
+     "allow", set(), ""),                                                            # 4.1: no rule decides on a save (the save vault keeps every version)
     ("rt-codex-patch-delete-dot", "apply_patch", _patch("*** Delete File: ."), None,
      "deny", {"S-DEL-INSTALL"}, DEL_INSTALL.format("Game")),
     ("rt-codex-patch-delete-dir", "apply_patch", _patch("*** Delete File: Data"), None,
@@ -142,16 +142,16 @@ ROWS = [
     # A Delete of a path the guard cannot place (an 8.3 short name) that reaches the install.
     ("rt-codex-patch-delete-unresolved", "apply_patch", _patch("*** Delete File: <install>/DATA~1/x.esp"), None,
      "deny", {"S-DEL-UNRESOLVED"}, DEL_UNRESOLVED),
-    # A patch that adds (replaces) a save in the settings folder: backed up first, then allowed (was W-SAVE's ask).
+    # A patch that adds (replaces) a save in the settings folder: allowed (4.1: no rule decides on a save (the save vault keeps every version)).
     ("rt-codex-patch-add-save", "apply_patch", _patch("*** Add File: <config>/Saves/Existing.ess", "+x"), None,
-     "allow", {"S-SAVE-BACKUP"}, SAVE_NOTE.format("Existing")),
+     "allow", set(), ""),
     # rt-fix-b (routes s115/s116): the DevBench judge Claude's protect-mcp uses, on Codex too.
     ("rt-codex-mcp-crash", "mcp__devbench-vr__console", {"command": "smp reset"}, None,
      "deny", {"S-DEVBENCH-CRASH"}, CRASH),
     ("rt-codex-mcp-list-input", "mcp__devbench-vr__console", ["smp reset"], None,
      "deny", {"S-DEVBENCH-CRASH"}, CRASH),
     ("rt-codex-mcp-save", "mcp__devbench-vr__game", {"action": "save", "name": "Existing"}, None,
-     "allow", {"S-SAVE-BACKUP"}, SAVE_NOTE.format("Existing")),
+     "allow", set(), ""),                                                            # 4.1: no rule decides on a save (the save vault keeps every version)
     ("rt-codex-mcp-other-server", "mcp__probe__echo", {"text": "smp reset"}, None, "allow", set(),
      "WARN AND ALLOW: this tool surface was not evaluated"),
     ("rt-codex-mcp-help", "mcp__devbench-vr__console", {"command": "help"}, None, "allow", set(), ""),

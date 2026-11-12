@@ -202,10 +202,8 @@ def test_protect_files_notes_inside_the_declared_install(project):
     ("rm Data/Textures/x.dds", "advise", "a relative delete inside Data"),
     ("rm ./Data/x.dds", "advise", "dot-relative too"),
     ("cat loadorder.txt", "allow", "reading the load order is silent; a write notes (Plan 5 Task 8)"),
-    # The save policy (2026-10-13): --apply on a bare save name with no cwd cannot be placed, so it cannot be backed
-    # up first -- refused (a placed save is backed up and allowed: tests/test_save_policy.py).
-    ("bash tools/resaver-cli.sh reset-havok save.ess --apply", "deny",
-     "--apply MUTATES a save through ReSaver's write path"),
+    ("bash tools/resaver-cli.sh reset-havok save.ess --apply", "allow",
+     "--apply changes a save; 4.1: no rule decides on a save (the save vault keeps every version)"),
     ("bash tools/resaver-cli.sh reset-havok save.ess", "allow", "the dry-run does not"),
 ])
 def test_protect_bash_decides(project, command, expected, why):
