@@ -13,7 +13,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from modding_harness import contracts, dispatch, telemetry
-from . import codes, engine, mcp_rules, paths, save_profile
+from . import codes, engine, mcp_rules, paths, save_profile, vault_watch
 from .audit import Audit
 from .request import Request
 from .verdict import Verdict
@@ -118,6 +118,11 @@ def check(action, project, *, transcript="", deadline=None, local_restrictions=(
         return replace(outcome, result=replace(outcome.result, warnings=outcome.result.warnings +
             ("PREVIEW ONLY: no operation is authorized; no receipt or runtime state was written",))), None
     result = outcome.result
+    # The save vault replaces every save rule, and only while its watcher runs: every host's pre-tool path looks,
+    # because a host with no session start (OpenCode, a generic adapter) has nothing else that would start it.
+    vault_note = vault_watch.ensure(str(project))
+    if vault_note:
+        result = replace(result, warnings=result.warnings + (vault_note,))
     # Ordinary config/script snapshots remain non-blocking.
     value = Verdict(result.decision, result.reason, "\n".join(result.warnings),
                     "partial" if result.evaluation == "unguarded" else result.evaluation, last[0].code)

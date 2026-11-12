@@ -12990,6 +12990,44 @@ MUTATIONS += [
                  marks=pytest.mark.skipif(sys.platform != "win32", reason="the sign-in task branch is Windows only")),
 ]
 
+# The watcher kept running from every host's pre-tool path (2026-11-11): one twin per clause of vault_watch.ensure.
+_VW = "tests/test_vault_watch.py::"
+_VW_MARKERS = '    if any(e.get(k) for e in (env, os.environ) for k in ("PYTEST_CURRENT_TEST", "HARNESS_FIXTURE_ROOT")):'
+MUTATIONS += [pytest.param("tools/skyguard/vault_watch.py", anchor, replacement, _VW + test, id="vw-" + name)
+              for anchor, replacement, test, name in [
+    ('    if not (own and TOOL.is_file()):\n        return ""', '    if not TOOL.is_file():\n        return ""',
+     'test_nothing_for_a_project_that_is_not_this_toolkit', 'any-project'),
+    ('    if env.get("SKYGUARD_SAVE_VAULT", "").strip().lower() == "off":\n        return ""',
+     '    if False:\n        return ""', 'test_each_switch_stops_the_start[SKYGUARD_SAVE_VAULT]', 'vault-switch-ignored'),
+    ('    if env.get("SKYGUARD_HOUSEKEEP_SWEEP", "").strip().lower() == "off":\n        return ""',
+     '    if False:\n        return ""', 'test_each_switch_stops_the_start[SKYGUARD_HOUSEKEEP_SWEEP]',
+     'sweep-switch-ignored'),
+    (_VW_MARKERS, _VW_MARKERS.replace("(env, os.environ)", "(env,)"),
+     'test_under_a_test_harness_nothing_is_started[process-PYTEST_CURRENT_TEST]', 'process-markers-unread'),
+    (_VW_MARKERS, _VW_MARKERS.replace("(env, os.environ)", "(os.environ,)"),
+     'test_under_a_test_harness_nothing_is_started[mapping-HARNESS_FIXTURE_ROOT]', 'mapping-markers-unread'),
+    (_VW_MARKERS, _VW_MARKERS.replace('("PYTEST_CURRENT_TEST", "HARNESS_FIXTURE_ROOT")', '("HARNESS_FIXTURE_ROOT",)'),
+     'test_under_a_test_harness_nothing_is_started[process-PYTEST_CURRENT_TEST]', 'starts-under-pytest'),
+    (_VW_MARKERS, _VW_MARKERS.replace('("PYTEST_CURRENT_TEST", "HARNESS_FIXTURE_ROOT")', '("PYTEST_CURRENT_TEST",)'),
+     'test_under_a_test_harness_nothing_is_started[process-HARNESS_FIXTURE_ROOT]', 'starts-under-the-launcher'),
+    ('        if running(root, now):\n            return ""', '        if False:\n            return ""',
+     'test_a_running_watcher_costs_nothing_and_starts_nothing', 'restarts-a-running-watcher'),
+    ('            if now - marker.stat().st_mtime < THROTTLE_S:\n                return ""',
+     '            if False:\n                return ""',
+     'test_a_start_is_tried_at_most_once_per_throttle_period', 'no-throttle'),
+    ('        return now - float(beat.get("last_sweep", 0)) <= STALE_S', '        return True',
+     'test_a_stopped_watcher_is_started_once_and_said', 'stale-heartbeat-reads-as-running'),
+    ('        return FAILED', '        return STARTED',
+     'test_a_launch_that_fails_is_said_and_never_raises', 'failed-launch-says-started'),
+]]
+MUTATIONS += [
+    pytest.param("tools/skyguard/portable.py", "    vault_note = vault_watch.ensure(str(project))", '    vault_note = ""',
+                 _VW + "test_every_pre_tool_check_looks_at_the_watcher_and_passes_its_note_on", id="vw-not-wired"),
+    pytest.param("tools/skyguard/run.py", "            vault_watch.start(project)\n", "            pass\n",
+                 "tests/test_session_vault_note.py::test_a_stopped_vault_is_said_and_its_watcher_is_started_detached",
+                 id="svn-session-start-launch-not-wired"),
+]
+
 # Save vault (2026-11-10): one twin per guarded clause of tools/save_vault.py.
 MUTATIONS += [pytest.param("tools/save_vault.py", anchor, replacement, "tests/test_save_vault.py::" + test,
                            id="sv-" + name)

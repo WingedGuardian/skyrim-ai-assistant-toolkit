@@ -1280,8 +1280,9 @@ fi
 
 # --- The save vault (4.1): every version of every save and settings INI is kept, whatever changed it ---
 # Each Claude Code / Codex session start says whether the vault's watcher runs and starts it when it does not
-# (tools/skyguard/run.py). The logon task starts it at sign-in instead, so versions are also kept while no agent
-# session is open. Registered only when asked for: the flag, or a yes at a real terminal. save_vault.py itself
+# (tools/skyguard/run.py), and every agent's guarded tool call does the same (tools/skyguard/vault_watch.py: OpenCode
+# and generic adapters have no session start). The logon task starts it at sign-in instead, so versions are also
+# kept while no agent session is open. Registered only when asked for: the flag, or a yes at a real terminal. save_vault.py itself
 # refuses to register a task under a test harness.
 VAULT_TASK_RC=""
 echo ""
@@ -1292,12 +1293,13 @@ if [ -z "$SL_WINDOWS" ]; then
         echo "  !! --save-vault-task: the sign-in task needs Windows. Not registered."
         VAULT_TASK_RC=3
     fi
-    echo "  Its watcher starts with each Claude Code or Codex session (or run: python tools/save_vault.py watch)."
+    echo "  Its watcher is started by each Claude Code or Codex session and by any agent's first guarded tool call"
+    echo "  (or run: python tools/save_vault.py watch)."
 else
     if [ -z "$WANT_VAULT_TASK" ] && [ -t 0 ]; then
-        echo "  Its watcher starts with each Claude Code or Codex session. A sign-in task starts it with Windows instead,"
-        echo "  so saves are also kept while no agent session is open. No administrator rights are needed; remove it"
-        echo "  any time with python tools/save_vault.py uninstall-task."
+        echo "  Its watcher is started by each Claude Code or Codex session and by any agent's first guarded tool call."
+        echo "  A sign-in task starts it with Windows instead, so saves are also kept while no agent session is open."
+        echo "  No administrator rights are needed; remove it any time with python tools/save_vault.py uninstall-task."
         read -r -p "Start the save vault at sign-in? (Y/n) " VT_ANSWER || VT_ANSWER="n"
         case "$VT_ANSWER" in n|N|no|NO|No) WANT_VAULT_TASK=no ;; *) WANT_VAULT_TASK=yes ;; esac
     fi

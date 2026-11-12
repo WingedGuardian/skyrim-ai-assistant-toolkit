@@ -198,11 +198,8 @@ def _vault_note(project) -> str:
     sweep_off = env.get("SKYGUARD_HOUSEKEEP_SWEEP", "").strip().lower() == "off"
     if stopped and not in_test and not sweep_off:
         try:
-            import subprocess
-            flags = 0x00000008 | 0x00000200 | 0x08000000 if os.name == "nt" else 0   # detached, new group, no window
-            subprocess.Popen([sys.executable, "-B", str(tool), "--project", str(project), "watch"], cwd=str(project),
-                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             close_fds=True, creationflags=flags, start_new_session=os.name != "nt")
+            from skyguard import vault_watch
+            vault_watch.start(project)
             lines.append("save vault: started the watcher now; confirm with python tools/save_vault.py status. "
                          "Until it runs, a changed save has no kept earlier version.")
         except Exception:  # noqa: BLE001
