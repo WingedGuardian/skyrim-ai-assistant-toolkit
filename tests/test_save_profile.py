@@ -1,24 +1,12 @@
 """Legacy backup names retain a complete pair in the neutral store."""
-import hashlib
-import json
-from pathlib import Path
 import sys
 
 import pytest
 
 from conftest import REPO
 sys.path.insert(0, str(REPO / "tools"))
-from modding_harness import approval, contracts, dispatch, profiles, workspace
-from modding_harness.preservation import SaveStore
-from skyguard import portable, save_profile, save_store
-
-
-def _qualify(monkeypatch, script):
-    """Model the reviewed source: add the fixture's hash to the qualified set. Since 783c5b0 every check reads
-    QUALIFIED_POLICY_SHA256 (built once at import), so patching TRANSFER_POLICY_SHA256 alone reaches nothing
-    (CI run 39145224156)."""
-    monkeypatch.setattr(local_policy, "QUALIFIED_POLICY_SHA256",
-                        local_policy.QUALIFIED_POLICY_SHA256 | {hashlib.sha256(script.read_bytes()).hexdigest()})
+from modding_harness import profiles
+from skyguard import save_profile
 
 
 @pytest.mark.parametrize("suffix", [".bak", ".BAK", ".old.1", ".snapshot-1", ".bäckup"])

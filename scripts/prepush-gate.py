@@ -341,6 +341,10 @@ def main(argv=None) -> int:
     g.step("collection against the recorded floors", pyt + ["--collect-only", "tests/"], check=collect_check)
     g.step("generated agent files match agent/", [py, "-B", "scripts/gen_agent_trees.py", "--check"])
     g.step("GUARD-FILES.sha256 is fresh", [py, "-B", "scripts/gen-guard-hashes.py", "--check"])
+    # CI's blocking lint (ci.yml "ruff" step): an undefined name in a test that was never called reached CI on 6b313f1 because
+    # this gate ran no lint. ruff is a declared dev dependency (requirements.txt), so a missing one is a refusal, not a skip.
+    py_files = [f for f in _git("ls-files", "*.py").splitlines() if f]
+    g.step("ruff blocking rules (E9,F63,F7,F82)", [py, "-m", "ruff", "check", "--select=E9,F63,F7,F82", *py_files])
     extra = [t for t in tests_for(changed) if t not in SENTINELS]
     missing = [s for s in SENTINELS if not (REPO / s).is_file()]
     if missing:
