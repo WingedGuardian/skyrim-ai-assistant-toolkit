@@ -191,7 +191,11 @@ def test_each_mutant_of_the_machinery_turns_the_named_row_red(tmp_path, mutant, 
     root, adapter = staged(tmp_path, "json-deny", tpl.replace(old, new))
     rows = conf.run_conformance(adapter.parent, PROFILES["json-deny"][1], cases_for("json-deny"), port=True)
     red = {r.id for r in rows if not r.ok}
-    assert row in red, "mutant {} was not caught by {} (red rows: {})".format(mutant, row, sorted(red))
+    # A starved run (a plain probe past PROBE_TIMEOUT_S) skips the fault matrix: the `faults` row says so, and the
+    # message must show it, or a slow machine reads as a surviving mutant (2026-11-11: once under five parallel
+    # test processes at idle priority; the engine answers in about 0.1 s).
+    why = {r.id: r.why for r in rows if not r.ok}
+    assert row in red, "mutant {} was not caught by {} (red rows: {})".format(mutant, row, why)
 
 
 def test_a_template_edit_outside_the_slots_is_reported_by_conformance(tmp_path):
