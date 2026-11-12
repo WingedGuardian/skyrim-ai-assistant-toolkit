@@ -69,8 +69,8 @@ def build(python: str, out: Path = libloot_loader.BUILT) -> Path:
         if shutil.which(tool) is None:
             raise SystemExit("%s not found: %s" % (tool, hint))
     if subprocess.run([python, "-m", "maturin", "--version"], capture_output=True).returncode != 0:
-        raise SystemExit("maturin not found for %s: python -m pip install --only-binary=:all: --require-hashes -r "
-                         "tools/libloot/build-requirements.lock" % python)
+        hint = "python -m pip install --only-binary=:all: --require-hashes -r tools/libloot/build-requirements.lock"
+        raise SystemExit("maturin not found for %s: %s" % (python, hint))
     with tempfile.TemporaryDirectory(prefix="libloot-build-") as tmp:
         with tarfile.open(pack) as t:
             _safe_extract(t, Path(tmp))
