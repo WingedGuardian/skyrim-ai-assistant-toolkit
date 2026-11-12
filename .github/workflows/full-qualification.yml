@@ -271,6 +271,12 @@ jobs:
       - name: The SDK is 10, and the pinned tools restore with it
         run: |
           set -euo pipefail
+          # The runner image may carry a newer SDK (11.0.100 on ubuntu-latest, CI 43285413535), and with no global.json
+          # dotnet picks the newest. Pin the 10 that setup-dotnet installed for this job only (the repo ships no
+          # global.json: that would choose users' SDK for them).
+          sdk=$(dotnet --list-sdks | awk '/^10\./ {print $1}' | sort -V | tail -1)
+          [ -n "$sdk" ] || { echo "::error::setup-dotnet installed no 10.x SDK"; dotnet --list-sdks; exit 1; }
+          printf '{"sdk": {"version": "%s", "rollForward": "disable"}}\n' "$sdk" > global.json
           v=$(dotnet --version)
           case "$v" in 10.*) echo "SDK $v" ;; *) echo "::error::dotnet resolves SDK $v, not 10"; exit 1 ;; esac
           dotnet tool restore
