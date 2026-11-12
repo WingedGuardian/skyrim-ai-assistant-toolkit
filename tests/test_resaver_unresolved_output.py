@@ -4,7 +4,7 @@ import sys
 import pytest
 
 from conftest import REPO
-from test_save_physical_paths import quoted
+from test_save_physical_paths import owned, quoted  # noqa: F401  (owned: a fixture used by name)
 
 sys.path.insert(0, str(REPO / 'tools'))
 from modding_harness import contracts

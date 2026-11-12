@@ -185,6 +185,7 @@ RESAVER_PLUS_ADDITIONS = 16
 ADAPTER_REQUIRED = (
     "ADAPTING.md",
     "docs/upgrading-native-hooks.md",
+    "docs/save-vault.md",
     "tools/modding_harness/patches.py",
     "tools/adapting/adapter_template.py",
     "tools/adapting/capability-report.template.json",

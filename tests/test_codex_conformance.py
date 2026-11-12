@@ -143,12 +143,12 @@ def _derived():
             def resaver(p):
                 p["tool_input"]["command"] = "bash tools/resaver-cli.sh reset-havok save.ess --apply"
             out.append(_variant(f, "derived:{}:resaver-apply".format(label), resaver,
-                                {"verdict": "allow"}, _seed_save))
+                                {"verdict": "allow", "code": "allow"}, _seed_save))
 
             def resaver_pattern(p):
                 p["tool_input"]["command"] = "bash tools/resaver-cli.sh reset-havok '*.ess' --apply"
             out.append(_variant(f, "derived:{}:resaver-apply-pattern".format(label), resaver_pattern,
-                                {"verdict": "allow"}))
+                                {"verdict": "allow", "code": "allow"}))
     return out
 
 
