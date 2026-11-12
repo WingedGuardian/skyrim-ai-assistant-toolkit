@@ -1,0 +1,100 @@
+name: libloot wheels
+# Builds the libloot Python wheels the toolkit ships in tools/libloot/wheels/, and the GPL source pack beside them
+# (tools/libloot/source/), from the upstream commit pinned in tools/libloot/PROVENANCE.json. Run it by pushing the
+# commit to the branch below (a new workflow cannot be dispatched until it is on the default branch). It only builds
+# and uploads artifacts; a person downloads them, checks the hashes, and commits them with tools/libloot/build.py
+# --record. Nothing here writes to the repository.
+on:
+  push:
+    branches: [build/libloot-wheels]
+permissions:
+  contents: read
+
+env:
+  LIBLOOT_REPO: loot/libloot
+  LIBLOOT_COMMIT: c242698ea86a382998cd8d1c5329f26aea666867   # 0.29.7; must equal PROVENANCE.json (checked below)
+  RUST_TOOLCHAIN: 1.99.1
+  MATURIN: 1.16.0
+
+jobs:
+  wheel:
+    name: wheel (Python ${{ matrix.python }})
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          path: toolkit
+      - name: The pin here matches PROVENANCE.json
+        shell: bash
+        run: |
+          want=$(python -c "import json;print(json.load(open('toolkit/tools/libloot/PROVENANCE.json'))['upstream']['commit'])")
+          [ "$want" = "$LIBLOOT_COMMIT" ] || { echo "::error::workflow pin $LIBLOOT_COMMIT != PROVENANCE.json $want"; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          repository: ${{ env.LIBLOOT_REPO }}
+          ref: ${{ env.LIBLOOT_COMMIT }}
+          persist-credentials: false
+          path: libloot
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup default "$RUST_TOOLCHAIN"
+          rustc --version
+      - name: Build
+        shell: bash
+        run: |
+          python -m pip install "maturin==$MATURIN"
+          cd libloot
+          maturin build --release --locked -m python/Cargo.toml -i python --out ../dist
+      - name: Record
+        shell: bash
+        run: |
+          cd dist
+          sha256sum *.whl > SHA256SUMS
+          { echo "runner: $ImageOS $ImageVersion"; rustc --version; maturin --version; python --version; } > build-info.txt
+          cat SHA256SUMS build-info.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: libloot-wheel-py${{ matrix.python }}
+          path: dist/
+          if-no-files-found: error
+
+  source:
+    name: GPL source pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          repository: ${{ env.LIBLOOT_REPO }}
+          ref: ${{ env.LIBLOOT_COMMIT }}
+          persist-credentials: false
+          path: libloot
+      - name: Vendor every crate and pack the corresponding source
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          cd libloot
+          rm -rf .git
+          mkdir -p .cargo
+          cargo +"$RUST_TOOLCHAIN" vendor --locked vendor > .cargo/config.toml
+          cd ..
+          name="libloot-0.29.7-${LIBLOOT_COMMIT:0:12}-source"
+          mv libloot "$name"
+          mkdir dist
+          tar --sort=name --owner=0 --group=0 --numeric-owner --mtime='2026-10-19 00:00Z' -czf "dist/$name.tar.gz" "$name"
+          cd dist && sha256sum *.tar.gz > SHA256SUMS && cat SHA256SUMS && du -h *.tar.gz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: libloot-source
+          path: dist/
+          if-no-files-found: error

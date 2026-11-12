@@ -1,0 +1,17 @@
+{
+ "what": "libloot Python wheels (the `loot` module) for tools/loot_advisor.py, and the GPL corresponding source",
+ "license": "GPL-3.0-or-later (libloot); bundled crates keep their own licenses, listed in the source pack",
+ "upstream": {
+  "repo": "https://github.com/loot/libloot",
+  "version": "0.29.7",
+  "commit": "c242698ea86a382998cd8d1c5329f26aea666867"
+ },
+ "build": {
+  "workflow": ".github/workflows/libloot-wheels.yml",
+  "run": null,
+  "rust": "1.99.1",
+  "maturin": "1.16.0",
+  "pythons": ["3.10", "3.11", "3.12", "3.13"],
+  "platform": "win_amd64"
+ }
+}
