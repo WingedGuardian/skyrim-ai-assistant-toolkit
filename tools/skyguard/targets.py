@@ -344,18 +344,6 @@ def physical(word: str, cwd: str, dialect: str, env: Mapping[str, str], *, liter
     return compared
 
 
-def physical_cwd(e, cwd: str, env: Mapping[str, str]) -> Optional[str]:
-    if e.cd_before == "?":
-        return None
-    if not e.cd_before:
-        return paths.physical_abs(cwd) if cwd else None
-    return physical(e.cd_before, cwd, e.dialect, env)
-
-
-def physical_operand(e, word: str, cwd: str, env: Mapping[str, str]) -> Optional[str]:
-    return physical(word, physical_cwd(e, cwd, env) or "", e.dialect, env)
-
-
 def _under(path: str, root: str) -> bool:
     if path == root:
         return True

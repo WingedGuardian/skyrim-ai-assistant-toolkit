@@ -20,8 +20,10 @@ REMOVED = frozenset({
     "S-REDIRECT-INSTALL",   # Task 8: replaced by the S-WRITE-* rules, which fire on the program that writes
     "S-MOVE-INSTALL",       # Task 9 fix round 1: 107 of 107 hits in history were the user's deliberate deploys
 })
-# (Not legacy ids, so not listed above: S-WRITE-SAVE and W-SAVE, the asks about a save write, went with the save
-# policy, user ruling 2026-10-13 -- saves.py's S-SAVE-* rules decide every save change, by any route. Never reused.)
+# (Not legacy ids, so not listed above; never reused. S-WRITE-SAVE and W-SAVE, the asks about a save write, went with
+# the 2026-10-13 save policy. That policy's own rules went with the save vault (4.1, user ruling 2026-11-10: no rule
+# decides on a save any more, tools/save_vault.py keeps every version instead): S-SAVE-BACKUP, S-SAVE-APPROVAL,
+# S-SAVE-UNKNOWN, S-SAVE-BACKUP-FAILED, S-SAVE-OPAQUE, S-RESAVER-APPLY, S-DEVBENCH-SAVE.)
 
 # DevBench console commands that are refused (Task 11, R14). DATA, compared on whitespace-split lower-case words, so the
 # entry is the WHOLE command: `smp reset` is listed, `smp reset <anything>` is not. The only command MEASURED to crash
@@ -293,28 +295,17 @@ RULES = {
         'Note: loose files override {file}; check for loose copies before trusting it.'
     ),
     },
-    # The save policy (2026-10-13): ReSaver --apply on a save the guard can place is backed up and allowed (saves.py);
-    # one it cannot place (a bare name with no cwd, a wildcard, no .ess at all) cannot be backed up, so it is refused.
-    'S-RESAVER-APPLY': {
-        "decision": 'deny',
-        "hook": 'protect-bash',
-        "legacy": False,
-        "prefixes": [],
-        "template": (
-        'Blocked: ReSaver {op} --apply writes {save}, which the guard cannot place to back it up first.\n'
-        'Give the save as a full path.'
-    ),
-    },
     # v4.0.0: ReSaver Plus's own executables run directly -- the CLI with a save-writing flag, or the GUI -- write saves
-    # with none of tools/resaver_native.py's admission, backups or receipt checks (shell_rules.resaver_native_direct).
+    # with none of tools/resaver_native.py's admission or receipt checks (shell_rules.resaver_native_direct). A note
+    # since 4.1 (it was a refusal): the save vault keeps the earlier version of whatever it writes.
     'S-RESAVER-NATIVE-DIRECT': {
-        "decision": 'deny',
+        "decision": 'advise',
         "hook": 'protect-bash',
         "legacy": False,
         "prefixes": [],
         "template": (
-        'Blocked: {file} run directly writes saves without the adapter\'s new-output checks and backups.\n'
-        'Use bash tools/resaver-cli.sh with RESAVER_BACKEND=native instead.'
+        'Note: {file} run directly writes saves without the adapter\'s new-output checks; '
+        'bash tools/resaver-cli.sh with RESAVER_BACKEND=native has them.'
     ),
     },
     'S-EXTERNAL-OUT': {
@@ -324,51 +315,6 @@ RULES = {
         "prefixes": [],
         "template": (
         'Note: {op} writes its output into the Skyrim install; check it landed where you meant.'
-    ),
-    },
-    # The save policy (user ruling 2026-10-13, saves.py): any call that changes saves -- a write, copy onto, edit,
-    # move, rename, delete, DevBench save or ReSaver --apply -- by any route (shell, edit tools, patch, MCP).
-    # 1 or 2 saves: each pair (.ess + .skse) is backed up and verified by the hook first, then the call is allowed.
-    'S-SAVE-BACKUP': {
-        "decision": 'advise',
-        "hook": 'protect-bash',
-        "legacy": False,
-        "prefixes": [],
-        "template": (
-        'Note: the guard backs up {file} before this runs ({op}).'
-    ),
-    },
-    # More than 2, or a wildcard: the user's typed SAVE_ACCESS_APPROVAL line (modding_harness/approval.py) is required.
-    'S-SAVE-APPROVAL': {
-        "decision": 'deny',
-        "hook": 'protect-bash',
-        "legacy": False,
-        "prefixes": [],
-        "template": (
-        "Blocked: this {op} {n} saves ({file}); more than 2, or a wildcard, needs the user's typed approval.\n"
-        'Scope: python tools/agent-harness.py check --preview; with local policy use check (writes state). See ADAPTING.md; only the user types SAVE_ACCESS_APPROVAL.'
-    ),
-    },
-    # A wildcard the guard cannot list (in a folder name, or an unreadable folder): no backup is possible.
-    'S-SAVE-UNKNOWN': {
-        "decision": 'deny',
-        "hook": 'protect-bash',
-        "legacy": False,
-        "prefixes": [],
-        "template": (
-        'Blocked: the guard cannot list the saves this {op} ({file}), so it cannot back them up first.\n'
-        'Name each save, or put the wildcard in the file name only.'
-    ),
-    },
-    # The backup itself failed (no space, unreadable, a copy that does not verify, the store busy): fail closed.
-    'S-SAVE-BACKUP-FAILED': {
-        "decision": 'deny',
-        "hook": 'protect-bash',
-        "legacy": False,
-        "prefixes": [],
-        "template": (
-        'Blocked: the backup of {file} failed ({op}), so the command did not run.\n'
-        'The save is unchanged; fix the cause, then retry.'
     ),
     },
     # routes red team (rt-fix-b): moving or renaming the install, its Data folder, the settings folder, its Saves
@@ -395,20 +341,8 @@ RULES = {
         'Approve only if you asked for those changes to be discarded.'
     ),
     },
-    # 2026-10-19 (user ruling, "ask first"): a program the guard cannot name (`$R`, `%R%`, `& $R`) whose words name a
-    # save. It may write, move or delete the save, or do nothing; the guard cannot count that change or back it up first.
-    'S-SAVE-OPAQUE': {
-        "decision": 'ask',
-        "hook": 'protect-bash',
-        "legacy": False,
-        "prefixes": [],
-        "template": (
-        'This runs a program the guard cannot name on the save {file}.\n'
-        'Approve only if you asked for this save to be used this way.'
-    ),
-    },
     # 2026-10-20 (user ruling, "ask first", v4.0.0 review L1): a program the guard cannot name (an unnamed program
-    # word, an eval of a variable, awk system()) on a path the other rules protect that is not a save (S-SAVE-OPAQUE's).
+    # word, an eval of a variable, awk system()) on a path the other rules protect. A save is not one (4.1).
     'S-OPAQUE-PROTECTED': {
         "decision": 'ask',
         "hook": 'protect-bash',
@@ -427,18 +361,6 @@ RULES = {
         "template": (
         "Blocked: '{op}' crashes a large load order in the live game.\n"
         'Use a targeted command instead, or run it yourself.'
-    ),
-    },
-    # The save policy (2026-10-13): a DevBench save over an EXISTING save is backed up and allowed (saves.py); one
-    # whose save the guard cannot tell (no plain name, no Saves folder) cannot be backed up, so it is refused.
-    'S-DEVBENCH-SAVE': {
-        "decision": 'deny',
-        "hook": 'protect-bash',
-        "legacy": False,
-        "prefixes": [],
-        "template": (
-        '{op}\n'
-        'The guard cannot back that save up first, so the call is refused; use a plain save name.'
     ),
     },
     # Plan 6 Task 11 (D6, R7): the lift rules (lift_rules.py). The CLI lifts are D6's: allowed, with a note. A

@@ -5,8 +5,8 @@
 #
 # SETUP: setup.sh fills in the Python path below (it writes sys.executable of the Python it found).
 #
-# This hook never blocks: it runs AFTER the call, which it cannot undo. It reports saves changed with
-# no backup first -- the gap the pre-call save rules cannot see (tools/skyguard/saves.py KNOWN LIMITS).
+# This hook never blocks: it runs AFTER the call, which it cannot undo. It reports the saves a call
+# changed or removed; tools/save_vault.py keeps every version of them (no rule decides on a save).
 # A failure here is LOUD in the audit log, never a refusal.
 #
 # A bare `cat`, never `cat /dev/stdin`: the latter returns ZERO BYTES when Claude Code (Node) spawns a

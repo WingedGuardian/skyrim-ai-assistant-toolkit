@@ -729,10 +729,8 @@ def raw_reaches(word: str, base: Optional[str], dialect: str, roots) -> bool:
 class Scan(NamedTuple):
     hit: Optional[Hit]
     relative_unknown: str           # basename for S-RELATIVE-UNKNOWN advice ("" for none)
-    # The save policy (saves.py): each save in the settings folder (writes.is_save) a delete removes, resolved. Not a
-    # S-DEL-CONFIG hit: saves.judge backs it up and allows it, or asks the user for a bulk delete. The Saves FOLDER
-    # itself is no save, so deleting it stays S-DEL-CONFIG.
-    saves: Tuple[str, ...] = ()
+    # A save in the settings folder (writes.is_save) is never a hit: no rule decides on a save (4.1, the save vault
+    # keeps every version). The Saves FOLDER itself is no save, so deleting it stays S-DEL-CONFIG.
 
 
 def _in_game_data(abs_path: str, roots) -> bool:
@@ -908,7 +906,6 @@ def _upstream(execs, i: int) -> list:
 def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, str]] = None, has=grep) -> Scan:
     env = os.environ if env is None else env
     from .writes import is_save                           # writes imports this module
-    saves: List[str] = []
     resolved: Optional[Hit] = None
     unresolved_reach: Optional[Hit] = None
     unknown_dir: Optional[Hit] = None
@@ -958,7 +955,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                 d = targets.resolve_literal(into, base, env) if into else None
                 if d is not None and targets.zone(b, roots) in RULE_OF and targets.zone(d, roots) == targets.zone(b, roots):
                     continue                                # stays where it was: not a delete, as with mv
-                if kind and not is_save(b, roots):          # a save keeps the save policy's own reading
+                if kind and not is_save(b, roots):          # a save is never a hit
                     resolved = Hit(RULE_OF[kind], posixpath.basename(b.rstrip("/")) or b)
                     break
         if e.program in MOVE_PROGRAMS and resolved is None:
@@ -994,7 +991,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                     continue
                 kind, b = place(a)
                 if is_save(b, roots):
-                    continue                              # the save policy: writes.scan names it, saves.py judges it
+                    continue                              # a save is never a hit
                 z = targets.zone(b, roots)
                 if d is None:
                     leaves = _expands(dst) and not raw_reaches(dst, mcwd, e.dialect, roots)
@@ -1016,8 +1013,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             if a is not None:
                 kind, b = place(a)
                 if is_save(b, roots):
-                    actual = targets.physical_operand(e, w, cwd, env)
-                    saves.append(actual if a == b and actual else "")
+                    pass                                  # a save is never a hit
                 elif kind and resolved is None:
                     resolved = Hit(RULE_OF[kind], posixpath.basename(b.rstrip("/")) or b)
                 continue
@@ -1027,8 +1023,6 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                 lit = literal_abs(w, ecwd, e.dialect)
                 kind = protected_kind(lit, roots) if lit else ""
                 if kind and is_save(lit, roots):
-                    actual_base = targets.physical_cwd(e, cwd, env) or ""
-                    saves.append(targets.physical(w, actual_base, e.dialect, env, literal=True) or "")
                     continue
                 if kind:
                     if resolved is None:
@@ -1066,8 +1060,6 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
         if a is not None:
             kind, b = place(a)
             if is_save(b, roots):
-                actual = targets.physical(w, cwd, "powershell", env, literal=how == "single")
-                saves.append(actual if a == b and actual else "")
                 continue
             if kind and resolved is None:
                 resolved = Hit(RULE_OF[kind], posixpath.basename(b.rstrip("/")) or b)
@@ -1075,22 +1067,21 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
         unresolved_any = True
         if unresolved_reach is None and raw_reaches(w, base, "powershell", roots):
             unresolved_reach = Hit("S-DEL-UNRESOLVED", "")
-    sv = tuple(dict.fromkeys(saves))
     if resolved:
-        return Scan(resolved, relative, sv)
+        return Scan(resolved, relative)
     if unresolved_reach:
-        return Scan(unresolved_reach, relative, sv)
+        return Scan(unresolved_reach, relative)
     if unknown_dir:
-        return Scan(unknown_dir, relative, sv)
+        return Scan(unknown_dir, relative)
     if unresolved_any and names_root(command, roots, has):
-        return Scan(Hit("S-DEL-UNRESOLVED", ""), relative, sv)
+        return Scan(Hit("S-DEL-UNRESOLVED", ""), relative)
     # (c1) also when the text names no root but the command RUNS in one: an unparsed `rm -rf Data` from the install.
     if not parsed.ok and has(DESTROYER, command) and (
             names_root(command, roots, has) or (base is not None and protected_kind(base, roots))):
-        return Scan(Hit("S-DEL-FALLBACK", ""), relative, sv)
+        return Scan(Hit("S-DEL-FALLBACK", ""), relative)
     if opaque and any(_loose_hit(e, roots, has) for e in parsed.execs):
-        return Scan(Hit("S-DEL-FALLBACK", ""), relative, sv)
-    return Scan(None, relative, sv)
+        return Scan(Hit("S-DEL-FALLBACK", ""), relative)
+    return Scan(None, relative)
 
 
 def _loose_hit(e, roots, has) -> bool:

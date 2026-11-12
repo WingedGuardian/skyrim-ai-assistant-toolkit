@@ -13,13 +13,13 @@ import time
 from pathlib import Path
 from typing import Iterable, Optional
 
-from . import (backup, codes, deletes, mcp_rules, paths as _paths, recovery, rules, saves, self_rules, shell_rules,
+from . import (backup, codes, deletes, mcp_rules, paths as _paths, recovery, rules, self_rules, shell_rules,
                shellparse, snapshot, state as _state, targets, write_rules)
 from .verdict import Advice, Verdict
 
 # apply_patch ops that take a file away from where it is (a Move only when it leaves that folder).
 DELETE_OPS = ("delete", "move_from")
-# The save policy (saves.py): what a patch op does to a save.
+# What a patch op does to a file, as write_rules.decide's `op` (kept for callers; no rule reads it since 4.1).
 SAVE_OP = {"delete": "delete", "move_from": "move"}
 
 _RANK = {"evaluated": 0, "partial": 1, "failed": 2}
@@ -81,11 +81,6 @@ def combine(verdicts: Iterable[Verdict]) -> Verdict:
     vs = list(verdicts)
     if not vs:   # nothing was evaluated; an empty fold must never read as "allow"
         return Verdict("deny", NO_VERDICTS, status="failed", code="engine.EMPTY_COMBINE")
-    # The save policy: when any verdict carries saves, the others' verdicts are folded here and ALL their saves are
-    # judged together (two one-save edits in one patch are two saves, not one each).
-    together = saves.combine(vs, combine)
-    if together is not None:
-        return codes.classify(together)
     worst = max((v.status for v in vs), key=lambda s: _RANK.get(s, 2), default="evaluated")
     # Plan 6 final fix (lane A C1): within a decision a NEVER_SHADOW refusal outranks the others (an apply_patch that
     # deletes an install file and then adds .skyguard/state.json is W-SELF-STATE, not S-DEL-INSTALL), and one that a
@@ -150,7 +145,7 @@ def _patch_delete(path: str, dest: Optional[str], roots, cwd: str, audit) -> Opt
     else:
         from .writes import is_save
         if is_save(a, roots):
-            return None                           # the save policy: the write rule judges it (saves.py)
+            return None                           # a save: no rule decides on it (4.1)
         kind = deletes.protected_kind(a, roots)
         if not kind:
             return None
@@ -242,10 +237,8 @@ def _rules(req, roots_fn, audit) -> Verdict:
         return v
     if req.kind == "mcp":
         # rt-fix-b (routes s115/s116) = gap X4 (Plan 5 Task 17): the DevBench judge Claude's protect-mcp uses, on Codex
-        # too. Any other MCP server is allowed by mcp_rules and still logged as unhooked. A save over an existing save
-        # carries its save plan (Verdict.saves), which pre_tool backs up before the call may run (the save policy,
-        # 2026-10-13); a save it cannot identify is refused (S-DEVBENCH-SAVE). Merge of rt-fix-b into plan5: this
-        # replaced Task 17's ask-to-advice downgrade (the stricter of the two; see merge-fixes-report).
+        # too. Any other MCP server is allowed by mcp_rules and still logged as unhooked. A DevBench save is not
+        # judged since 4.1 (the save vault keeps every version).
         try:
             args = json.loads(req.mcp_args) if req.mcp_args else {}
         except ValueError:
@@ -316,9 +309,6 @@ NEVER_SHADOW = frozenset(("shell.S-LIFT-PERMANENT", "shell.S-LIFT-RAW", "shell.S
 # Plan 6 Task 12 (R12): nor does it open the state file. Shadowed, a `guards off` would let the agent then write
 # .skyguard/state.json directly -- a persistent disable or an extended lift that nobody approved.
 NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SELF-STATE", "write.W-SELF-STATE"))
-# The save policy (user ruling 2026-10-13): a bulk save change needs the USER's typed approval, and a save that cannot
-# be backed up is never changed. `guards off` is a lift the agent may take itself, so it lifts neither.
-NEVER_SHADOW = NEVER_SHADOW | saves.NEVER_SHADOW
 NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SAVE-STORE", "write.W-SAVE-STORE"))
 # User ruling 2026-10-31: only the user turns save locking off, so `guards off` does not open its switch either.
 NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SAVE-LOCK", "write.W-SAVE-LOCK"))

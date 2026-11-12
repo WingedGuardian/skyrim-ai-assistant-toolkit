@@ -25,9 +25,6 @@ class Verdict(NamedTuple):
     # decision above is a different refusal that outranked it (a deny beside a lift rule's ask). engine.shadow returns
     # it instead of converting the call, so a decoy refusal can never hide a lift or self-state refusal.
     never: object = None
-    # The save policy (saves.py): saves.Plan(change, rest) when the call changes saves -- every save it changes and the
-    # other rules' verdict -- so the hook (portable.check) can back them up, and only then let the decision stand.
-    saves: object = None
 
 
 class Advice:

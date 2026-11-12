@@ -10,6 +10,12 @@ sys.dont_write_bytecode = True
 from modding_harness import contracts, generic, installation, telemetry
 from skyguard import portable, save_store
 
+# The files of a 3.x personal save policy (one reviewed install's; kept by user ruling 2026-10-20). An upgrade keeps
+# them as local files; nothing reads or registers them since 4.1.
+LEGACY_POLICY_FILES = (".claude/hooks/protect-save-access.py", ".claude/hooks/save-access-entry.ps1",
+                       ".claude/scripts/guarded-runtime-load.py", ".claude/hooks/restore-save-backup.py",
+                       ".claude/hooks/test_protect_save_access.py")
+
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
@@ -43,10 +49,12 @@ def main(argv=None):
             result = {"context": preferences.render(root),
                       "scope": "explicit My preferences section only; unclassified notes remain notes"}
         elif args.command in installation.COMMANDS:
-            from skyguard import ordered_upgrade, upgrade_render
-            result = installation.handle(args, root, local_files=(*ordered_upgrade.POLICY_FILES, ".claude/hooks/test_protect_save_access.py",
+            from skyguard import upgrade_render
+            # A 3.x personal save policy's files are kept as local files and never registered: no save policy is
+            # consulted since 4.1 (the save vault), so --integrate-local-policy has nothing to build.
+            result = installation.handle(args, root, local_files=(*LEGACY_POLICY_FILES,
                 "skyrim-paths.env", ".claude/skyrim-paths.env"), candidate_preparer=upgrade_render.prepare,
-                candidate_validator=upgrade_render.validate, review_builder=ordered_upgrade.proposal)
+                candidate_validator=upgrade_render.validate, review_builder=None)
         elif args.command == "save-list":
             from modding_harness import workspace
             target = save_store.store(root)
@@ -64,7 +72,7 @@ def main(argv=None):
             result = {"api_version": 1, "profile": "skyrim", "unknown_policy": "warn and allow",
                       "host_enforcement": "unmeasured; qualify the actual host transport and review hooks",
                       "surfaces": {"files": "Python rules", "shell": "Bash/PowerShell rules", "mcp": "DevBench only"},
-                      "local_policy_upgrade": "upgrade-stage --integrate-local-policy; exact reviewed Windows sources/groups, explicit settings choices; host trust remains separate",
+                      "local_policy_upgrade": "none since 4.1: no save policy is consulted; a 3.x personal policy's files are kept unregistered",
                       "save_recovery": "save-list/save-restore; guarded in-place; both legacy formats remain readable via snapshot"}
         else:
             action = generic.parse(sys.stdin.buffer.read(1024 * 1024 + 1))

@@ -21,7 +21,7 @@ _T0 = time.monotonic()        # the engine's time budget counts from (about) her
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from skyguard import backup, codes, engine, health, paths, recovery, saves, session, snapshot  # noqa: E402
+from skyguard import backup, codes, engine, health, paths, recovery, session, snapshot  # noqa: E402
 from skyguard.adapters import claude, codex  # noqa: E402
 from skyguard.audit import Audit  # noqa: E402
 from skyguard.verdict import Verdict  # noqa: E402
@@ -217,7 +217,7 @@ def _recovery_deadline() -> float:
 
 def _recovery(a, p, audit, roots) -> None:
     """Task 15: the load order and INIs, before the command (snapshot role). Never raises and never changes a verdict.
-    A save the command changes is backed up by the deciding hook instead (_saves)."""
+    Saves are not this hook's: tools/save_vault.py keeps every version of them."""
     try:
         recovery.run(a.project, p["command"], p["empty"], audit, roots, cwd=p.get("cwd", ""),
                      shell=p.get("shell", ""), agent="claude", session_id=p.get("session_id", ""),
@@ -227,9 +227,10 @@ def _recovery(a, p, audit, roots) -> None:
 
 
 def _saves(a, p, audit, v, what):
-    """The save policy (portable.check): every save the call changes is backed up and verified HERE, in the deciding
-    PreToolUse hook, before its decision is returned -- so the tool cannot run first. A backup that fails, or that
-    raises, denies."""
+    """The shared dispatcher's ordering for a deciding hook (portable.check): shadow mode, telemetry and the receipt.
+    The name is historical: since 4.1 it backs up no save (tools/save_vault.py keeps every version instead). If the
+    dispatcher raises, the rules' own verdict `v` stands: a refusal stays a refusal, and nothing is loosened because
+    main() then skips the shadow pass."""
     try:
         from skyguard import portable
         kind = {"protect-bash": "shell", "protect-files": "write", "protect-mcp": "mcp"}[a.role]
@@ -246,11 +247,10 @@ def _saves(a, p, audit, v, what):
         return portable.legacy_pre_tool(req, a.project, roots, audit, a.telemetry,
                                          deadline=_recovery_deadline(), precomputed=v, side_effects=False,
                                          metadata=p.get("receipt_identity", {}))
-    except Exception as e:  # noqa: BLE001 -- fail closed: no verified backup, no save change
-        reason = saves.rules.message("S-SAVE-BACKUP-FAILED", file="the saves", op="the guard raised " +
-                                     e.__class__.__name__)
-        audit.rule(a.role, "S-SAVE-BACKUP-FAILED", "deny", reason)
-        return Verdict("deny", reason, code="shell.S-SAVE-BACKUP-FAILED")
+    except Exception as e:  # noqa: BLE001 -- the rules have already decided; the dispatcher adds no refusal of its own
+        audit.log(a.role, "FAILED", "the shared dispatcher raised {} -- the rules' verdict stands".format(
+            e.__class__.__name__))
+        return v
 
 
 def _receipt_identity(raw):
@@ -411,7 +411,7 @@ def main(argv=None) -> int:
         env = _declared_env(a)
         roots = paths.roots(a.root, a.root_win, env if env is not None else {})
         v = engine.evaluate_mcp(p["tool_name"], p["mcp_input"], audit, roots=roots)
-        v = _saves(a, p, audit, v, p["tool_name"])          # an existing save DevBench overwrites is kept first
+        v = _saves(a, p, audit, v, p["tool_name"])
     elif a.role == "backup-before-edit":
         kept = backup.run(a.project, p["tool_name"], p["file_path"], p["empty"], audit, "claude", p.get("session_id", ""))
         v = Verdict()
@@ -419,7 +419,7 @@ def main(argv=None) -> int:
             v = Verdict("allow", "", "NO BACKUP of {} could be taken before this edit (see .claude/backups/AUDIT_LOG.txt). "
                         "Tell the user if the file matters.".format(p["file_path"]))
     elif a.role == "save-sentinel":
-        # PostToolUse, after the call: report saves changed with no backup first (saves.py KNOWN LIMITS). Never a
+        # PostToolUse, after the call: report the saves that changed or went (save_sentinel.py). Never a
         # decision; an unreadable paths file costs only the declared config dirs, never the look itself.
         from skyguard import save_sentinel
         env = _declared_env(a)

@@ -75,7 +75,7 @@ import unicodedata
 from pathlib import Path
 from typing import List, Mapping, NamedTuple, Optional, Tuple
 
-from . import paths, shellparse, targets
+from . import shellparse, targets
 from .deletes import _cp_target_option, _plain_operands, interpreter_code, python_nodes, robocopy_positionals, substituted
 from .grep import _compile
 from .shellparse import ps_param
@@ -381,10 +381,6 @@ def _plain_operands_valued(argv, valued) -> List[str]:
     return out
 
 
-def _remote_copy_operands(e) -> List[str]:
-    return _plain_operands_valued(e.argv, _SCP_VALUED if e.program == "scp" else _RSYNC_VALUED)
-
-
 def _perl_code_given(argv) -> bool:
     return any(w in ("-e", "-E") for w in argv)
 
@@ -610,658 +606,16 @@ def _python_write_targets(code: str) -> List[str]:
     return out
 
 
-# Issue #26: a Python write whose target is computed (`for p in Path(S).glob('*.ess'): p.write_bytes(b'')`) names no
-# file, so the literal reader above returns nothing for it and the save policy never saw the saves it changes.
-# These are the calls that write (or move a file onto) their target; deletes are read by deletes.py (S-DEL-CONFIG).
-# The save_targets entry for such a write: saves.count reads it as a save it cannot list (S-SAVE-UNKNOWN), with words
-# that say what to do instead.
-COMPUTED_SAVE = "<computed by inline Python>"
-COMPUTED_SAVE_WHY = "inline Python computes the target; name saves literally, or split read and write"
-_PY_WRITE_METHODS = frozenset(("write_bytes", "write_text", "touch", "symlink_to", "hardlink_to"))
-# name -> the (position, keyword) arguments a call writes or takes away. A move counts its source too: the save goes.
-_PY_WRITE_FUNCS = {
-    "open": ((0, "file"),), "io.open": ((0, "file"),), "builtins.open": ((0, "file"),), "io.FileIO": ((0, "file"),),
-    "zipfile.ZipFile": ((0, "file"),), "tarfile.TarFile": ((0, "name"),), "gzip.GzipFile": ((0, "filename"),),
-    "bz2.BZ2File": ((0, "filename"),), "lzma.LZMAFile": ((0, "filename"),), "os.open": ((0, "path"),), "os.truncate": ((0, "path"),),
-    "shutil.copy": ((1, "dst"),), "shutil.copy2": ((1, "dst"),), "shutil.copyfile": ((1, "dst"),),
-    "shutil.copytree": ((1, "dst"),), "os.link": ((1, "dst"),), "os.symlink": ((1, "dst"),),
-    "shutil.move": ((0, "src"), (1, "dst")), "os.rename": ((0, "src"), (1, "dst")),
-    "os.replace": ((0, "src"), (1, "dst")), "os.renames": ((0, "old"), (1, "new")),
+# What `from <module> import *` brings in that the literal reader above reads as a write, a move or a delete of its
+# literal argument. `nt` and `posix` are the modules os re-exports.
+_STAR_NAMES = {
+    "bz2": ("BZ2File",), "gzip": ("GzipFile",), "io": ("FileIO", "open"), "lzma": ("LZMAFile",),
+    "os": ("link", "open", "remove", "removedirs", "rename", "renames", "replace", "rmdir", "symlink", "truncate",
+           "unlink"),
+    "send2trash": ("send2trash",),
+    "shutil": ("copy", "copy2", "copyfile", "copytree", "move", "rmtree", "unpack_archive"),
+    "tarfile": ("TarFile",), "zipfile": ("ZipFile",),
 }
-_PY_MODE_AT = {"open": 1, "io.open": 1, "builtins.open": 1, "io.FileIO": 1, "zipfile.ZipFile": 1,
-               "tarfile.TarFile": 1, "gzip.GzipFile": 1, "bz2.BZ2File": 1, "lzma.LZMAFile": 1}   # absent = read
-
-
-class ComputedWrites(NamedTuple):
-    """What python_computed_writes found (#26).
-    computed: a write, move, link or extraction whose target is not a direct literal, so it can land anywhere.
-    literals: the string literals that can name where it lands (see _location_literals), plus every extraction's
-              literal destination (the literal reader does not read extraction)."""
-    computed: bool
-    literals: Tuple[str, ...]
-
-
-_PY_EXTRACT_METHODS = {"extractall": (0, "path"), "extract": (1, "path")}   # ZipFile / TarFile
-_PY_EXTRACT_FUNCS = {"shutil.unpack_archive": (1, "extract_dir")}
-# Module opens called by name after `from gzip import *` (`gzip.open(...)` by attribute is read below as well).
-_PY_MODULE_OPENS = {"gzip.open": ((0, "filename"),), "bz2.open": ((0, "filename"),), "lzma.open": ((0, "filename"),),
-                    "tarfile.open": ((0, "name"),)}
-# #26 round 8 (user ruling 14:58 covers deletes): a computed delete counts as a change the guard cannot place, so one
-# run from inside the settings area (`cd Saves && python -c "[os.remove(f) for f in os.listdir()]"`, allowed in 4.0)
-# is refused. A literal os.remove/os.unlink/send2trash/Path.unlink target is still placed (the literal reader returns
-# it) and judged by deletes.py; a literal rmtree/rmdir/removedirs target counts as computed.
-_PY_DELETE_FUNCS = {"os.remove": ((0, "path"),), "os.unlink": ((0, "path"),), "os.rmdir": ((0, "path"),),
-                    "os.removedirs": ((0, "name"),), "shutil.rmtree": ((0, "path"),),
-                    "send2trash.send2trash": ((0, "paths"),)}
-_PY_DELETE_METHODS = frozenset(("unlink", "rmdir"))       # Path(...).unlink() / .rmdir()
-
-
-# `nt` and `posix` are the modules os re-exports (round 9 review: `nt.remove(n)` was read as no call at all).
-_OS_SPELLINGS = {"nt": "os", "posix": "os"}
-
-
-def _star_names() -> dict:
-    out: dict = {}
-    # Module opens are left out: after `from gzip import *` a bare `open(p, 'wb')` reads as builtin open, counted the
-    # same way (`from gzip import open as gopen` is read by name below).
-    for table in (_PY_WRITE_FUNCS, _PY_EXTRACT_FUNCS, _PY_DELETE_FUNCS):
-        for dotted in table:
-            module, _, name = dotted.rpartition(".")
-            if module and module != "builtins":
-                out.setdefault(module, set()).add(name)
-    return {module: tuple(sorted(names)) for module, names in out.items()}
-
-
-_STAR_NAMES = _star_names()
-_PY_VALUE_COUNTED = (frozenset(_PY_WRITE_FUNCS) | frozenset(_PY_DELETE_FUNCS) | frozenset(_PY_EXTRACT_FUNCS) |
-                     frozenset(_PY_MODULE_OPENS)) - {"open", "io.open", "builtins.open"}
-
-
-def python_computed_writes(code: str, conservative: bool = True) -> ComputedWrites:
-    """Read as Python (ast, never run): is anything written, moved, linked or extracted to a target this guard cannot
-    place? Fail closed (user decision 2026-11-09, after three reviews of finer placement): only a direct literal target
-    -- a string, or `Path(<literals>)` -- is placed, and _python_write_targets judges it with the full save policy.
-    Anything else is computed: a name, a `/` chain, os.path.join, a loop item. With an os.chdir in the code a relative
-    literal is computed too (it lands wherever chdir pointed). Archive extraction always counts as computed.
-
-    Counted: `Path` write_bytes/write_text/touch/symlink_to/hardlink_to and `.open` in a writing mode; `.rename(x)` and
-    a one-argument `.replace(x)` (a str.replace takes two), both sides; open/io.open/io.FileIO in a writing mode,
-    os.open unless os.O_RDONLY, os.truncate, copies onto a destination, links, moves (source and destination), and
-    ZipFile/TarFile extractall/extract and shutil.unpack_archive. A module's `.open(file, mode)` (gzip, tarfile,
-    codecs) reads its mode from the second argument; a mode chosen at run time may write. Not read (known limits):
-    getattr and other string-named access (operator.methodcaller, `os.__dict__[...]`), private helpers
-    (shutil._rmtree_unsafe), exec/eval of code strings, __import__, subprocess-launched copies. A counted function or
-    write/delete method handed on as a value (`map(os.remove, ...)`, `rep = os.replace`, `[p.unlink for p in ...]`)
-    counts as computed; `nt`/`posix` are read as os.
-    Unparseable code returns nothing (scan's unparsed-code refusal)."""
-    try:
-        nodes = python_nodes(code)
-    except (SyntaxError, ValueError, RecursionError, MemoryError):
-        return ComputedWrites(False, ())
-    modules, names = {}, {}
-    for node in nodes:
-        if isinstance(node, ast.Import):
-            modules.update({a.asname or a.name: _OS_SPELLINGS.get(a.name, a.name) for a in node.names})
-        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
-            module = _OS_SPELLINGS.get(node.module, node.module)          # `from nt import unlink` is os.unlink
-            names.update({a.asname or a.name: module + "." + a.name for a in node.names})
-            if any(a.name == "*" for a in node.names):        # `from os import *` (review round 5)
-                names.update({n: module + "." + n for n in _STAR_NAMES.get(module, ())})
-    try:                                                  # what the literal reader itself judges (round 6)
-        emitted = {os.path.normcase(str(w)) for w in _python_write_targets(code)}
-    except ValueError:
-        emitted = set()
-    moves_cwd = any(isinstance(n, ast.Call) and (
-        isinstance(n.func, ast.Attribute) and n.func.attr == "chdir" or
-        isinstance(n.func, ast.Name) and names.get(n.func.id, n.func.id) in ("os.chdir", "chdir")) for n in nodes)
-
-    def direct(node):
-        """A string, or Path(<strings>): _python_write_targets reads these. Relative ones are not, after a chdir."""
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            text = node.value
-        elif isinstance(node, ast.Call) and node.args and not node.keywords and all(
-                isinstance(a, ast.Constant) and isinstance(a.value, str) for a in node.args):
-            text = node.args[0].value                     # Path(<literals>); anything else is not emitted
-            value = str(Path(*[a.value for a in node.args]))
-        else:
-            return False
-        if isinstance(node, ast.Constant):
-            value = text
-        # Placed only when the literal reader returned this very literal: a keyword or mode it does not read
-        # (`os.renames(old=, new=)`, `Path.rename(target=)`) is computed (#26 round 5 review).
-        if os.path.normcase(value) not in emitted:
-            return False
-        return not moves_cwd or bool(re.match(r"^(?:[A-Za-z]:)?[/\\]", text))
-
-    computed = False
-    extracted: List[str] = []
-
-    def target(node):
-        nonlocal computed
-        if node is not None and not direct(node):
-            computed = True
-
-    def extraction(node):
-        nonlocal computed
-        computed = True                                   # no destination = the cwd; a literal one is still a place
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            extracted.append(node.value)                  # a computed destination's literals: _location_literals
-
-    def argument(call, index, keyword):
-        if len(call.args) > index:
-            return call.args[index]
-        return next((k.value for k in call.keywords if k.arg == keyword), None)
-
-    def mode_writes(call, index):
-        mode = argument(call, index, "mode")
-        if mode is None:
-            return False
-        if isinstance(mode, ast.Constant) and isinstance(mode.value, str):
-            return any(c in mode.value for c in "wax+")
-        return True                                       # a mode chosen at run time may write
-
-    def os_open_writes(call):
-        flags = argument(call, 1, "flags")
-        # Only the real os.O_RDONLY (or 0): `class K: O_RDONLY = 0x301` is write+create+truncate (list review 2), and
-        # nothing may assign an O_RDONLY anywhere (`os.O_RDONLY = 0x301`, `O_RDONLY = 0x301`; list review 3).
-        if any(isinstance(n, (ast.Name, ast.Attribute)) and isinstance(n.ctx, ast.Store) and
-               (getattr(n, "id", None) == "O_RDONLY" or getattr(n, "attr", None) == "O_RDONLY") for n in nodes):
-            return not (isinstance(flags, ast.Constant) and flags.value == 0)
-        # (an `X.O_RDONLY` of another module is an unknown value: the conservative scan refuses it)
-        read_only = (isinstance(flags, ast.Attribute) and flags.attr == "O_RDONLY" or
-                     isinstance(flags, ast.Name) and names.get(flags.id) == "os.O_RDONLY" or
-                     isinstance(flags, ast.Constant) and flags.value == 0)
-        return not read_only
-
-    def imported(node):
-        return isinstance(node, ast.Name) and (node.id in modules or node.id in names)
-
-    # A counted function handed on as a value (`map(os.remove, os.listdir())`, `list(map(Path.unlink, ...))`) changes
-    # targets this guard never sees: computed (round 8 review). Builtin open defaults to reading, so it is left out.
-    called = {id(n.func) for n in nodes if isinstance(n, ast.Call)}
-    for node in nodes:
-        if id(node) in called or not isinstance(getattr(node, "ctx", None), ast.Load):
-            continue
-        if isinstance(node, ast.Attribute) and node.attr in _PY_DELETE_METHODS | _PY_WRITE_METHODS:
-            computed = True             # map(Path.unlink, ...), [p.unlink for p in ...]: any receiver (round 9 review)
-            continue
-        if isinstance(node, ast.Name):
-            value = names.get(node.id, node.id)
-        elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
-            value = modules.get(node.value.id, node.value.id) + "." + node.attr
-        else:
-            continue
-        if value in _PY_VALUE_COUNTED:
-            computed = True
-    for node in nodes:
-        if not isinstance(node, ast.Call):
-            continue
-        f = node.func
-        if isinstance(f, ast.Attribute):
-            receiver_is_module = isinstance(f.value, ast.Name) and modules.get(f.value.id, f.value.id) in (
-                "io", "builtins", "os", "shutil")
-            if f.attr in _PY_WRITE_METHODS and not receiver_is_module:
-                target(f.value)
-            if f.attr == "open" and not receiver_is_module:
-                # gzip.open(file, mode), and any receiver given two arguments (`__builtins__.open(p, 'w')`, a module
-                # reached through sys.modules): the file is the first argument, the mode the second (safe-list review).
-                if imported(f.value) or len(node.args) >= 2 or any(k.arg in ("file", "filename", "name")
-                                                                   for k in node.keywords):
-                    if mode_writes(node, 1):
-                        target(argument(node, 0, "file") or argument(node, 0, "filename") or argument(node, 0, "name"))
-                elif mode_writes(node, 0):                # Path(...).open(mode)
-                    target(f.value)
-            moving = f.attr == "rename" or f.attr == "replace" and (
-                len(node.args) == 1 and not node.keywords or not node.args and [k.arg for k in node.keywords] == ["target"])
-            if moving and not receiver_is_module and not imported(f.value):
-                target(f.value)
-                target(node.args[0] if node.args else argument(node, 0, "target"))
-            if f.attr in _PY_EXTRACT_METHODS and not receiver_is_module:
-                extraction(argument(node, *_PY_EXTRACT_METHODS[f.attr]))
-            if f.attr in _PY_DELETE_METHODS and not receiver_is_module:
-                # p.unlink() / p.unlink(True) / p.rmdir() (round 8 review). An unbound Path.unlink(p) has the class as
-                # its receiver, never a literal, so it is computed too. os.rmdir(x) is read by name below.
-                target(f.value)
-        name = ""
-        if isinstance(f, ast.Name):
-            name = names.get(f.id, f.id)
-        elif isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name):
-            name = modules.get(f.value.id, f.value.id) + "." + f.attr
-        if name in _PY_EXTRACT_FUNCS:
-            extraction(argument(node, *_PY_EXTRACT_FUNCS[name]))
-            continue
-        if name in _PY_DELETE_FUNCS:
-            for index, keyword in _PY_DELETE_FUNCS[name]:
-                given = argument(node, index, keyword)
-                # send2trash([...]): each literal is placed on its own, as the literal reader reads them
-                for item in (given.elts if isinstance(given, (ast.List, ast.Tuple, ast.Set)) else [given]):
-                    target(item)
-            continue
-        if name in _PY_MODULE_OPENS and isinstance(f, ast.Name):
-            if mode_writes(node, 1):                      # by attribute it is the `.open` branch above
-                for index, keyword in _PY_MODULE_OPENS[name]:
-                    target(argument(node, index, keyword))
-            continue
-        if name not in _PY_WRITE_FUNCS:
-            continue
-        if name in _PY_MODE_AT and not mode_writes(node, _PY_MODE_AT[name]):
-            continue
-        if name == "os.open" and not os_open_writes(node):
-            continue
-        for index, keyword in _PY_WRITE_FUNCS[name]:
-            target(argument(node, index, keyword))
-    # #26 conservative scan (user decision 2026-11-10, after six review rounds each found another spelling of a change
-    # call: `shutil.os.remove`, `p.rename` passed as a value, ...): the named calls above are not the whole set. Every
-    # other call must be a known read; a call this guard does not know counts as computed (fail closed by construction).
-    if not computed and conservative:                   # off only in tests of the named layer above
-        try:
-            computed = _unread_call(nodes, modules, names)
-        except RecursionError:                            # a 2000-deep attribute chain: unreadable, so a possible change
-            computed = True
-    return ComputedWrites(computed, tuple(_location_literals(nodes)) + tuple(extracted))
-
-
-# The conservative scan's known reads (#26, user decision 2026-11-10; reviewed as a list the same day). A call is known
-# when it is one the write logic above already judges, or an EXACT read below. Everything else -- an unknown module
-# function, anything deeper than one public name below a read module (`json.codecs.open`, `argparse._os.remove`,
-# `ElementTree.ElementTree.write`), a method this list does not name, a call through a subscript, a variable or
-# another call -- counts as a possible change. Ambiguous names (`remove`, `add`, `copy`: a list, os, Path in 3.14)
-# are deliberately not reads: in code that names a save location they are refused.
-_JUDGED_CALLS = (frozenset(_PY_WRITE_FUNCS) | frozenset(_PY_DELETE_FUNCS) | frozenset(_PY_EXTRACT_FUNCS) |
-                 frozenset(_PY_MODULE_OPENS) | frozenset(_PY_MODE_AT) |
-                 {"codecs.open", "os.chdir", "chdir", "zipfile.ZipFile", "tarfile.TarFile", "tarfile.open"})
-_JUDGED_METHODS = _PY_WRITE_METHODS | _PY_DELETE_METHODS | frozenset(("open", "rename", "replace", "extractall",
-                                                                         "extract"))
-_FILE_WRITES = frozenset(("write", "writelines", "flush", "truncate"))   # judged only on a file a judged open() made
-_READ_BUILTINS = frozenset((
-    "print", "len", "sorted", "list", "dict", "set", "frozenset", "tuple", "str", "int", "float", "bool", "bytes",
-    "bytearray", "memoryview", "range", "enumerate", "zip", "map", "filter", "min", "max", "sum", "any", "all", "abs",
-    "round", "repr", "ascii", "isinstance", "issubclass", "hasattr", "type", "iter", "next", "reversed", "format",
-    "ord", "chr", "hex", "oct", "bin", "divmod", "hash", "id", "callable", "super", "object", "slice", "complex", "pow",
-    "exit", "quit"))
-# One public name directly below these is a read (`json.loads`, `hashlib.sha256`, `collections.Counter`); nothing
-# deeper and nothing private. None of these modules has a module-level function that writes a file.
-_READ_MODULES = frozenset(("json", "hashlib", "re", "math", "struct", "datetime", "time", "os.path", "glob", "fnmatch",
-                           "collections", "itertools", "base64", "binascii", "statistics", "textwrap", "string",
-                           "difflib", "pprint", "platform", "locale", "decimal", "fractions", "enum",
-                           "dataclasses", "unicodedata", "random", "html", "shlex", "uuid", "zlib", "ntpath",
-                           "posixpath"))
-_READ_FUNCS = frozenset((
-    "os.listdir", "os.scandir", "os.walk", "os.stat", "os.lstat", "os.getcwd", "os.getenv", "os.fspath",
-    "os.cpu_count", "os.getpid", "os.environ.get", "os.get_terminal_size", "os.urandom", "os.fsencode", "os.fsdecode",
-    "os.close", "os.read", "os.fstat", "os.lseek",                          # a descriptor os.open was judged for
-    "io.StringIO", "io.BytesIO", "zipfile.is_zipfile", "tarfile.is_tarfile", "shutil.disk_usage",
-    "Path", "PurePath", "pathlib.Path", "pathlib.PurePath", "pathlib.PureWindowsPath", "pathlib.PurePosixPath",
-    "sys.exit", "sys.getsizeof", "sys.intern", "sys.stdout.write", "sys.stderr.write", "sys.stdout.flush",
-    "sys.stderr.flush", "sys.stdout.reconfigure", "sys.stderr.reconfigure", "traceback.print_exc",
-    "traceback.format_exc", "functools.reduce", "functools.lru_cache", "functools.cmp_to_key", "functools.wraps",
-    "copy.deepcopy", "csv.reader", "csv.DictReader", "datetime.datetime.now", "datetime.datetime.utcnow",
-    # a csv writer writes to the file it is handed: that file's open() was judged (or it is stdout)
-    "csv.writer", "csv.DictWriter", "sys.stdout.buffer.write", "sys.stdout.buffer.flush",
-    # CLI parsing for an audit script; argparse.FileType (it opens files) stays unknown
-    "argparse.ArgumentParser",
-    "datetime.datetime.fromtimestamp", "datetime.datetime.strptime", "datetime.datetime.fromisoformat",
-    "datetime.date.today", "datetime.date.fromtimestamp", "datetime.date.fromisoformat",
-    # a save's body is LZ4-compressed: read-only save audits decompress it (priced: 5 such audits, 2026-11-10)
-    "lz4.block.decompress", "lz4.frame.decompress"))
-_READ_METHODS = frozenset((
-    "read", "read_text", "read_bytes", "readline", "readlines", "exists", "is_file", "is_dir", "is_symlink", "iterdir",
-    "glob", "rglob", "stat", "lstat", "resolve", "absolute", "relative_to", "is_relative_to", "with_suffix",
-    "with_name", "with_stem", "joinpath", "as_posix", "as_uri", "match", "samefile", "expanduser", "home", "cwd",
-    "split", "rsplit", "splitlines", "strip", "lstrip", "rstrip", "lower", "upper", "casefold", "title",
-    "capitalize", "swapcase", "startswith", "endswith", "join", "format", "format_map", "encode", "decode", "get",
-    "keys", "values", "items", "append", "extend", "insert", "pop", "sort", "index", "count", "find", "rfind",
-    "partition", "rpartition", "zfill", "center", "ljust", "rjust", "isdigit", "isalpha", "isalnum", "isspace",
-    "islower", "isupper", "isnumeric", "isdecimal", "isidentifier", "isprintable", "expandtabs", "translate",
-    "maketrans", "removeprefix", "removesuffix", "hexdigest", "digest", "update", "setdefault", "fromkeys",
-    "most_common", "namelist", "infolist", "getinfo", "getmembers", "getnames", "getmember", "extractfile", "close",
-    "seek", "tell", "fileno", "isatty", "readable", "seekable", "group", "groups", "groupdict", "span", "start", "end",
-    "findall", "finditer", "search", "fullmatch", "sub", "subn", "loads", "dumps", "total_seconds", "isoformat",
-    "strftime", "timestamp", "date", "time", "difference", "union", "intersection", "issubset", "issuperset",
-    "is_absolute", "to_bytes", "from_bytes", "bit_length", "hex", "fromhex", "unpack", "unpack_from", "pack",
-    "pack_into", "iter_unpack", "isoweekday", "weekday", "now", "utcnow", "today", "fromtimestamp", "fromisoformat",
-    "strptime", "astimezone", "getvalue", "elements", "clear", "reverse", "popleft", "appendleft", "__enter__",
-    "__exit__", "is_mount", "owner", "readlink", "samestat", "tobytes", "tolist", "writerow", "writerows",
-    "writeheader", "add_argument", "parse_args", "parse_known_args", "add_mutually_exclusive_group",
-    "add_argument_group", "print_help", "print_usage", "error"))
-_READ_DATA = frozenset((                               # module attributes that are values, not functions
-    "os.sep", "os.altsep", "os.linesep", "os.pathsep", "os.curdir", "os.pardir", "os.extsep", "os.devnull",
-    "os.environ", "os.name", "os.O_RDONLY", "os.O_BINARY", "os.SEEK_SET", "os.SEEK_CUR", "os.SEEK_END", "sys.argv",
-    "sys.stdin", "sys.stdout", "sys.stderr", "sys.platform", "sys.version_info", "sys.path", "sys.executable",
-    "sys.maxsize"))
-# Method names that change a file when called, refused when handed on as a value (`map(p.chmod, ...)`); a direct call
-# of any of them is already refused as an unknown method (list review 2).
-_CHANGE_METHOD_VALUES = frozenset(("chmod", "lchmod", "chown", "mkdir", "makedirs", "touch", "copy", "move",
-                                   "copy_into", "move_into", "remove", "writestr", "write_text", "write_bytes"))
-_EXCEPTION_NAME = r"(?:Error|Exception|Warning|Exit|Interrupt|Iteration)$"   # raise SystemExit(...), StopIteration()
-
-def _unread_call(nodes, modules, names) -> bool:
-    """A call this guard neither judges nor knows to be a read (see the tables above)."""
-    local = {n.name for n in nodes if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
-    local |= {t.id for n in nodes if isinstance(n, ast.Assign) and isinstance(n.value, ast.Lambda)
-              for t in n.targets if isinstance(t, ast.Name)}
-    roots = {k.split(".")[0] for k in modules}
-
-    # Safe-list review: a name the tables trust must mean what its import says. Rebinding one (`json = os`, a
-    # parameter or loop variable named `json`, `def print(...)`) and then calling through it is a possible change.
-    protected = set(modules) | roots | set(names) | _READ_BUILTINS | {"open", "Path", "PurePath", "__builtins__"}
-    binds: dict = {}
-
-    def bind(name):
-        binds[name] = binds.get(name, 0) + 1
-
-    for n in nodes:
-        if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
-            bind(n.id)
-        elif isinstance(n, ast.arg):
-            bind(n.arg)
-        elif isinstance(n, (ast.Global, ast.Nonlocal)):
-            for name in n.names:
-                bind(name)
-        elif isinstance(n, ast.ExceptHandler) and n.name:
-            bind(n.name)
-        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            bind(n.name)
-        elif type(n).__name__ in ("MatchAs", "MatchStar") and getattr(n, "name", None):
-            bind(n.name)
-    bound = set(binds)
-    # A local def or lambda is trusted only when that is its one binding: `def w(): pass; w = open; w(n, 'w')`, a
-    # parameter or comprehension variable of the same name, is something else (list review 3).
-    local = {name for name in local if binds.get(name, 0) == 1}
-    # An import name bound to two different things (`import os as json` beside a decoy `import json` elsewhere): the
-    # tables above saw only the last one (list review 2).
-    imported = {}
-    for n in nodes:
-        if isinstance(n, ast.Import):
-            for a in n.names:
-                imported.setdefault(a.asname or a.name.split(".")[0], set()).add(a.name if a.asname else a.name.split(".")[0])
-        elif isinstance(n, ast.ImportFrom):
-            for a in n.names:
-                imported.setdefault(a.asname or a.name, set()).add((n.module or "") + "." + a.name)
-    import_names = set(modules) | roots | set(names)
-    rebound = (bound & protected) | {k for k, v in imported.items() if len(v) > 1}
-
-    def root_name(node):
-        while isinstance(node, ast.Attribute):
-            node = node.value
-        return node.id if isinstance(node, ast.Name) else None
-
-    # Calling the rebound name itself (`print = ...; print(n)`), or calling through a rebound IMPORT (`json = os;
-    # json.remove(n)`). A rebound builtin or variable used only as a method receiver (`hash = sha256(...);
-    # hash.hexdigest()`) is an ordinary variable.
-    for n in nodes:
-        if isinstance(n, ast.Call):
-            root = root_name(n.func)
-            if root not in rebound:
-                continue
-            if isinstance(n.func, ast.Name):
-                return True
-            # through a rebound import, only a known read method: `path.lower()` after `for path in ...` is a str
-            if root in import_names and n.func.attr not in _READ_METHODS:
-                return True
-
-    # Files a judged open() made: their write()/flush() is judged by that open's mode.
-    files = set()
-    for n in nodes:
-        opened = None
-        if isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name):
-            opened, alias = n.value, n.targets[0].id
-        elif isinstance(n, ast.withitem) and isinstance(n.optional_vars, ast.Name):
-            opened, alias = n.context_expr, n.optional_vars.id
-        if isinstance(opened, ast.Call) and (isinstance(opened.func, ast.Name) and opened.func.id == "open" or
-                                             isinstance(opened.func, ast.Attribute) and opened.func.attr == "open"):
-            files.add(alias)
-
-    def dotted(node):
-        """`a.b.c` from a module name, or None when the chain does not start at an imported module."""
-        if isinstance(node, ast.Name):
-            if node.id in modules:
-                return modules[node.id]
-            if node.id in roots:                          # `import lz4.block` binds `lz4`
-                return node.id
-            return names.get(node.id) if node.id in names else None
-        if isinstance(node, ast.Attribute):
-            head = dotted(node.value)
-            return head + "." + node.attr if head else None
-        return None
-
-    def known(name):
-        parts = name.split(".")
-        # A module reached through another (`os.path.os.remove`, `shutil.os.remove`, `json.codecs.open`) is never
-        # a read: only exactly one name below a read module is (below), and a judged call counts only when the
-        # write logic named its module directly (it does not read `shutil.os`).
-        data = next((d for d in _READ_DATA if name.startswith(d + ".")), None)
-        if data is not None:                              # a method on a module value: `os.sep.join(...)`
-            return name in _READ_FUNCS or parts[-1] in _READ_METHODS
-        if (name in _JUDGED_CALLS and len(parts) == 2) or name in _READ_FUNCS:
-            return True
-        module, _, attr = name.rpartition(".")
-        return module in _READ_MODULES and bool(attr)    # exactly one name below: `json.codecs.open` is not a read
-
-    def judged_file_write(f):
-        receiver = f.value
-        if isinstance(receiver, ast.Name) and receiver.id in files:
-            return True
-        return isinstance(receiver, ast.Call) and (
-            isinstance(receiver.func, ast.Name) and receiver.func.id == "open" or
-            isinstance(receiver.func, ast.Attribute) and receiver.func.attr == "open")
-
-    # A function handed on as a value is called where this guard cannot see (`map(subprocess.call, ...)`,
-    # `map(Path.rename, ...)`): a module function or a judged method referenced but not called must be a known read.
-    called = {id(n.func) for n in nodes if isinstance(n, ast.Call)}
-    inner = {id(n.value) for n in nodes if isinstance(n, ast.Attribute)}
-    for node in nodes:
-        if id(node) in called or id(node) in inner or not isinstance(getattr(node, "ctx", None), ast.Load):
-            continue
-        if isinstance(node, ast.Attribute) and node.attr in _JUDGED_METHODS | _FILE_WRITES | _CHANGE_METHOD_VALUES:
-            return True                                   # `map(p.chmod, ...)`: a change method handed on
-        name = (dotted(node) if isinstance(node, ast.Attribute) else
-                names.get(node.id) if isinstance(node, ast.Name) and node.id not in local else None)
-        if isinstance(node, ast.Name) and node.id in _JUDGED_CALLS and node.id not in names and node.id not in local:
-            return True                                   # `map(open, ns, ['w'] * n)`: builtin open handed on
-        if name is not None and (not known(name) or name in _JUDGED_CALLS) and name not in _READ_DATA:
-            # a judged call handed on as a value is not judged: its arguments are never seen (`map(io.open, ...)`)
-            return True
-    for node in nodes:
-        if not isinstance(node, ast.Call):
-            continue
-        f = node.func
-        # `os.remove(**{'path': n})`, `open(*[n, 'w'])`: the write logic reads arguments by position and keyword,
-        # so an unpacked argument is unread there. Only a known READ may take one (`print(*rows)`) (list review 2).
-        if any(isinstance(a, ast.Starred) for a in node.args) or any(k.arg is None for k in node.keywords):
-            if isinstance(f, ast.Name) and (f.id in local or f.id in _READ_BUILTINS):
-                continue
-            target_name = dotted(f) if isinstance(f, ast.Attribute) else names.get(f.id) if isinstance(
-                f, ast.Name) else None
-            if target_name is not None and known(target_name) and target_name not in _JUDGED_CALLS:
-                continue
-            if target_name is None and isinstance(f, ast.Attribute) and f.attr in _READ_METHODS:
-                continue
-            return True
-        if isinstance(f, ast.Name):
-            if f.id in local or f.id in _READ_BUILTINS or re.search(_EXCEPTION_NAME, f.id):
-                continue
-            if f.id in names:
-                if known(names[f.id]):
-                    continue
-                return True
-            if f.id in _JUDGED_CALLS or f.id in _READ_FUNCS:
-                continue
-            return True                                   # an unknown name: a variable holding any callable
-        if isinstance(f, ast.Attribute):
-            name = dotted(f)
-            if name is not None:                          # a module function, however deep (`shutil.os.remove`)
-                if known(name):
-                    continue
-                return True
-            if f.attr in _READ_METHODS or f.attr in _JUDGED_METHODS:
-                continue
-            if f.attr in _FILE_WRITES and judged_file_write(f):
-                continue
-            return True
-        if isinstance(f, ast.Lambda):
-            continue
-        return True                                       # a call through a subscript or another call's result
-    return False
-
-
-# A literal outside a path position names a location only when it is shaped like a path: it starts with a drive, a
-# separator, `~`, `%`, `$`, `{` or `word/`, and holds no shell separators (a command line held as data is text).
-_PATH_SHAPED = re.compile(r"""^(?:[A-Za-z]:[/\\]|[/\\~%${]|\.{1,2}[/\\]|[\w.-]+[/\\])""")
-_SHELLISH = re.compile(r"""[;|`]|&&|\n""")
-# Calls whose arguments are content or swapped-in text, never a location (endswith's are a filter: kept).
-_CONTENT_CALLS = frozenset(("print", "write", "writelines", "write_text", "write_bytes", "dumps", "dump", "log",
-                            "debug", "info", "warning", "error", "exception"))
-
-
-def _location_literals(nodes) -> List[str]:
-    """The literals that can name where a computed target lands (#26 round 3, review: the round-2 list of positions
-    missed helper functions, defaults, argv fallbacks, tuples and `+=`). Path positions (see _path_literals) count as
-    they are; any other literal counts when it is path-shaped. Never: arguments of text methods (but endswith's),
-    content and log calls, multi-line strings, text not shaped like a path, and command lines held as data."""
-    out = list(_path_literals(nodes))
-    skip = set()
-    for node in nodes:
-        if isinstance(node, ast.Call):
-            f = node.func
-            name = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
-            text_method = isinstance(f, ast.Attribute) and name in _TEXT_METHODS
-            if name in ("endswith", "fnmatch", "fnmatchcase", "match_suffix"):
-                for arg in node.args:                     # n.endswith(('.ess', '.skse')): a save filter
-                    out += [c.value for c in ast.walk(arg) if isinstance(c, ast.Constant) and isinstance(c.value, str)]
-            elif text_method or name in _CONTENT_CALLS:
-                for arg in list(node.args) + [k.value for k in node.keywords]:
-                    skip.update(id(c) for c in ast.walk(arg))
-        elif isinstance(node, ast.Compare) and any(isinstance(s, ast.Attribute) and s.attr in ("suffix", "suffixes")
-                                                    for s in [node.left] + list(node.comparators)):
-            out += [c.value for c in ast.walk(node) if isinstance(c, ast.Constant) and isinstance(c.value, str)]
-    for node in nodes:
-        if (isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in skip
-                and len(node.value) < 1024 and not _SHELLISH.search(node.value) and _PATH_SHAPED.match(node.value)):
-            out.append(node.value)
-    return out
-
-
-# Calls whose arguments are paths. str.replace is not one (its arguments are text an edit swaps), nor print/format.
-_PATH_CALLS = frozenset((
-    "Path", "PurePath", "PureWindowsPath", "PurePosixPath", "WindowsPath", "PosixPath", "join", "joinpath", "glob",
-    "iglob", "rglob", "listdir", "scandir", "walk", "open", "FileIO", "chdir", "expanduser", "expandvars", "abspath",
-    "realpath", "normpath", "fspath", "exists", "is_dir", "is_file", "iterdir", "copy", "copy2", "copyfile",
-    "copytree", "move", "rename", "remove", "unlink", "truncate", "with_name", "with_suffix", "mkdir", "makedirs"))
-
-
-_TEXT_METHODS = frozenset(("replace", "format", "count", "find", "rfind", "index", "split", "rsplit", "strip", "lstrip",
-                           "rstrip", "startswith", "endswith", "encode", "decode", "upper", "lower", "partition",
-                           "removeprefix", "removesuffix", "sub", "subn", "search", "match", "fullmatch", "findall"))
-
-
-def _path_literals(nodes) -> List[str]:
-    """The string literals that can be part of a path (#26 pricing): arguments of a path call, operands of `/`, and
-    values assigned to a name or iterated over. Not text: str.replace/print/comparison arguments, docstrings and
-    multi-line strings, and dict values (a path kept in a dict and used later is a known limit)."""
-    out: List[str] = []
-    shallow = _shallow_path_strings(out)
-
-    def strings(node):
-        stack = [node]
-        while stack:
-            n = stack.pop()
-            if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in _TEXT_METHODS):
-                stack.append(n.func.value)                # 'C:/x/a.skse'.replace(...): the receiver can be a path,
-                continue                                  # the arguments are text the edit swaps in
-            if isinstance(n, ast.Constant) and isinstance(n.value, str):
-                out.append(n.value)
-            stack.extend(ast.iter_child_nodes(n))
-
-    for node in nodes:
-        if isinstance(node, ast.Call):
-            f = node.func
-            name = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
-            if name in _PATH_CALLS:
-                for arg in list(node.args) + [k.value for k in node.keywords]:
-                    strings(arg)
-        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
-            strings(node.left)
-            strings(node.right)
-        elif isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None and all(
-                isinstance(t, ast.Name) for t in (node.targets if isinstance(node, ast.Assign) else [node.target])):
-            shallow(node.value)
-        elif isinstance(node, (ast.For, ast.comprehension)):
-            shallow(node.iter)
-    return out
-
-
-def _shallow_path_strings(out):
-    """One-token literals ('Saves', '*.ess') in an assigned, looped-over or concatenated value: `SAVES = 'Saves'` then
-    `Path(D) / SAVES`. A path-shaped literal anywhere is read by _location_literals (round 3); this adds the bare
-    tokens that only name saves in these positions. A token with whitespace or shell separators is text."""
-    def shallow(node):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if not re.search(r"\s", node.value) and not _SHELLISH.search(node.value):
-                out.append(node.value)
-        elif isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Div)):
-            shallow(node.left)
-            shallow(node.right)
-        elif isinstance(node, (ast.List, ast.Tuple, ast.Set)):
-            for element in node.elts:
-                shallow(element)
-    return shallow
-
-
-def names_save_location(text: str) -> bool:
-    """A string literal that spells part of a save path without resolving to one by itself (#26 review): a path
-    component `Saves`, or a name or pattern ending .ess/.skse. Built paths (`os.path.join(D, 'Saves')`,
-    `Path.home() / ... / 'Saves'`, `glob('*.ess')`) carry one of these."""
-    low = text.replace("\\", "/").casefold()
-    return low.endswith(SAVE_EXTS) or "saves" in [part.strip() for part in low.split("/")]
-
-
-# Round 8 review: a word boundary, not a list of separators (`cd "$D"/Saves&& ...`), and `My\ Games` / `My%20Games`.
-_SAVES_WORD = r"(?<![\w.-])saves(?![\w-])"
-_SAVE_NAME = r"\.(?:ess|skse)\b"
-_MY_GAMES = r"my(?:\s|%20)+games"            # `My\ Games` is read through _bash_unquoted
-_SAVE_DIRS_VAR = r"SKYRIM_SAVE_DIRS"
-_COMMAND_NAMES_SAVES = re.compile("(?i)" + "|".join((_SAVES_WORD, _SAVE_NAME, _MY_GAMES, _SAVE_DIRS_VAR)))
-_COMMAND_WORDS = re.compile(r""""([^"]*)"|'([^']*)'|((?:\\.|[^\s"';|&()<>\\])+)""")
-
-
-def _bash_unquoted(command: str) -> str:
-    """The text with bash's quoting taken out, so `Sa''ves`, `Sa""ves`, `S\\aves`, `$'Sav\\x65s'` and `My' 'Games` read
-    as the words bash passes on (round 8 review). An over-approximation used only to look for save words: a word
-    split by quotes everywhere is joined, never split."""
-    def ansi_c(m):
-        try:
-            return m.group(1).encode("latin-1", "backslashreplace").decode("unicode_escape")
-        except (UnicodeError, ValueError):
-            return m.group(1)
-    text = command.replace("\\\n", "")                    # a line continuation joins `Sa\<newline>ves`
-    text = re.sub(r"\$'((?:[^'\\]|\\.)*)'", ansi_c, text)
-    text = re.sub(r'\$(?=")', "", text)                     # $"..." (locale string) is a quoted word: `Sa$"ves"`
-    return re.sub(r"""['"\\]""", "", text)
-
-
-def command_names_saves(command: str, base: str, roots, env) -> bool:
-    """Issue #26 round 7 (user ruling 2026-11-09): a computed write run from a cwd the guard cannot work out
-    (`S=...; cd "$S"` in a command the parser will not trust, `cd "$(...)"`) is refused only when the command's own
-    text names a save location: a `Saves` component, a .ess/.skse name, `My Games`, SKYRIM_SAVE_DIRS, or a path-shaped
-    word that resolves into the settings area (a custom sLocalSavePath folder). Failing closed on every unknown cwd
-    refused 227 ordinary scratch-folder scripts in the priced history; a cd computed at run time with no save
-    location anywhere in the text is not seen (documented limit)."""
-    if _COMMAND_NAMES_SAVES.search(command) or _COMMAND_NAMES_SAVES.search(_bash_unquoted(command)):
-        return True
-    for m in _COMMAND_WORDS.finditer(command):
-        raw = next(g for g in m.groups() if g is not None)
-        # Unquoted, bash reads `My\ Games` as one word, while a Windows path keeps its backslashes: try both.
-        words = {raw, re.sub(r"\\(.)", r"\1", raw)} if m.group(3) is not None else {raw}
-        for word in words:
-            if m.group(3) is not None and re.match(r"[A-Za-z_]\w*=", word):
-                word = word.split("=", 1)[1]              # an unquoted assignment value: D=C:/x
-            if not word or len(word) >= 1024 or not _PATH_SHAPED.match(word):
-                continue
-            a = targets.resolve_literal(word, base, env)
-            if a is not None and targets.zone(a, roots) == "config":
-                return True
-    return False
 
 
 def text_write_targets(code: str, *, python_literals: bool = False) -> List[str]:
@@ -1282,13 +636,6 @@ def _script_reads_stdin(e, command: str) -> bool:
         return False
     seen, program = shellparse.python_options(e.argv)      # `python -X utf8 <<EOF` names no script
     return "i" not in seen and "PYTHONINSPECT" not in command and program != "stdin"
-
-
-def _unplaced_save(word: str) -> bool:
-    """A literal save path in the settings area the guard cannot resolve (an 8.3 name, a glob character in a folder).
-    A run-time value (`$S/a.ess`) is not one: it says nothing about where it lands (saves.py KNOWN LIMITS)."""
-    low = word.replace("\\", "/").lower()
-    return low.endswith(SAVE_EXTS) and not re.search(r"[$`%]", word) and bool(re.search(r"/my games/|/saves/", low))
 
 
 def write_targets(e) -> List[str]:
@@ -1468,10 +815,6 @@ class Scan(NamedTuple):
     deny: str                               # basename of a plugin a write primitive targets ("" for none)
     advice: Tuple[Tuple[str, str], ...]     # (rule id, file phrase) in rule order, one per rule
     move_root: str = ""                     # S-MOVE-ROOT: basename of a protected folder a move takes away
-    # The save policy (saves.py): (resolved path, op) for each save in the settings folder a write, copy onto, move
-    # or rename CHANGES -- op "write" (written or replaced) or "move" (taken from where it is). Not a decision here:
-    # saves.judge decides the call on every save it changes, together.
-    save_targets: Tuple[Tuple[str, str], ...] = ()
     sed_crlf: str = ""                      # S-SED-CRLF: basename of a file sed -i rewrites without -b
 
 
@@ -1483,96 +826,6 @@ _CONFIG_SAVES = re.compile(r"/documents/my games/skyrim[^/]*/saves$")
 def is_save(abs_path: Optional[str], roots) -> bool:
     """A save (or its SKSE co-save) in the settings folder, where the game reads it."""
     return bool(abs_path) and abs_path.lower().endswith(SAVE_EXTS) and targets.zone(abs_path, roots) == "config"
-
-
-def is_save_folder(abs_path: Optional[str], roots) -> bool:
-    """A Saves folder in the settings area: a bulk copy into it can replace any save there."""
-    if not abs_path or targets.zone(abs_path, roots) != "config":
-        return False
-    # Below the settings folder only (sLocalSavePath can name a folder below Saves): a parent folder of the settings
-    # folder that happens to be called Saves says nothing.
-    below = _rel(abs_path, roots.config_dirs)
-    if below is None:
-        m = re.search(r"/my games/skyrim[^/]*/(.*)$", abs_path.rstrip("/").lower())
-        below = m.group(1).split("/") if m else []
-    return "saves" in below
-
-
-def is_settings_folder(abs_path: Optional[str], roots) -> bool:
-    """The settings folder itself (the parent of Saves): a tree restored into it replaces same-named saves."""
-    if not abs_path or targets.zone(abs_path, roots) != "config":
-        return False
-    return _rel(abs_path, roots.config_dirs) == [] or bool(re.search(r"/my games/skyrim[^/]*$", abs_path.rstrip("/").lower()))
-
-
-def _settings_hold_saves(physical: str) -> bool:
-    """Is there a save for a tree restored into this settings folder to replace? With none, nothing is at risk, and a
-    wildcard approval could name nothing to approve. A folder that cannot be listed counts as holding some."""
-    if not physical:
-        return True
-    failed = []
-    for _folder, _dirs, names in os.walk(physical.rstrip("/\\") + "/Saves", onerror=failed.append):   # sLocalSavePath can
-        if any(n.lower().endswith(SAVE_EXTS) for n in names):                                            # name a folder below
-            return True
-    return any(not isinstance(e, FileNotFoundError) for e in failed)
-
-
-def _keeps_source_folders(e) -> bool:
-    """`rsync -R a/b/c dest/` and `cp --parents a/b/c dest/` write dest/a/b/c, so a name with a folder in it does not
-    land where it looks. A plain top-level name has no folder to keep."""
-    if e.program == "rsync":
-        relative = any(w == "--relative" or re.fullmatch(r"-[A-Za-z]*R[A-Za-z]*", w) for w in e.argv)
-    else:
-        relative = e.program == "cp" and any(re.fullmatch(r"--pa(?:r(?:e(?:n(?:ts?)?)?)?)?", w) for w in e.argv)
-    if not relative:
-        return False
-    sources = [s for _, words in copy_targets(e) for s in words]
-    return any("/" in s.replace("\\", "/") and (_name(s).lower().endswith(SAVE_EXTS) or _may_bring_saves(s)) for s in sources)
-
-
-def _may_bring_saves(source: str) -> bool:
-    """A copy source that can hold saves: a folder, a wildcard that could match one. A named other file cannot."""
-    name = _name(source)
-    if re.search(r"[*?\[{]", name):
-        import fnmatch
-        return any(fnmatch.fnmatchcase("x" + ext, name.lower()) or fnmatch.fnmatchcase("save" + ext, name.lower())
-                   for ext in SAVE_EXTS) or not re.search(r"\.[a-z0-9]+$", name.lower())
-    return _looks_like_dir(source)
-
-
-def bulk_destinations(e) -> List[str]:
-    """Folders this exec fills with files it does not name: an archive extraction, or a tree copy (release review
-    2026-11-02: `tar -xf x -C Saves`, `rsync -a bk/ Saves/` and `robocopy bk Saves` changed saves with no save plan)."""
-    p, argv = e.program, e.argv
-    if p == "tar" and (any(w in ("--extract", "--get") or re.fullmatch(r"-[a-zA-Z]*x[a-zA-Z]*", w) for w in argv)
-                       or re.fullmatch(r"[a-zA-Z]*x[a-zA-Z]*", argv[0] if argv else "")):
-        return (_opt_values(argv, ("--directory",), ("-C",)) or ["."])[:1]
-    if p == "unzip":
-        return (_opt_values(argv, (), ("-d",)) or ["."])[:1]
-    if p in ("7z", "7za", "7zr", "7z.exe") and argv and argv[0].lower() in ("x", "e"):
-        out = [w[2:] for w in argv if w.startswith("-o") and len(w) > 2]
-        return out[:1] or ["."]
-    if p == "expand-archive":
-        return (list(ps_param(e, "destinationpath", 1, before=(("path", "literalpath"),))) or ["."])[:1]
-    if p in ("rsync", "scp"):
-        return _remote_copy_operands(e)[-1:]
-    if p == "robocopy":
-        pos = robocopy_positionals(argv)
-        return [pos[1]] if len(pos) == 2 else []
-    return []
-
-
-def _save_only_writes(e) -> List[str]:
-    """Programs that replace a file by name and are judged elsewhere, read here only for the save policy."""
-    p, argv = e.program, e.argv
-    if p == "shred":
-        return _plain_operands_valued(argv, ("-n", "--iterations", "-s", "--size", "--random-source"))
-    if p == "install" and not any(w in ("-d", "--directory") for w in argv):
-        return _plain_operands_valued(argv, ("-m", "--mode", "-o", "--owner", "-g", "--group", "-t",
-                                             "--target-directory"))[-1:]
-    if p == "ln":
-        return _plain_operands(argv)[-1:]
-    return []
 
 
 def is_protected_folder(abs_path: Optional[str], roots) -> bool:
@@ -1702,7 +955,6 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
     env = os.environ if env is None else env
     plugin: List[str] = []
     moved: List[str] = []
-    saves: List[Tuple[str, str]] = []
     crlf: List[str] = []
     notes = {k: [] for k in ADVICE_ORDER}
 
@@ -1723,8 +975,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             # S-SED-WINPATH (Task 9): sed -i on an install/config/MO2 file whose replacement holds a backslash path.
             # It REPLACES the S-WRITE-INSTALL note for that file (one note per write, not two).
             if is_save(a, roots):
-                saves.append((targets.physical_operand(e, w, cwd, env) or "", "write"))
-                continue
+                continue                    # a save: no rule and no note (4.1: the save vault keeps every version)
             # S-SED-CRLF (P8-SED): a game file by name, or any file in the install / config / MO2 area.
             in_zone = targets.zone(a, roots) in SED_ZONES if a is not None else False
             if text_mode and w in sed_files and (kind or in_zone):
@@ -1742,63 +993,11 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             a = targets.resolve_operand(e, w, cwd, env)
             if is_protected_folder(a, roots):
                 moved.append(posixpath.basename(a.rstrip("/")) or a)
-            elif is_save(a, roots):
-                saves.append((targets.physical_operand(e, w, cwd, env) or "", "move"))
-        saves.extend((targets.physical_operand(e, w, cwd, env) or "", "write") for w in _save_only_writes(e)
-                     if is_save(targets.resolve_operand(e, w, cwd, env), roots))
-
-        def bulk_into_saves(word, below=""):
-            """A wildcard change of that Saves folder: the typed approval, like any bulk change (saves.judge)."""
-            physical = targets.physical_operand(e, word, cwd, env)
-            saves.append((physical.rstrip("/\\") + below + "/*" if physical else "", "write"))
-
-        for dst in bulk_destinations(e):
-            a_bulk = targets.resolve_operand(e, dst, cwd, env)
-            if e.program in ("rsync", "scp") and is_save(a_bulk, roots):
-                saves.append((targets.physical_operand(e, dst, cwd, env) or "", "write"))     # one named save, as cp
-            elif is_save_folder(a_bulk, roots):
-                named = _remote_copy_operands(e)[:-1] if e.program in ("rsync", "scp") else []
-                if named and all(s.lower().endswith(SAVE_EXTS) for s in named):
-                    physical = targets.physical_operand(e, dst, cwd, env) or ""
-                    saves.extend((paths.physical_abs(physical.rstrip("/\\") + "/" + _name(s)) if physical else "", "write")
-                                 for s in named)
-                else:
-                    bulk_into_saves(dst)
-            elif is_settings_folder(a_bulk, roots) and (
-                    e.program not in ("rsync", "scp") or any(_may_bring_saves(s) for s in _remote_copy_operands(e)[:-1])) and (
-                    _settings_hold_saves(targets.physical_operand(e, dst, cwd, env))):
-                bulk_into_saves(dst, "/Saves")
         for dst, srcs in copy_targets(e):
             # The destination as written AND where it resolves (`cp a.ini x.ini` run inside Data/SKSE/Plugins).
             a_dst = targets.resolve_operand(e, dst, cwd, env)
-            # A save replaced: the destination itself, or a folder destination that takes a save's name.
             if is_save(a_dst, roots):
-                saves.append((targets.physical_operand(e, dst, cwd, env) or "", "write"))
-                continue
-            if is_settings_folder(a_dst, roots) and _keeps_source_folders(e) and _settings_hold_saves(
-                    targets.physical_operand(e, dst, cwd, env)):
-                bulk_into_saves(dst, "/Saves")
-                continue
-            if is_save_folder(a_dst, roots) and (not srcs or any(_may_bring_saves(s) for s in srcs
-                                                                 if not s.lower().endswith(SAVE_EXTS))):
-                bulk_into_saves(dst)
-                continue
-            if is_settings_folder(a_dst, roots) and any(_may_bring_saves(s) for s in srcs) and _settings_hold_saves(
-                    targets.physical_operand(e, dst, cwd, env)):
-                bulk_into_saves(dst, "/Saves")
-                continue
-            if a_dst is None and _unplaced_save(dst):
-                saves.append(("", "write"))        # a real path the guard cannot resolve: S-SAVE-UNKNOWN, as saves.py says
-                continue
-            if a_dst is not None and _looks_like_dir(dst):
-                save_dests = [a_dst.rstrip("/") + "/" + _name(s) for s in srcs
-                              if s.lower().endswith(SAVE_EXTS)]
-                save_dests = [p for p in save_dests if is_save(p, roots)]
-                if save_dests:
-                    physical_dst = targets.physical_operand(e, dst, cwd, env)
-                    saves.extend((paths.physical_abs(physical_dst.rstrip("/\\") + "/" + _name(p))
-                                  if physical_dst else "", "write") for p in save_dests)
-                    continue
+                continue                    # a save replaced: no rule and no note (the save vault)
             kind = file_class(dst, a_dst or "")
             if kind == "plugin" and any(s.lower() in NULL_TARGETS for s in srcs):
                 plugin.append(_name(dst))                           # cp /dev/null X.esp truncates it: a write
@@ -1839,8 +1038,8 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
     # routes red team: a file written by name in interpreter code (`python -c "open('X.esp','wb')"`, node
     # writeFileSync) or by a .NET call in PowerShell text (WebClient.DownloadFile, FileStream, [IO.File]::Open).
     # Only literal names. fix-limits 9: each is resolved where the code runs (the exec's cwd, after any cd before it)
-    # and judged exactly as a shell write to that place is: a plugin's raw write anywhere, a save, a file class by
-    # where it lands (an SKSE INI), any other file in the install area. It was judged by its name alone.
+    # and judged exactly as a shell write to that place is: a plugin's raw write anywhere, a file class by where it
+    # lands (an SKSE INI), any other file in the install area. It was judged by its name alone. A save: nothing.
     lit = [(None, w) for w in text_write_targets_ps(command)]
     for e in parsed.execs:
         code = interpreter_code(e)
@@ -1852,53 +1051,20 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
             except ValueError:
                 if not _script_reads_stdin(e, command):
                     raise
-            # Issue #26: a computed write target in code that names a save, the Saves folder or the settings folder
-            # may change saves the guard cannot list or back up: S-SAVE-UNKNOWN, as for any save it cannot place.
-            if shellparse._PYTHON.fullmatch(e.program) and not _script_reads_stdin(e, command):
-                found = python_computed_writes(code)
-                if found.computed:
-                    base = targets.exec_cwd(e, cwd, env) or ""
-
-                    def names_saves(s):
-                        a = targets.resolve_literal(s, base, env) if len(s) < 1024 and "\n" not in s else None
-                        # A literal inside Saves carries a `Saves` component; run from the settings area is the
-                        # cwd check below. Resolving adds a relative settings folder (`Path('Skyrim VR')` from My Games).
-                        return is_settings_folder(a, roots) or names_save_location(s)
-
-                    here = targets.resolve_literal(".", base, env) if base else None
-                    # #26 round 4 review: run from the settings area, a computed target needs no literal at all
-                    # (`cd Saves && python -c "...extractall()"`, `os.listdir()` + rename).
-                    # an unknown cwd (`cd "$D" && python ...`) may be the settings area: refused when the command
-                    # names a save location anywhere in its text (round 7, user ruling)
-                    unknown = here is None and command_names_saves(command, targets.normalise_cwd(cwd) or "", roots, env)
-                    if unknown or here is not None and targets.zone(here, roots) == "config" or any(
-                            names_saves(s) for s in found.literals):
-                        saves.append((COMPUTED_SAVE, "write"))
     for e, word in lit:
         base = cwd if e is None else (targets.exec_cwd(e, cwd, env) or "")
         a = targets.resolve_literal(word, base, env)                    # a literal: nothing in it expands
         kind = file_class(word, a or "")
         copied = isinstance(word, _CopyWord)
-        if copied and word.removed and not is_save(a, roots):
+        if copied and word.removed:
             continue
-        actual_base = cwd if e is None else (targets.physical_cwd(e, cwd, env) or "")
         if kind == "plugin" and copied:
             if not word.moved and a is not None and game_loads(a, roots):
                 notes["S-COPY-PLUGIN"].append(_name(word))       # as `cp`: advice in the load path, silent elsewhere
         elif kind == "plugin":
             plugin.append(_name(word))
         elif is_save(a, roots):
-            saves.append((targets.physical(word, actual_base, "cmd", env, literal=True) or "", "write"))
-        elif copied and not word.moved and is_save_folder(a, roots) and word.source.lower().endswith(SAVE_EXTS) and not word.tree:
-            physical = targets.physical(word, actual_base, "cmd", env, literal=True)
-            saves.append((paths.physical_abs(physical.rstrip("/\\") + "/" + _name(word.source)) if physical else "", "write"))
-        elif copied and not word.moved and (is_save_folder(a, roots) or (
-                word.tree and is_settings_folder(a, roots) and _settings_hold_saves(
-                    targets.physical(word, actual_base, "cmd", env, literal=True)))) and (
-                word.tree or _may_bring_saves(word.source)):
-            physical = targets.physical(word, actual_base, "cmd", env, literal=True)
-            below = "/Saves" if is_settings_folder(a, roots) else ""
-            saves.append((physical.rstrip("/\\") + below + "/*" if physical else "", "write"))
+            continue                        # a save written by name in code: no rule and no note (the save vault)
         elif kind:
             notes[RULE_OF_CLASS[kind]].append(_name(word))
         elif a is not None and in_install_area(a, roots):
@@ -1913,8 +1079,7 @@ def scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping[str, 
                 plugin.append(_name(word))
             else:
                 notes[RULE_OF_CLASS[kind]].append(_name(word))
-    extra = dict(move_root=_phrase(moved) if moved else "", save_targets=tuple(dict.fromkeys(saves)),
-                 sed_crlf=_phrase(crlf) if crlf else "")
+    extra = dict(move_root=_phrase(moved) if moved else "", sed_crlf=_phrase(crlf) if crlf else "")
     if plugin:
         return Scan(_phrase(plugin), (), **extra)
     return Scan("", tuple((r, _phrase(notes[r])) for r in ADVICE_ORDER if notes[r]), **extra)

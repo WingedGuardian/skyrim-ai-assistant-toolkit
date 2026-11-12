@@ -17,7 +17,6 @@ from . import lift_rules
 from . import mcp_rules
 from . import paths
 from . import rules
-from . import saves
 from . import self_rules
 from . import shellparse
 from . import targets
@@ -28,9 +27,6 @@ HOOK = "protect-bash"
 
 NO_COMMAND_LOG = "no command in payload -- hook could not evaluate its rules"
 NO_COMMAND_DENY = rules.RULES["S-INERT-NOCMD"]["template"]
-TOO_LARGE_DENY = ("Blocked: this command is larger than the guard can read (%d characters) and names a save location "
-                  "or runs in the settings folder, so the guard cannot list the saves it changes. Put the data in a "
-                  "file and pass its path, or split the command." % shellparse.MAX_INPUT_CHARS)
 NO_ROOT_LOG = "could not derive the install root -- the delete guard evaluated NOTHING"
 NO_ROOT_DENY = rules.RULES["S-INERT-NOROOT"]["template"]
 
@@ -48,58 +44,10 @@ ADV_EXTERNAL = rules.RULES["S-EXTERNAL-OUT"]["template"]
 DESTROYER = deletes.DESTROYER   # legacy delete-word regex; now used only by S-DEL-FALLBACK and on interpreter code
 
 
-# --- S-RESAVER-APPLY: ReSaver is the PROGRAM RUN, with --apply and a save-writing operation among ITS OWN arguments
-# (port of install 4a429bd/1540b99; Task 4 widened it with regexes, Task 6 re-based it on shellparse). Text that
-# merely contains the words (a heredoc to python, grep, echo, a commit message) is not a save write. Every
-# operation below writes a save when given --apply (tools/resaver-cli.sh, ResaverCLI.java).
-#
-# The parser supplies what the Task 4 regexes approximated: wrappers (sudo, env, timeout, xargs, find -exec ...),
-# `bash -c` / `eval` / `pwsh -Command` / `cmd /c` strings, shell-fed heredocs (R7), `$( )`, backticks,
-# line continuations, quoted and quote-split tokens, and the PowerShell and cmd dialects.
-#
-# NOT SAFE BY DEFAULT. Where the parser cannot be sure what runs -- the text could not be parsed (ok=False, R4) or an
-# exec's program is opaque ("?": `$R reset-havok ...`, `printf ... | sh`) -- the statement's TEXT is checked
-# instead: `resaver`, `--apply` and an operation word all present is a save write (Task 5 carry: "?" is unresolved,
-# never safe), judged by the save policy (saves.py): backed up first, or refused when the save cannot be placed.
-RESAVER_OPS = ("set-global", "set-var", "clean", "reset-havok", "cleanse-formlists", "remove-created")
-RESAVER_PROGRAMS = ("resaver-cli", "resavercli")
-RESAVER_APPLY = "--apply"
-# Text fallback: whole-word op (`reset-havok.ess` is a file name, not the operation). Linear: no nested repetition.
-RESAVER_TEXT_OP = re.compile(r"(?<![^\s\"'])(" + "|".join(RESAVER_OPS) + r")(?![^\s\"'])", re.ASCII | re.IGNORECASE)
-RESAVER_TEXT_SAVE = re.compile(r"[^\s\"'/\\]{1,300}\.ess(?![^\s\"'])", re.ASCII | re.IGNORECASE)
-
-
-def _is_resaver(e) -> bool:
-    if e.program in RESAVER_PROGRAMS:
-        return True
-    # v4.0.0: the native backend's adapter run directly (`python tools/resaver_native.py clean x.ess y.ess --apply`)
-    # takes the wrapper's arguments, so it is judged exactly as the wrapper is.
-    if RESAVER_PYTHON.fullmatch(e.program):
-        script, k = "", 0
-        while k < len(e.argv):                                                 # past `-B`, `-3`, `-I`, and `-X utf8`
-            if e.argv[k] in ("-X", "-W", "--check-hash-based-pycs"):
-                k += 2
-            elif e.argv[k].startswith("-"):
-                k += 1
-            else:
-                script = e.argv[k]
-                break
-        if _base_name(script).startswith(RESAVER_ADAPTER):
-            return True
-    return e.program == "java" and any("resaver" in a.lower() for a in e.argv)
-
-
 def _base_name(word: str) -> str:
     return re.split(r"[/\\]", word.lower())[-1]
 
 
-# --- S-RESAVER-NATIVE-DIRECT (v4.0.0): ReSaver Plus's own executables, run directly. The command-line tool writes a
-# save with `-o`, `--batch`/`--batch-all` and its structured `--apply` (upstream src/cli/main.cpp, src/core/Structured.cpp)
-# with none of tools/resaver_native.py's new-output admission, backups or receipt checks, and the GUI's writes are
-# unqualified (tools/resaver-plus/README.md). Reads (`x.ess --top 20`, `x.pex --psc`, `--json info x.ess`) stay
-# allowed. An argument not proven literal is read as a write.
-RESAVER_PYTHON = re.compile(r"python[\d.]*|py", re.ASCII)
-RESAVER_ADAPTER = "resaver_native"
 RESAVER_NATIVE_CLI = ("resaverpp-cli",)
 RESAVER_NATIVE_GUI = ("resaverpp",)
 RESAVER_NATIVE_WRITES = ("-o", "--batch", "--batch-all", "--apply")
@@ -147,106 +95,6 @@ def resaver_native_direct(command: str, parsed) -> str:
     return ""
 
 
-def _resaver_op(e) -> str:
-    words = [a.lower() for a in e.argv]
-    if RESAVER_APPLY not in words:
-        return ""
-    return next((a for a in words if a in RESAVER_OPS), "")
-
-
-def _save_word(words) -> str:
-    """The first .ess argument AS WRITTEN (a path or a bare name), "" when there is none."""
-    for a in words:
-        if a.lower().endswith(".ess"):
-            return a
-    return ""
-
-
-def _save_of(words) -> str:
-    return re.split(r"[/\\]", _save_word(words))[-1]
-
-
-def _text_fallback(command: str):
-    """(op, save) when the raw text names ReSaver, --apply and an operation; None otherwise."""
-    low = command.lower()
-    if "resaver" not in low or RESAVER_APPLY not in low:
-        return None
-    m = RESAVER_TEXT_OP.search(command)
-    if not m:
-        return None
-    s = RESAVER_TEXT_SAVE.search(command)
-    return m.group(1).lower(), (s.group(0) if s else "")
-
-
-def resaver_target(command: str, shell: str = "", parsed=None):
-    """(operation, the save as written -- a path or a bare name -- or "") when ReSaver is executed with --apply and a
-    write operation. resaver_writes reads the saves it writes from the same decision (the save policy, saves.py)."""
-    if "resaver" not in command.lower():        # every form names resaver; skip the parse entirely
-        return None
-    parsed = shellparse.parse(command, shell) if parsed is None else parsed
-    opaque = False
-    for e in parsed.execs:
-        if e.program == "?":
-            opaque = True
-            continue
-        if _is_resaver(e):
-            e = deletes.substituted(e)             # RT-A: `OP=reset-havok; ... $OP x.ess --apply`
-            if any(_DYNAMIC.search(a) for a in e.argv):
-                opaque = True                       # RT-A: an argument not proven literal (`$(echo --apply)`): the text
-            op = _resaver_op(e)
-            if op:
-                # No .ess among its own arguments (`find -name "*.ess" -exec ... {}`): name the one its segment selects.
-                s = _save_word(e.argv) or (lambda m: m.group(0) if m else "")(RESAVER_TEXT_SAVE.search(e.segment))
-                return op, s
-    if not parsed.ok or opaque:
-        return _text_fallback(command)
-    return None
-
-
-def resaver_writes(command: str, shell: str = "", parsed=None):
-    """(first operation, [ALL saves WRITTEN, as written]) for compatibility callers.
-
-    the toolkit's ReSaver CLI writes `<out.ess>` -- the .ess after the input -- and never the input
-    (tools/resaver-cli/ResaverCLI.java:49); set-global, set-var and clean write it with no existence check. A ReSaver
-    given ONE .ess is taken to write that one (another front end writing in place). The text fallback reads the same
-    shape from the raw text."""
-    calls = resaver_write_calls(command, shell, parsed)
-    return (calls[0][0], [w for _, words, _ in calls for w in words]) if calls else None
-
-
-def resaver_write_calls(command: str, shell: str = "", parsed=None):
-    """Every write call, retaining its execution context so relative outputs follow that call's cd."""
-    if "resaver" not in command.lower():
-        return []
-    parsed = shellparse.parse(command, shell) if parsed is None else parsed
-    t = resaver_target(command, shell, parsed)
-    if t is None:
-        return []
-    calls = []
-    for e in parsed.execs:
-        e = deletes.substituted(e)
-        # An opaque program may be the ReSaver named elsewhere in the command.
-        # Do not let one known call suppress another call's conservative scope.
-        if (_is_resaver(e) or e.program == "?") and _resaver_op(e):
-            if any(_DYNAMIC.search(a) for a in e.argv):
-                # A resolved input is not proof of an unresolved output. Keep
-                # this call explicitly unknown so it refuses before backup.
-                calls.append((_resaver_op(e), [], e))
-                continue
-            ws = [a for a in e.argv if a.lower().endswith(".ess")] or RESAVER_TEXT_SAVE.findall(e.segment)
-            calls.append((_resaver_op(e), ws[1:] or ws, e))
-    if calls:
-        return calls
-    ws = RESAVER_TEXT_SAVE.findall(command)
-    return [(t[0], ws[1:] or ws, None)]
-
-
-def resaver_apply(command: str, shell: str = "", parsed=None):
-    """(operation, save basename or "") when ReSaver is executed with --apply and a write operation."""
-    t = resaver_target(command, shell, parsed)
-    return None if t is None else (t[0], re.split(r"[/\\]", t[1])[-1])
-
-
 def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "", shell: str = "",
            env=None, parsed=None, transcript: str = "") -> Verdict:
     """cwd: the payload's working directory, RAW (any spelling; targets normalises it). shell: "bash",
@@ -276,16 +124,6 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
     # --- hard blocks
     # Deletes (Task 7): decided on the commands that RUN and where their operands RESOLVE (deletes.py, E16).
     parsed = shellparse.parse(command, shell) if parsed is None else parsed
-    # #26 review 3 (also in 4.0.0, MEASURED): past the parser's input cap the inline code is never read, so three
-    # literal save writes padded with 300 KB of data were allowed. Such a command that names a save location, or runs
-    # in the settings area, is refused: the guard cannot list what it changes.
-    if not parsed.ok and len(command) > shellparse.MAX_INPUT_CHARS:
-        base = targets.normalise_cwd(cwd) or ""
-        here = targets.resolve_literal(".", base, env) if base else None
-        if writes.command_names_saves(command, base, roots, env) or (
-                here is not None and targets.zone(here, roots) == "config"):
-            audit.rule(HOOK, "S-SAVE-UNKNOWN", "deny", TOO_LARGE_DENY)
-            return Verdict("deny", TOO_LARGE_DENY)
     dels = deletes.scan(command, parsed, roots, cwd, env)
     # Plan 6 Task 12 (R12): a write -- or a delete (fix round 1, I1) -- into .skyguard/** is the CLI's alone. Checked before
     # the delete deny, because S-DEL-INSTALL is shadowed by guards off and S-SELF-STATE is not.
@@ -318,32 +156,9 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
     perm = rules.message("S-LIFT-PERMANENT")
     if v.decision in ("deny", "ask") and v.reason != perm and lift_rules.permanent(parsed, command):
         v = v._replace(never=Verdict("ask", perm))
-    # The save policy (user ruling 2026-10-13): every save the command changes -- deleted, written, copied onto,
-    # moved, rewritten by ReSaver --apply or saved over by DevBench -- is judged together, after the other rules.
-    resaver = resaver_write_calls(command, shell, parsed)
-    dev: list = []
-    mcp_rules.scan_shell(command, parsed, roots, env, found=dev)      # its own prefilter skips most commands
-    change = saves.shell_change(dels, wr, resaver, dev, cwd, shell, roots, env)
-    return saves.judge(change, v, audit, HOOK)
-
-
-def _opaque_save(parsed, roots, cwd, env, command="") -> str:
-    """The first save (by name) an exec carries in its words or redirects when the guard has no idea what its program is
-    (Parsed.unnamed: "?" with no candidate), or "". A word with candidates (`R=$(echo resaver-cli.sh); $R ...`) is read
-    as each of them, and the save rules count and back up what those readings change."""
-    for e in parsed.unnamed:
-        if _resaver_op(e):                  # read as ReSaver by its operation (resaver_write_calls): counted, backed up
-            continue
-        e = deletes.substituted(e)
-        for w in list(e.argv) + [t for _, t in e.redirects]:
-            a = targets.resolve_operand(e, w, cwd, env)
-            if writes.is_save(a, roots):
-                return os.path.basename(a)
-    if _unfinished(parsed, command):
-        m = RESAVER_TEXT_SAVE.search(command)
-        if m:
-            return re.split(r"[/\\]", m.group(0))[-1]
-    return ""
+    # No rule decides on a save (4.1, user ruling 2026-11-10): tools/save_vault.py keeps every version of every save,
+    # whatever changes it. Deleting or moving a Saves FOLDER is still S-DEL-CONFIG / S-MOVE-ROOT.
+    return v
 
 
 def _unfinished(parsed, command) -> bool:
@@ -417,7 +232,7 @@ def _path_like(word) -> bool:
 
 def _protected_word(a, roots) -> str:
     """The name to show when the resolved path `a` is the install itself, under its Data folder, in the settings
-    folder (not a save: S-SAVE-OPAQUE's) or MO2's folders; "" otherwise."""
+    folder (not a save: no rule decides on one) or MO2's folders; "" otherwise."""
     if not a:
         return ""
     z = targets.zone(a, roots)
@@ -544,9 +359,6 @@ def _ordered(command, parsed, dels, wr, own, roots, audit, cwd, shell, env) -> V
     champ = anchored.champollion(command, parsed, roots, cwd, env)
     if champ:
         return deny("S-CHAMPOLLION", champ)
-    native = resaver_native_direct(command, parsed)
-    if native:
-        return deny("S-RESAVER-NATIVE-DIRECT", native)
     # Task 11: the DevBench console reached by curl or devbench-cli.sh (mcp_rules.py judges the same calls as the MCP hook).
     dev = mcp_rules.scan_shell(command, parsed, roots, env)
     if dev and dev[0] == "S-DEVBENCH-CRASH":
@@ -567,22 +379,18 @@ def _ordered(command, parsed, dels, wr, own, roots, audit, cwd, shell, env) -> V
     # anchored.py: AutoMod writes, on AutoMod's own arguments.
     for rid, file in list(wr.advice) + anchored.automod(parsed):
         advise(rid, file=file)
+    native = resaver_native_direct(command, parsed)          # a note since 4.1: the save vault keeps the old version
+    if native:
+        advise("S-RESAVER-NATIVE-DIRECT", file=native)
 
-    # --- ask (drops accumulated advice, as the bash exit does). A save change (ReSaver --apply, a write, copy, move
-    # or delete of a save, a DevBench save) is no ask any more: decide() hands every one to saves.judge.
+    # --- ask (drops accumulated advice, as the bash exit does). A save change is never an ask (4.1: the save vault).
     git = anchored.git_discard(parsed, roots, cwd, env)      # rt-fix-b: git overwriting a protected working tree
     if git:
         reason = rules.message("S-GIT-DISCARD", file=git)
         audit.rule(HOOK, "S-GIT-DISCARD", "ask", reason)
         return Verdict("ask", reason)
-    # User ruling 2026-10-19 ("ask first"): an unnamed program word naming a save. A save another reading changes is
-    # still counted (saves.judge), and portable.check holds this ask until that save is approved and backed up.
-    opaque = _opaque_save(parsed, roots, cwd, env, command)
-    if opaque:
-        reason = rules.message("S-SAVE-OPAQUE", file=opaque)
-        audit.rule(HOOK, "S-SAVE-OPAQUE", "ask", reason)
-        return Verdict("ask", reason)
-    # User ruling 2026-10-20: the same "ask first" for a protected path that is not a save (_opaque_protected).
+    # User ruling 2026-10-20 ("ask first"): an unnamed program on a protected path that is not a save
+    # (_opaque_protected).
     hidden = _opaque_protected(command, parsed, roots, cwd, env)
     if hidden:
         reason = rules.message("S-OPAQUE-PROTECTED", file=hidden)

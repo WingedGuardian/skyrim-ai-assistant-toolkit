@@ -1,8 +1,9 @@
 """Skyrim policy bridge for the shared synchronous dispatcher.
 
-The Python rules still decide game policy. Local restrictions run before the
-shared store preserves bytes or permission is emitted. Legacy entrypoints stay
-available while each new host path is qualified.
+The Python rules still decide game policy. Since 4.1 no call preserves a save here
+and no installed save policy is consulted: tools/save_vault.py keeps every version
+of every save, whatever changed it (user ruling 2026-11-10). Legacy entrypoints
+stay available while each new host path is qualified.
 """
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from modding_harness import contracts, dispatch, telemetry
-from . import codes, engine, local_policy, mcp_rules, paths, rules, saves, save_profile
+from . import codes, engine, mcp_rules, paths, save_profile
 from .audit import Audit
 from .request import Request
 from .verdict import Verdict
@@ -42,13 +43,6 @@ def request(action, transcript=""):
                    execution_cwd_known=action.provenance.get("execution_cwd_known", True) is not False)
 
 
-def mutations(change):
-    counted = saves.count(change)
-    if counted.unknown:
-        raise ValueError("save identity could not be resolved")
-    return tuple(dispatch.Mutation(pair.ess, op) for pair in saves._existing(counted) for op in pair.ops), counted
-
-
 class _PreviewAudit(Audit):
     """Retain in-memory rule ordering without audit or strict-shadow appends."""
     def raw(self, line):
@@ -62,9 +56,10 @@ def check(action, project, *, transcript="", deadline=None, local_restrictions=(
           preview=False):
     """Preview reads current policy/scope but grants no execution or preservation authority.
 
-    Arbitrary installed policy workers and caller restriction callbacks are not
-    read-only qualified. A preview refuses those rather than running or omitting
-    their requirements. Normal deciding calls retain the original path.
+    Caller restriction callbacks are not read-only qualified. A preview refuses
+    those rather than running or omitting their requirements. Normal deciding
+    calls retain the original path. `helper` is accepted for older callers and
+    changes nothing: no save plan is built.
     """
     if preview and (_legacy is not None or local_restrictions):
         return dispatch.Outcome(contracts.Result("deny", "partial", reason=
@@ -72,7 +67,6 @@ def check(action, project, *, transcript="", deadline=None, local_restrictions=(
     audit = _PreviewAudit(str(project)) if preview else (_legacy.audit if _legacy else Audit(str(project)))
     req = _legacy.request if _legacy else request(action, transcript)
     last = [Verdict()]
-    save_plan = [None]
     known = req.kind in ("shell", "write") or req.kind == "mcp" and mcp_rules.judged_server(req.mcp_tool)
     if _legacy:
         roots = _legacy.roots or paths.Roots("", "")
@@ -100,17 +94,7 @@ def check(action, project, *, transcript="", deadline=None, local_restrictions=(
             engine.hold_if_shadowing(str(project), audit)
         value = codes.classify(_legacy.value if _legacy else engine._rules(req, lambda: roots, audit))
         last[0] = value
-        plan = dispatch.SavePlan()
-        if value.saves is not None:
-            change, rest = value.saves
-            if change.unknown:
-                return dispatch.Evaluation(contracts.Result("deny", "partial", "failed", reason=value.reason))
-            changed, counted = mutations(change)
-            plan = dispatch.SavePlan(changed, bool(counted.patterns), helper=helper, recheck=
-                (lambda: mutations(change)[0]) if counted.patterns or helper else None)
-            value = rest
-        # Resolve the toolkit's existing, session-bound shadow policy exactly
-        # once. A later shadow pass must not relax a refused preservation.
+        # Resolve the toolkit's existing, session-bound shadow policy exactly once.
         shadow_options = {"readonly": True} if preview else {}
         value = engine.shadow(codes.classify(value), str(project), req.session_id,
                               _legacy.telemetry if _legacy else "", audit, now=_legacy.now if _legacy else None,
@@ -126,31 +110,15 @@ def check(action, project, *, transcript="", deadline=None, local_restrictions=(
         else:
             result = contracts.Result(value.decision, value.status, reason=value.reason,
                                       warnings=(value.context,) if value.context else ())
-        if not preview:
-            plan = local_policy.supplement_native_backups(action, project, plan, profile, helper=helper, deadline=deadline)
-            plan = local_policy.supplement_controlled(action, project, plan, profile, deadline)
-            plan = local_policy.supplement_shell_scope(action, project, plan, profile, transcript, deadline)
-        save_plan[0] = plan
-        return dispatch.Evaluation(result, plan)
+        return dispatch.Evaluation(result, dispatch.SavePlan())      # never a save to preserve (4.1)
 
-    def preview_restriction(_action):
-        local_surface = action.surface in ("files", "shell", "mcp") and not (
-            action.surface == "files" and not any(op != "read" for op in action.operations))
-        if local_surface and local_policy.registration(project) is not None:
-            return contracts.Result("deny", "partial", reason=
-                "PREVIEW ONLY: installed local policy workers are not read-only qualified; use normal check for exact scope (it may write runtime state/backups).")
-        return contracts.Result(evaluation="evaluated")
-
-    restrictions = ((preview_restriction,) if preview else
-                    (local_policy.restriction(project, deadline, lambda: save_plan[0]), *local_restrictions))
-    outcome = dispatch.Dispatcher(project, profile, policy, restrictions).pre(action, transcript, deadline,
-                                                                          preserve=not preview)
+    outcome = dispatch.Dispatcher(project, profile, policy, tuple(local_restrictions)).pre(
+        action, transcript, deadline, preserve=not preview)
     if preview:
         return replace(outcome, result=replace(outcome.result, warnings=outcome.result.warnings +
-            ("PREVIEW ONLY: no operation is authorized; no backup, receipt or runtime state was written",))), None
+            ("PREVIEW ONLY: no operation is authorized; no receipt or runtime state was written",))), None
     result = outcome.result
-    # Ordinary config/script snapshots remain non-blocking and distinct from
-    # the permanent save preservation that has already decided this call.
+    # Ordinary config/script snapshots remain non-blocking.
     value = Verdict(result.decision, result.reason, "\n".join(result.warnings),
                     "partial" if result.evaluation == "unguarded" else result.evaluation, last[0].code)
     side = (engine.side_effects(req, str(project), audit, value, lambda: roots, deadline)
@@ -159,8 +127,6 @@ def check(action, project, *, transcript="", deadline=None, local_restrictions=(
         result = replace(result, evaluation="partial")
     if _legacy:
         _legacy.verdict = side
-    if outcome.transactions:
-        audit.log("portable-pre-tool", "SAVE-BACKUP", "verified neutral transactions: " + ", ".join(outcome.transactions))
     if result.decision in ("deny", "ask"):
         audit.log("portable-pre-tool", "REFUSED", result.reason)
     count = telemetry.Telemetry(project).record(action, "pre", result, source="Skyrim portable profile")
@@ -213,29 +179,6 @@ def legacy_pre_tool(req, project, roots_fn, audit, telemetry_path="", now=None, 
     outcome, count = check(action, project, transcript=req.transcript_path, deadline=deadline, _legacy=context)
     result = outcome.result
     answer = context.verdict
-    if result.preservation == "verified" and value.saves is not None:
-        change, _rest = value.saves
-        counted = saves.count(change)
-        note = saves._render("S-SAVE-BACKUP", (("file", saves._phrase([pair.stem for pair in saves._existing(counted)])),
-                                               ("op", saves.NOTE_BEFORE)))
-        answer = saves._with_note(answer, note)
-        audit.rule("portable-pre-tool", "S-SAVE-BACKUP", "allow", note)
-        if value.decision == "deny":
-            audit.log("portable-pre-tool", "SAVE-APPROVED", "canonical typed grant verified; saves preserved before permission")
-    elif result.decision == "deny" and result.preservation == "required":
-        first = value.reason.split("\n", 1)[0] if value.reason else (
-            "Blocked: this save change needs the user's typed SAVE_ACCESS_APPROVAL.")
-        reason = first + "\n" + rules.RULES["S-SAVE-APPROVAL"]["template"].split("\n", 1)[1]
-        if req.agent not in ("claude", "codex") or not req.session_id:
-            reason = first + "\nThis host/session has no qualified approval reader; bulk changes remain refused (ADAPTING.md)."
-        answer = answer._replace(code=codes.rule_code("S-SAVE-APPROVAL"),
-                                 reason=reason)
-    elif result.preservation == "failed":
-        # An unresolved save is a policy refusal with its original explanation,
-        # not a failed attempt to copy already identified save bytes.
-        if not (value.saves is not None and value.saves.change.unknown):
-            reason = saves._render("S-SAVE-BACKUP-FAILED", (("file", "the saves"), ("op", result.reason)))
-            answer = answer._replace(code=codes.rule_code("S-SAVE-BACKUP-FAILED"), reason=reason)
     if result.evaluation == "unguarded" and not telemetry.announce(count):
         answer = answer._replace(context="")
     return codes.classify(answer)

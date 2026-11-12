@@ -1,10 +1,9 @@
-"""The PostToolUse save sentinel (role `save-sentinel`): a save changed with no backup first, whatever changed it.
+"""The PostToolUse save sentinel (role `save-sentinel`): a save changed or removed, whatever changed it.
 
-The pre-call save rules (saves.py) see what a call NAMES. A save changed by code that builds its path at run time
-(`python fix.py`) is invisible to them -- saves.py's KNOWN LIMITS. This role closes that gap after the fact: it hands
-the save folders to the shared sentinel (modding_harness/sentinel.py), which compares them with the previous look
-and reports every .ess/.skse modified or removed without a committed backup in the permanent store since then.
-It lists and stats only, and never blocks (a post-call hook cannot undo the call).
+No rule decides on a save before a call (4.1; tools/save_vault.py keeps every version instead). This role says what
+changed after the fact: it hands the save folders to the shared sentinel (modding_harness/sentinel.py), which compares
+them with the previous look and reports every .ess/.skse modified or removed since then (one already in the 4.0
+permanent store is not repeated). It lists and stats only, and never blocks (a post-call hook cannot undo the call).
 
 Watched: every existing Saves folder the game may read (each declared config dir, Documents -- from the environment
 and, on Windows, as the OS reports it -- / My Games / every game folder, and each game folder's INI sLocalSavePath
@@ -231,7 +230,7 @@ def lock_notes(project, state, before, profile, now):
 
 
 def report_text(project, roots, env, now=None):
-    """(text for the agent, raise to the user?) -- ('', False) when nothing changed without a backup. A look that fails
+    """(text for the agent, raise to the user?) -- ('', False) when no save changed. A look that fails
     says so, once an hour: the wrapper discards a crash, and the user was told any save change is reported."""
     now = time.time() if now is None else now
     try:
@@ -281,8 +280,9 @@ def _look(project, roots, env, now):
     state["noted"] = standing
     text = sentinel.describe(report._replace(unbacked=raised))
     if raised:
-        text += ("\nThe save rules did not back these up. If a command or script you ran did this, tell the user now; "
-                 "a removed file may be in the Recycle Bin. Restore points: tools/skyguard.sh snapshot list --kind save")
+        text += ("\nIf a command or script you ran did this and it was not meant, tell the user now. The save vault keeps "
+                 "every settled version: python tools/save_vault.py status <SAVE>, then restore <SAVE> (dry run first). "
+                 "A removed file may also be in the Recycle Bin.")
     if quiet:
         lines = ["SAVE SENTINEL: {} save file(s) changed while the game was running or before it last exited, so it may be "
                  "the game itself saving:".format(len(quiet))]
