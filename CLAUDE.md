@@ -216,8 +216,6 @@ names, resolve against the reported working directory; names built at run time r
 - DevBench `smp reset` (measured to crash a large load order), by MCP, `curl` or `devbench-cli.sh`
 - Decoded text run as commands (`base64 -d | bash`), which the guard cannot read
 - `sed -i` without `-b` on a file in the install, config or MO2 folder (it makes CRLF LF): use `sed -i -b`
-- **More than two saves changed at once**, or saves named by a wildcard, until the user types the
-  `SAVE_ACCESS_APPROVAL` line `check --preview` prints (skill `skyrim-save`)
 - A command the guard cannot read: empty or not text ("GUARD INERT"), or unparseable while it contains
   a deletion and names a protected folder -- it refuses rather than shrugs
 
@@ -231,20 +229,21 @@ names, resolve against the reported working directory; names built at run time r
   file directly in the game folder (its exe and dlls, `openvr_api.dll`, loader INIs)
 - A decompiler writing its output into the install; a backslash path in a `sed` replacement
 - AutoMod write commands without `--dry-run`
-- Changing one or two saves (a save and its `.skse` are one): both are backed up, verified, first;
-  a failed backup refuses
 
 Naming a plugin or INI in a read-only command is silent: notes fire on the program that writes.
 
-### ASKS THE USER -- five rules
+### ASKS THE USER -- four rules
 - git discarding uncommitted changes in a protected folder (`checkout -- x`, `restore`, `reset --hard`)
-- an unnamed program (`$R`) given a save
 - an unnamed program, an eval of a variable, or awk system() given a protected path
 - `lock disable` (file lock off for good), and `snapshot restore --in-place` or
   `restore-from-backup.sh --restore` (writes over live files)
 
 Few prompts by design: a guard that prompts on routine work is approved by reflex
 (`docs/safety-philosophy.md`). **Check the guards are alive: `bash tools/hook-canary.sh`.**
+
+### Saves: no rule; the save vault keeps every version
+`python tools/save_vault.py status <SAVE>` lists kept versions; `restore` (dry run without `--apply`).
+**Session line says NOT RUNNING: tell the user.** A whole `Saves` folder stays refused. `docs/save-vault.md`.
 Coverage and gaps: `docs/guard-coverage.md`.
 
 ### The file lock and the guards' own state

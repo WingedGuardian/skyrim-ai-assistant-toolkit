@@ -1,8 +1,8 @@
 # Reviewed upgrade for installs with their own hook handlers
 
 > Most installs do not need this page: follow "How do I update the toolkit?" in [README.md](../README.md). This
-> page is for an install that has its own pre-tool hook handlers or a personal save policy (for example a
-> `.claude/hooks/protect-save-access.py` you wrote), which extracting a new version over the install would replace.
+> page is for an install that has its own pre-tool hook handlers (for example a `.claude/hooks/protect-save-access.py`
+> you wrote), which extracting a new version over the install would replace.
 
 The commands below are subcommands of the NEW toolkit's entry, run from the folder you unpacked it into, with
 `--installed-root` naming your Skyrim folder. `<new folder>` is the zip's one inner folder,
@@ -21,53 +21,14 @@ trees:
 cd "<new folder>" && python -c "import hashlib,json,pathlib; r=pathlib.Path('.'); print(json.dumps({'v':1,'files':{p.relative_to(r).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(r.rglob('*')) if p.is_file()}}))" > "<scratch folder>/candidate.json"
 ```
 
-## Personal save policies and the reviewed upgrade
+## Personal save policies (retired in 4.1)
 
-An existing installed `protect-save-access.py` is a local policy, never a
-replaceable toolkit default. Portable mutations refuse until it is registered
-in `.modding-agent-harness/local-policies.json` as version 1, kind
-`legacy-skyrim-save-guard-v1`, its exact installed relative path, and
-its full SHA-256; see [native hook formats](#native-hook-formats) below.
-The bridge runs only its pure `decide` entry before permanent
-preservation. Changed bytes, a crash, output, or a missed deadline refuse the
-call. It cannot grant bulk approval or bypass game rules. Its structured DevBench
-checks retain the local refusal of generic runtime save/load; the separately
-pinned controlled loader retains its own independent gate. For the exact reviewed
-policy/controller hashes, its prepare/load requests add complete preservation
-scope; request bytes, controller identity, policy and membership are rechecked
-after copying. These are fixture-qualified preflight checks, not a live controller
-or runtime-saving qualification. Legacy backup and approval decisions must be
-covered by the portable save plan, including logical pair identities, operations,
-bulk thresholds and wildcard membership rechecks. The exact reviewed source can
-add finite shell requirements omitted by the game parser, including the legacy
-restore helper and suffixed backup writes. Qualified transfer roles distinguish a
-move source from a written destination. Requirements and membership are rechecked
-after preservation. These additions cannot relax an independent game-policy denial.
-For that reviewed policy, an unresolved helper may use one unambiguous canonical
-human declaration binding the current session, full command SHA-256, operation,
-logical-save count and every absolute pair-member path. Include an absent co-save
-too. Even one declared save requires this grant; it is read again after verified
-preservation. The human declaration specifies the opaque command's intended
-scope; it does not prove what its implementation will do. An incomplete pair,
-ambiguous declarations, an unknown approval reader or changed membership refuses.
-Legacy basename/short-hash grants and caller-supplied provenance cannot supply a
-preservation plan. Without qualified evidence the helper refuses before backup.
-Fresh installations
-without that personal policy do not acquire it. Registration is part of a
-reviewed upgrade, never inferred from a hook trust record.
-Keep the existing parallel handler active until the complete replacement,
-including any controlled loader and helper routes in use, is qualified. The
-profile supports `upgrade-stage --integrate-local-policy` for the exact reviewed
-Windows policy, wrapper and native groups. It needs the complete candidate guard
-runtime and both destination-rendered native definitions. Unknown source versions,
-changed matcher/timeout/Windows/async fields, unrelated local pre-handlers and an
-unqualified existing registration refuse the proposal. The wrapper permits only
-its documented literal interpreter-path and UTF-8/line-ending normalization.
-All policy/helper sources and unrelated settings/post-handlers are retained.
-Every proposed file needs an explicit `reviewed_settings` choice; application
-reproduces the proposal from retained bytes and binds every required runtime file.
-Runtime is published before registration, then native definitions. A staged review
-changes no installed file and establishes no native host trust or interception.
+Since 4.1 no save policy is consulted: the save vault keeps every version of every save
+([save-vault.md](save-vault.md)), so a personal save guard such as an installed
+`protect-save-access.py` is neither registered nor read. An upgrade keeps its files as local files, untouched;
+`.modding-agent-harness/local-policies.json` is no longer read, and `upgrade-stage --integrate-local-policy` refuses
+("this profile provides no qualified local-policy migration"). If the personal guard is still registered as a native
+pre-tool handler, it is an unresolved handler below: remove its registration yourself, or keep the file kept.
 
 `upgrade-preview --installed-root DIR --candidate FILE [--previous FILE]` compares version 1 inventories
 (`{"v":1,"files":{"relative/path":"sha256"}}`) without writing anything.
@@ -147,31 +108,6 @@ review before claiming enforcement.
 
 These are native configuration formats for Claude Code and Codex, independent of the agent performing the
 upgrade.
-An installed `.claude/hooks/protect-save-access.py` is user policy. Its optional
-registration at `.modding-agent-harness/local-policies.json` has exactly these
-fields; replace the descriptive SHA placeholder with the full source digest:
-
-```json
-{
-  "v": 1,
-  "kind": "legacy-skyrim-save-guard-v1",
-  "path": ".claude/hooks/protect-save-access.py",
-  "sha256": "FULL_SHA256_OF_THE_RETAINED_SOURCE"
-}
-```
-
-Registration alone does not qualify retiring its parallel native handler.
-Keep it until controlled-load, helper and transfer routes have passed the
-replacement qualification described above.
-
-The exact reviewed policy's controlled request scopes and canonical declared
-helper scopes have fixture qualification. Other policy revisions remain
-restrictive until qualified. This does not change host trust, execute the
-controller, or establish that removing the native handler is safe. A declaration
-for an opaque helper requires full absolute pair paths, operation, logical count,
-current session and full command hash from a qualified human reader; it never
-comes from tool arguments or agent-authored provenance.
-
 `--owned-pre-groups FILE` reads a versioned object whose `files` maps
 `.claude/settings.json` and/or `.codex/hooks.json` to lists of complete verified
 previous `PreToolUse` groups. Each group must match in full, including matcher,
@@ -184,12 +120,3 @@ For an existing native definition, replacing it uses an explicit
 `.claude/settings.local.json`. Unresolved pre-tool handlers in any reviewed
 configuration refuse application even when that file is kept. Unknown post-tool
 handlers and unrelated settings remain in the merged proposal.
-
-For the exact reviewed Windows policy, `upgrade-stage --integrate-local-policy`
-can stage a reproducible proposal containing the source-hash registration and
-both native definitions. It validates complete groups, retains every private
-source/helper and requires the full candidate guard runtime. It also reviews
-local settings; unknown pre-handlers remain a refusal. Each proposed file needs
-an explicit `reviewed_settings` choice. See the section above for the retained-handler
-and native host qualification requirements. This option performs no deployment
-or host trust changes.

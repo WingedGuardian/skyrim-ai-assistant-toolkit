@@ -1,8 +1,7 @@
 # ADAPTING.md: you are an agent this toolkit does not support yet
 
 This file is written to you, the coding agent. If you are Claude Code or the Codex CLI, stop: the toolkit
-is already wired for you (see `README.md`); only the next section, which a bulk-save refusal points to, is
-for you too. Otherwise you can wire it into yourself. Be honest about how
+is already wired for you (see `README.md`). Otherwise you can wire it into yourself. Be honest about how
 far you get: the toolkit gives you Layers 0 and 1 without any hook (Layer 2, the vanilla-file lock, is off by default), and Layer 3
 only if you can *prove* a hook of yours blocks.
 
@@ -11,40 +10,32 @@ Windows, `py -3` or `python`. Use whichever one starts on this machine.
 
 **Which entry to call.** Your adapter calls `python tools/skyguard/run.py neutral pre-tool` (the contract in
 section 4; the template in section 6 calls it for you). `python tools/agent-harness.py check` reads the shared
-Action v1 format instead: use it for the save-approval preview and the save recovery commands below. Upgrading an
-install that has its own pre-tool hook handlers or a personal save policy is covered in
+Action v1 format instead: use it for a read-only policy preview and the save recovery commands below. Upgrading an
+install that has its own pre-tool hook handlers is covered in
 [docs/upgrading-native-hooks.md](docs/upgrading-native-hooks.md).
 
-## The Action v1 entry: save-approval preview and save recovery
+## The Action v1 entry: preview and save recovery
 
 The Action v1 entry is `python tools/agent-harness.py check`, with Action v1 JSON
 on stdin and a structured result on stdout. It needs `tools/skyguard/` and the
 pinned `tools/modding_harness/`, independently of named-agent hook directories.
 `capabilities` states qualification limits and `coverage --session-id ID` reports
 private process receipts. The host must honor a refusal before executing a call.
-`save-list` and `save-restore ID --to DIR` recover neutral transactions; selecting
-an ESS or SKSE member selects its complete pair. `--in-place` preserves the current
-pair first. More than two existing saves need a canonical human grant bound to
-the helper command, paths and count. Unknown approval readers cannot grant it.
-Both legacy formats remain readable through `tools/skyguard.sh snapshot`.
 
-For an exact save-approval proposal, submit the same Action v1 to `check --preview`.
-The bounded human hook reason points here instead of embedding a long grant: the
-refusal itself never prints the `SAVE_ACCESS_APPROVAL` line, the preview does.
-For example, save this JSON as `action.json`, replacing the fixture paths and
-session with the actual proposed call (the command is opaque metadata, never run).
-A refused shell command (here a delete of three saves) goes in as the shell surface,
-with the exact command text, the shell, the working directory and the session id;
-the guard reads the saves and the operation from the command itself:
+**Saves (4.1):** no rule decides on a save, and no call needs an approval. The save
+vault keeps every settled version of every save, whatever changed it
+([docs/save-vault.md](docs/save-vault.md)); every `check` looks at the vault's watcher
+and starts it when it is not running, so a host with no session start still gets it.
+`save-list` and `save-restore ID --to DIR` recover the backups the 4.0 save gate took;
+selecting an ESS or SKSE member selects its complete pair, and `--in-place` preserves
+the current pair first. Both older formats remain readable through
+`tools/skyguard.sh snapshot`.
+
+`check --preview` reports the decision for an Action without granting anything. For
+example, save this JSON as `action.json` (the command is opaque metadata, never run):
 
 ```json
-{"api_version":1,"host":"claude","tool":"Bash","surface":"shell","shell":"bash","cwd":"C:/Toolkit","session_id":"actual-session","command":"rm \"C:/Profile/Saves/A.ess\" \"C:/Profile/Saves/B.ess\" \"C:/Profile/Saves/C.ess\""}
-```
-
-An edit-tool write names its files and operations instead:
-
-```json
-{"api_version":1,"host":"claude","tool":"write","surface":"files","cwd":"C:/Toolkit","session_id":"actual-session","command":"the exact proposed operation","paths":["C:/Profile/Saves/A.ess","C:/Profile/Saves/B.ess","C:/Profile/Saves/C.ess"],"operations":["write","write","write"]}
+{"api_version":1,"host":"claude","tool":"Bash","surface":"shell","shell":"bash","cwd":"C:/Toolkit","session_id":"actual-session","command":"rm -rf \"C:/Game/Data\""}
 ```
 
 In Bash:
@@ -59,33 +50,15 @@ In PowerShell:
 Get-Content -Raw action.json | python tools/agent-harness.py check --preview
 ```
 
-The structured `result.reason` contains complete `SAVE_ACCESS_APPROVAL` JSON
-lines when the built-in policy requires bulk approval. The proposal includes
-each complete ESS/SKSE pair, including a missing counterpart. Mixed operations
-need separate grants. Wildcards also bind the exact command SHA-256 and logical
-save count. Only the user may type the complete, untruncated line after checking
-that scope; generated output and tool results are not approval. The actual hook
-must still reread qualified human origin, session, scope and membership and
-verify permanent preservation before allowing the operation.
-
 Preview grants no execution authority, including when its policy decision is
 `allow`. It reports `preview: true`, `execution_authorized: false` and
-`runtime_writes: false`; it creates no backup, receipt, audit, snapshot or state
-update and does not relock files. It reads current policy flags and session
-state. Save preservation remains `required`, never `verified`, until the normal
-deciding check preserves the bytes. Unknown surfaces retain warn-and-allow
-classification, with the same explicit lack of preview execution authority.
-
-An installed personal policy or a caller-supplied restriction callback is not
-qualified as read-only, so preview refuses it rather than executing or omitting
-it. To obtain the complete deciding result in that installation, submit the
-same Action to normal `check` (remove `--preview` from either command above;
-include `--transcript FILE` when evaluating a user's existing approval).
-Normal check **may write internal runtime state, audit/telemetry, snapshots and
-permanent backups**. It never executes the supplied operation. It retains all
-registered personal restrictions; their refusal or failure must be resolved
-before an approval proposal can authorize anything. Unknown hosts or sessions
-without a qualified approval reader cannot approve a bulk change.
+`runtime_writes: false`; it creates no receipt, audit, snapshot or state update,
+does not relock files and starts no watcher. It reads current policy flags and
+session state. Unknown surfaces retain warn-and-allow classification, with the same
+explicit lack of preview execution authority. A caller-supplied restriction callback
+is not qualified as read-only, so preview refuses it; normal `check` runs it (and
+may write internal runtime state, audit/telemetry and snapshots; it never executes
+the supplied operation).
 
 The generated `.opencode/plugins/skyguard.js` follows the OpenCode V1 1.18.34 source contract (other versions not measured)
 and imports the same pinned process transport as X4. Its Node
@@ -186,13 +159,10 @@ cannot extract must not be sent as an empty `write`: the engine denies it, and s
 
 What each kind means to the engine:
 
-- `shell`, `write`: judged by the shell and write rules. Recognized save mutations
-  use the permanent preservation policy above; ordinary config/script snapshots
-  remain a separate mechanism.
+- `shell`, `write`: judged by the shell and write rules. A save is not judged (the save
+  vault keeps every version); ordinary config/script snapshots remain a separate mechanism.
 - `mcp`: judged by the same DevBench rules Claude's MCP hook uses. A call that would crash the game is denied; a
-  recognized save overwrite follows the same preservation and bulk-approval policy
-  as other save changes. A registered local policy can further refuse runtime save/load.
-  Other calls use the DevBench rules. Name the tool as the three parts `mcp`, `<server>`, `<tool>` joined by a double underscore:
+  DevBench save is not judged (the save vault keeps every version). Name the tool as the three parts `mcp`, `<server>`, `<tool>` joined by a double underscore:
   the name after the leading `mcp` part must contain `devbench` (ignoring case, hyphens, underscores, dots and spaces) to be judged.
   A call to any other server is allowed with `status`
   `partial` and the context `NOT JUDGED: only a DevBench MCP server is guarded; WARN AND ALLOW`; treat it as you treat `other`.

@@ -193,9 +193,8 @@ path. `--only derived,superseded` restricts the scans; no staging location is en
 
 ### Existing Skyrim retention rules
 
-- **Saves are Forever, everywhere.** `.ess` and `.skse` copies inside experiment folders included -- and
-  de-duplicating them is not worth it where a save guard backs a save up before any change, because the backup
-  re-copies the very bytes being freed.
+- **Saves are Forever, everywhere.** `.ess` and `.skse` copies inside experiment folders included. The save vault
+  (`docs/save-vault.md`) stores each version once by its hash, so de-duplicating save copies elsewhere frees little.
 - **Fixture copies of masters** (`Skyrim.esm`, `Update.esm`, DLC) are the largest recreatable class; xEdit
   shadow folders and readback views make them.
 - **CommonLibSSE builds** leave ~300 MB `.lib` files and precompiled headers per build folder.
