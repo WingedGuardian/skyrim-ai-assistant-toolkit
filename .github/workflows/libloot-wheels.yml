@@ -53,7 +53,8 @@ jobs:
       - name: Build
         shell: bash
         run: |
-          python -m pip install "maturin==$MATURIN"
+          python -m pip install --only-binary=:all: --require-hashes -r toolkit/tools/libloot/build-requirements.lock
+          maturin --version | grep -q " $MATURIN\$" || { echo "::error::lock file maturin != MATURIN ($MATURIN)"; exit 1; }
           cd libloot
           maturin build --release --locked -m python/Cargo.toml -i python --out ../dist
       - name: Record

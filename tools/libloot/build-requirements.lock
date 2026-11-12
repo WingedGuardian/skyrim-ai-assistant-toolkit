@@ -1,0 +1,11 @@
+# The build tool for libloot's Python wheel (.github/workflows/libloot-wheels.yml and tools/libloot/build.py).
+# Install: python -m pip install --only-binary=:all: --require-hashes -r tools/libloot/build-requirements.lock
+# Hashes are PyPI's published sha256 for each wheel (maturin 1.16.0 for Windows x64, Linux x86_64, macOS; tomli for
+# maturin on Python 3.10).
+maturin==1.16.0 \
+    --hash=sha256:9d43a2adf51a2794e907a8f7dbad06eb114d5edb0909c73c1fa9040f15e584e9 \
+    --hash=sha256:837db2f4d93d4899c3ac393fb3cc9eebf35b6002336e5d574f4a4fb6c49fe283 \
+    --hash=sha256:2216d731c9324869d3bff72c0c73009bb6e640b3fa7d340174ae70dc874d1d9f \
+    --hash=sha256:131fcc17ddb3ccc48aa183d2172ebf994c322b858e1b9694fb8744d783df66f6
+tomli==2.5.0 ; python_full_version < "3.11" \
+    --hash=sha256:32a7b79ac57a2e83670ce329ccf675798bc5a2094783a63676866b70503f2e2b
