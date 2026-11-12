@@ -12172,3 +12172,36 @@ MUTATIONS += [pytest.param("tools/save_vault.py", anchor, replacement, "tests/te
     ('                            locks.enter_context(exclusive(fresh.root / "status" / "watch.lock", 0))',
      '                            pass', 'test_a_vault_that_recovers_on_refresh_takes_its_lock', 'recovered-vault-locked'),
 ]]
+
+# LOOT advisor (4.1): one twin per guarded clause of tools/loot_advisor.py and tools/libloot/.
+_LA = "tests/test_loot_advisor.py::"
+MUTATIONS += [pytest.param(path, anchor, replacement, _LA + test, id="la-" + name)
+              for path, anchor, replacement, test, name in [
+    ("tools/loot_advisor.py", "    proposed = list(g.sort_plugins(active))\n",
+     "    proposed = list(g.sort_plugins(active))\n    g.set_load_order(proposed)\n",
+     "test_the_advice_never_writes_the_load_order", "writes-the-order"),
+    ("tools/loot_advisor.py", "        if version <= readable and (best is None", "        if (best is None",
+     "test_the_newest_branch_this_libloot_reads_is_chosen", "branch-too-new"),
+    ("tools/loot_advisor.py", "    if not offline:\n", "    if True:\n", "test_offline_makes_no_network_call", "offline-fetches"),
+    ("tools/loot_advisor.py", "old.name not in (store.name, previous)", "old.name != store.name",
+     "test_the_cache_keeps_the_current_and_previous_masterlist_only", "cache-keeps-previous"),
+    ("tools/loot_advisor.py", "            if not present(_name(r)):\n", "            if True:\n",
+     "test_masterlist_messages_dirty_plugins_requirements_and_incompatibilities_are_reported", "requirement-present"),
+    ("tools/loot_advisor.py", "            if present(_name(c)):\n", "            if True:\n",
+     "test_masterlist_messages_dirty_plugins_requirements_and_incompatibilities_are_reported", "incompatible-active"),
+    ("tools/loot_advisor.py", "    if missing:\n        raise ValueError(\"active plugins not on disk",
+     "    if False:\n        raise ValueError(\"active plugins not on disk",
+     "test_an_active_plugin_missing_from_disk_is_could_not_check", "missing-plugin"),
+    ("tools/libloot/libloot_loader.py", "    if want is None:\n", "    if False:\n",
+     "test_an_unlisted_or_changed_wheel_is_refused", "unlisted-wheel"),
+    ("tools/libloot/libloot_loader.py", "    if got != want:\n", "    if False:\n",
+     "test_an_unlisted_or_changed_wheel_is_refused", "changed-wheel"),
+    ("tools/libloot/libloot_loader.py", "                if dest != part.resolve() and part.resolve() not in dest.parents:\n",
+     "                if False:\n", "test_a_wheel_member_outside_its_folder_is_refused_and_nothing_is_left", "zip-escape"),
+    ("tools/libloot/libloot_loader.py", "    verify_extracted(path, target)\n", "    pass\n",
+     "test_a_changed_extracted_file_is_refused", "extracted-reverified"),
+    ("tools/libloot/libloot_loader.py", "lambda plat: plat == SHIPPED_PLATFORM", "lambda plat: True",
+     "test_a_shipped_wheel_for_another_platform_is_not_used", "shipped-platform"),
+    ("tools/libloot/build.py", "            if not f.is_file() or _sha256(f) != want:\n", "            if not f.is_file():\n",
+     "test_record_refuses_an_artifact_that_does_not_match_its_run", "record-checks-hash"),
+]]

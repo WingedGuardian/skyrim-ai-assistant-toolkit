@@ -8,10 +8,15 @@
  },
  "build": {
   "workflow": ".github/workflows/libloot-wheels.yml",
-  "run": null,
+  "run": "43279706414",
   "rust": "1.99.1",
   "maturin": "1.16.0",
-  "pythons": ["3.10", "3.11", "3.12", "3.13"],
+  "pythons": [
+   "3.10",
+   "3.11",
+   "3.12",
+   "3.13"
+  ],
   "platform": "win_amd64"
  }
 }
