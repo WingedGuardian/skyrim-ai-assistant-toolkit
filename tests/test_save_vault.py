@@ -517,7 +517,9 @@ def test_a_locked_save_is_kept_by_copy(bed, monkeypatch):
     def no_link(*a, **k):
         raise PermissionError(5, "Access is denied")
     monkeypatch.setattr(save_vault.os, "link", no_link)
-    [e] = v.sweep()["captured"]
+    out = v.sweep()
+    assert len(out["captured"]) == 1, out                 # the sweep's own errors, if any, say why (Linux CI)
+    [e] = out["captured"]
     assert e["ess"]["size"] == 300 and list((bed["root"] / "staging-links").iterdir()) == []
 
 
@@ -533,7 +535,8 @@ def test_another_volume_waits_while_the_game_runs(bed, monkeypatch):
     out = v.sweep()
     assert out["captured"] == [] and out["deferred"] == 1 and out["errors"] == []
     bed["state"]["busy"] = False
-    assert len(v.sweep()["captured"]) == 1
+    out = v.sweep()
+    assert len(out["captured"]) == 1, out
 
 
 def test_one_pair_that_cannot_be_kept_does_not_starve_the_rest(bed, monkeypatch):
@@ -773,7 +776,8 @@ def test_another_volume_is_copied_never_linked(bed, monkeypatch):
     monkeypatch.setattr(Vault, "_same_volume", lambda self, folder: False)
     linked = []
     monkeypatch.setattr(save_vault.os, "link", lambda *a: linked.append(a))
-    assert len(v.sweep()["captured"]) == 1 and linked == []
+    out = v.sweep()
+    assert len(out["captured"]) == 1 and linked == [], out
 
 
 def test_deferred_pairs_do_not_starve_a_same_volume_folder(tmp_path):
