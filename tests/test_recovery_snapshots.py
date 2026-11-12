@@ -87,6 +87,13 @@ class Install:
         recovery.run(str(self.game), command, False, self.audit, self.roots, cwd=cwd, shell=shell, now=now,
                      deadline=deadline, env={})
 
+    def keep(self, name):
+        """A verified backup of one save pair in the permanent store, as the 4.0 hooks took before a save change.
+        No hook takes one since 4.1 (tools/save_vault.py keeps every version); the backups already in a user's store
+        must stay listed, kept forever and restorable, which is what the tests using this hold."""
+        return save_store.backup_pairs(self.game, self.audit,
+                                       [(self.saves / (name + ".ess"), self.saves / (name + ".skse"))], "test backup")
+
     def change(self, command, cwd="", shell="bash", deadline=None):
         """A save change as the deciding hook makes it: the rules, then the LIVE dispatcher (approval, backup)."""
         v = shell_rules.decide(command, self.roots, self.audit, cwd=cwd, shell=shell, env={})
@@ -399,9 +406,9 @@ def test_a_snapshot_whose_earlier_state_line_is_gone_is_refused(inst):
 
 def test_old_save_snapshots_are_kept_forever(inst):
     """The save policy: save backups are never pruned, however old (disk space is the user's call)."""
-    inst.change("bash tools/resaver-cli.sh clean Quick.ess --apply", cwd=str(inst.game))
+    inst.keep("Quick")
     put(inst.saves / "Quick.ess", b"rewritten")
-    inst.change("bash tools/resaver-cli.sh clean Quick.ess --apply", cwd=str(inst.game))
+    inst.keep("Quick")
     recovery.prune(inst.store, time.time() + 3650 * DAY, inst.audit)
     assert [e["sha256"] for e in inst.lines() if e["src"].endswith("Quick.ess")] == \
         [sha(b"quick save bytes"), sha(b"rewritten")]

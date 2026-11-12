@@ -43,7 +43,8 @@ def test_posix_path_constructor_resets_to_a_later_absolute_part(monkeypatch, par
 def test_unproved_native_cli_flags_are_writes(arg):
     command = "resaverpp-cli x.ess " + arg
     assert shell_rules.resaver_native_direct(command, shellparse.parse(command, "cmd")) == "resaverpp-cli.exe"
-    assert decide(command, "cmd").decision == "deny"
+    v = decide(command, "cmd")
+    assert v.decision == "allow" and "resaverpp-cli.exe" in v.context     # a note since 4.1, not a refusal
 
 
 @pytest.mark.parametrize("command", ["resaverpp-cli x.ess --top 20", "resaverpp-cli --json info x.ess"])

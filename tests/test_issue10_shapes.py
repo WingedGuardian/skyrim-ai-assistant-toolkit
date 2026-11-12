@@ -72,8 +72,12 @@ def heredoc(body):
     return "python - <<'EOF'\n" + DOC + body + "EOF"
 
 
-def test_real_save_changes_are_still_refused(install):
+def test_the_saves_folder_itself_is_still_refused(install):
+    """4.1 (user ruling 2026-11-10): no rule decides on a save, the save vault keeps every version. The whole Saves
+    folder, everything in it at once, and the folder holding it still cannot be deleted or moved."""
     saves = install["saves"]
-    assert decide(install, 'rm "' + saves + '"/*.ess') == "deny"
-    assert decide(install, "python - <<'X'\nimport os\nos.remove(r'" + saves + "/Save1.ess')\nX") == "deny"
-    assert decide(install, "python - <<'X'\nimport shutil\nshutil.rmtree(r'" + saves + "')\nX") == "deny"
+    assert decide(install, 'rm "' + saves + '"/*.ess') == "allow"                  # saves by name pattern: the vault
+    for refused in ('rm -rf "' + saves + '"', 'rm -rf "' + saves + '"/*', 'mv "' + saves + '" /c/Temp/elsewhere',
+                    'rm -rf "' + saves.rsplit("/", 1)[0] + '"',
+                    "python - <<'X'\nimport shutil\nshutil.rmtree(r'" + saves + "')\nX"):
+        assert decide(install, refused) == "deny", refused

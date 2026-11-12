@@ -95,6 +95,14 @@ def live_enforce(v, game, roots, audit, transcript="", agent="claude", deadline=
                                     side_effects=False)
 
 
+def keep(inst, *stems):
+    """A verified backup of each named save pair in the permanent store, as the 4.0 hooks took before a save change.
+    The hooks take none since 4.1 (tools/save_vault.py keeps every version instead); the backups already in a user's
+    store must stay listed, kept forever and restorable, which is what the tests below hold."""
+    return save_store.backup_pairs(inst.game, inst.audit,
+                                   [(inst.saves / (s + ".ess"), inst.saves / (s + ".skse")) for s in stems], "test backup")
+
+
 @pytest.fixture
 def inst(tmp_path):
     return Inst(tmp_path)
@@ -170,11 +178,11 @@ def ops(v):
 # ================================================================ what counts as a save change (judge)
 
 
-def test_a_quoted_wildcard_over_saves_is_a_save_change_not_a_settings_delete(inst):
+def test_a_quoted_wildcard_over_saves_is_not_a_settings_delete(inst):
     """A quoted `*` is literal to bash, so the delete rules read the word literally (deletes.literal_abs); it is still a
-    save word, judged by the save policy (it needs approval), never refused as a delete of the settings folder."""
+    save word, and no rule decides on a save (4.1): never refused as a delete of the settings folder."""
     v = inst.shell('rm "' + inst.S + '/Save*.ess"')
-    assert v.decision == "deny" and v.reason.startswith("Blocked: this deletes 3 saves (Save1, Save2, Save3)")
+    assert v.decision == "allow" and v.reason == "", v
 
 
 @pytest.mark.parametrize("cmd,rid", [('rm -rf "{dir}"', "S-DEL-CONFIG"), ('mv "{dir}" /tmp/old', "S-MOVE-ROOT"),
@@ -246,7 +254,7 @@ def three(inst):
 
 
 def test_save_snapshots_are_never_pruned(inst):
-    inst.enforce(inst.shell("rm " + inst.p("Save1.ess")))
+    keep(inst, "Save1")
     store = inst.store().root
     later = recovery.time.time() + 3650 * recovery.DAY
     recovery.prune(store, later, inst.audit)
@@ -271,7 +279,7 @@ def _snap(inst):
 
 
 def test_a_restore_puts_both_files_of_the_pair_back_verified(inst, tmp_path):
-    inst.enforce(inst.shell("rm " + inst.p("Save1.ess")))
+    keep(inst, "Save1")
     sid = _snap(inst)
     (inst.saves / "Save1.ess").unlink()
     (inst.saves / "Save1.skse").write_bytes(b"changed")
@@ -286,7 +294,7 @@ def test_a_restore_puts_both_files_of_the_pair_back_verified(inst, tmp_path):
 
 
 def test_a_restore_refuses_a_damaged_backup_and_writes_nothing(inst, tmp_path):
-    inst.enforce(inst.shell("rm " + inst.p("Save1.ess")))
+    keep(inst, "Save1")
     sid, sha = _snap(inst), inst.saved()[0]["sha256"]
     (inst.store().root / "blobs" / sha).write_bytes(b"rot")
     import io
@@ -296,7 +304,7 @@ def test_a_restore_refuses_a_damaged_backup_and_writes_nothing(inst, tmp_path):
 
 
 def test_a_restore_that_does_not_verify_at_its_target_writes_nothing(inst, tmp_path, monkeypatch):
-    inst.enforce(inst.shell("rm " + inst.p("Save1.ess")))
+    keep(inst, "Save1")
     store, sha = inst.store().root, inst.saved()[0]["sha256"]
     real = backup._sha256
     monkeypatch.setattr(backup, "_sha256", lambda p: "0" * 64 if ".restore-part-" in str(p) else real(p))
@@ -307,7 +315,7 @@ def test_a_restore_that_does_not_verify_at_its_target_writes_nothing(inst, tmp_p
 
 
 def test_a_restore_of_a_pair_without_its_cosave_says_so(inst, tmp_path):
-    inst.enforce(inst.shell("rm " + inst.p("Single.ess")))
+    keep(inst, "Single")
     import io
     buf = io.StringIO()
     assert snapcli.cmd_restore(str(inst.game), _snap(inst), [], str(tmp_path / "r"), False, buf) == 0
@@ -315,7 +323,7 @@ def test_a_restore_of_a_pair_without_its_cosave_says_so(inst, tmp_path):
 
 
 def test_the_listing_names_each_pair_and_a_missing_cosave(inst):
-    inst.enforce(inst.shell("rm " + inst.p("Single.ess") + " " + inst.p("Save2.ess")))
+    keep(inst, "Single", "Save2")
     import io
     buf = io.StringIO()
     snapcli.cmd_list(str(inst.game), "save", buf)
@@ -323,11 +331,11 @@ def test_the_listing_names_each_pair_and_a_missing_cosave(inst):
     assert "Save2.ess + Save2.skse" in text and "Single.ess, no Single.skse" in text and "kept forever" in text
 
 
-# ================================================================ the hooks: backup happens in the deciding hook, first
+# ================================================================ the hooks take no save backup (4.1: the save vault)
 
 
 def test_the_snapshot_hook_no_longer_copies_saves(inst):
-    """Saves are backed up by the deciding hook only; the parallel snapshot hook copies the load order and INIs."""
+    """No hook backs a save up; the snapshot hook copies the load order and INIs only."""
     recovery.run(str(inst.game), "rm " + inst.p("Save1.ess"), False, inst.audit, inst.roots, env={})
     assert inst.saved() == []
 

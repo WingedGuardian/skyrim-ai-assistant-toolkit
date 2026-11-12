@@ -101,7 +101,7 @@ def test_opencode_uses_its_native_grammar_and_refuses_bad_known_payload(install)
     root, files = install
     data = {"v": 1, "tool": "edit", "args": {"filePath": str(files[0][0])}, "directory": str(root)}
     result = opencode.handle(json.dumps(data), root)
-    assert result["decision"] in ("allow", "advise") and "backup verified" in result["context"]
+    assert result["decision"] == "allow" and not result.get("context")     # 4.1: a save edit takes no hook backup
     data["args"] = {}
     result = opencode.handle(json.dumps(data), root)
     assert result["decision"] == "deny" and result["inert"]

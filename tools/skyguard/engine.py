@@ -312,11 +312,8 @@ NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SELF-STATE", "write.W-SELF-STA
 NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SAVE-STORE", "write.W-SAVE-STORE"))
 # User ruling 2026-10-31: only the user turns save locking off, so `guards off` does not open its switch either.
 NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SAVE-LOCK", "write.W-SAVE-LOCK"))
-# v4.0.0: a direct ReSaver Plus write is one the guard cannot back up first (it names no output the guard can read
-# reliably, and the GUI names none at all), so a `guards off` does not lift it either.
-NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-RESAVER-NATIVE-DIRECT",))
-# User ruling 2026-10-20: `guards off` is a lift the agent may take; it must not open the transcript the user's typed
-# save approval is read from.
+# User ruling 2026-10-20: `guards off` is a lift the agent may take; it must not open the agent's session transcript
+# (typed save approvals were read from it until 4.1; the transcript stays the user's record).
 NEVER_SHADOW = NEVER_SHADOW | frozenset(("shell.S-SELF-TRANSCRIPT", "write.W-SELF-TRANSCRIPT"))
 
 

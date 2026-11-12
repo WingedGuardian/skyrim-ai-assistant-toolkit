@@ -264,10 +264,11 @@ NEW_RESAVER = ("Blocked: ReSaver reset-havok --apply writes s.ess, which the gua
                "Give the save as a full path.")
 
 
-def test_rule16_refusal_drops_earlier_advice(tmp_path):
-    v = run("echo x >> plugins.txt; bash tools/resaver-cli.sh reset-havok s.ess --apply", tmp_path)
-    assert v.decision == "deny" and v.context == ""
-    assert v.reason == NEW_RESAVER
+def test_a_refusal_drops_earlier_advice(tmp_path):
+    advice = run("echo x >> plugins.txt", tmp_path)
+    assert advice.decision == "allow" and advice.context                     # the note the refusal below drops
+    v = run(f'echo x >> plugins.txt; rm -rf "{GAME}/Data"', tmp_path)
+    assert v.decision == "deny" and v.context == "" and v.reason.startswith("Blocked:")
 
 
 def _t4_rows():
@@ -393,11 +394,11 @@ def test_every_message_constant_equals_the_bash_text():
     assert consts == set(expected) | set(plan5), consts ^ (set(expected) | set(plan5))
 
 
-def test_ask_path_writes_the_ask_audit_line(tmp_path):
-    cmd = "bash tools/resaver-cli.sh reset-havok s.ess --apply"
-    run(cmd, tmp_path)
+def test_a_refusal_writes_its_audit_line(tmp_path):
+    v = run(f'rm -rf "{GAME}/Data"', tmp_path)
+    assert v.decision == "deny"
     log = (tmp_path / ".claude/backups/AUDIT_LOG.txt").read_text(encoding="utf-8")
-    assert "protect-bash DENY: " + NEW_RESAVER.split("\n")[0] in log
+    assert "protect-bash DENY: " + v.reason.split("\n")[0] in log
 
 
 def test_rule_trace_records_the_rule_id(tmp_path):
@@ -410,7 +411,7 @@ def test_rule_trace_records_the_rule_id(tmp_path):
     assert a.fired == [("S-WRITE-LOADORDER", "advise")]
     a = audit.Audit(str(tmp_path))
     shell_rules.decide("bash tools/resaver-cli.sh reset-havok s.ess --apply", r, a)
-    assert a.fired == [("S-RESAVER-APPLY", "deny")]
+    assert a.fired == []                         # 4.1: no rule decides on a save (the save vault keeps every version)
     a = audit.Audit(str(tmp_path))
     shell_rules.decide("", r, a)
     assert a.fired == [("S-INERT-NOCMD", "deny")]

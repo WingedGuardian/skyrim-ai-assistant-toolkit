@@ -367,12 +367,11 @@ def test_to_request_carries_cwd_raw(cwd):
 def test_run_judges_monitor_in_the_unknown_dialect(tmp_path):
     """Merge of Plans 4+5: Plan 4's to_request hard-coded shell="bash". Monitor names no dialect, so the engine must
     get "" (bash AND PowerShell, R5): the same python heredoc that is allowed as Bash asks as Monitor."""
-    cmd = "python - <<'EOF'\nprint('resaver-cli.sh reset-havok x.ess --apply')\nEOF"
+    cmd = "cat <<'EOF'\nreg delete \"HKLM" + chr(92) + "SOFTWARE" + chr(92) + "Bethesda Softworks" + chr(92) + "Skyrim VR\" /f\nEOF"
     p = claude.extract(json.dumps({"tool_name": "Monitor", "tool_input": {"command": cmd}}))
     assert claude.to_request(p, "shell").shell is None
     bash = _run("protect-bash", json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}}), tmp_path)
     mon = _run("protect-bash", json.dumps({"tool_name": "Monitor", "tool_input": {"command": cmd}}), tmp_path)
     assert json.loads(bash.stdout) == {}
-    # The save policy (2026-10-13): the ReSaver --apply the PowerShell reading sees names a save it cannot place (no
-    # cwd), so it cannot be backed up first -- refused (it used to ask).
+    # To bash the registry delete is here-document text; the PowerShell reading sees a command (S-REGISTRY).
     assert json.loads(mon.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"

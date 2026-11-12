@@ -19,11 +19,12 @@ REMOVED = frozenset({
     "S-LOADORDER-REF",      # Task 8: fired on READS of plugins.txt; a write is S-WRITE-LOADORDER
     "S-REDIRECT-INSTALL",   # Task 8: replaced by the S-WRITE-* rules, which fire on the program that writes
     "S-MOVE-INSTALL",       # Task 9 fix round 1: 107 of 107 hits in history were the user's deliberate deploys
+    "S-RESAVER-APPLY",      # 4.1 (user ruling 2026-11-10): no rule decides on a save; the save vault keeps every version
 })
 # (Not legacy ids, so not listed above; never reused. S-WRITE-SAVE and W-SAVE, the asks about a save write, went with
 # the 2026-10-13 save policy. That policy's own rules went with the save vault (4.1, user ruling 2026-11-10: no rule
 # decides on a save any more, tools/save_vault.py keeps every version instead): S-SAVE-BACKUP, S-SAVE-APPROVAL,
-# S-SAVE-UNKNOWN, S-SAVE-BACKUP-FAILED, S-SAVE-OPAQUE, S-RESAVER-APPLY, S-DEVBENCH-SAVE.)
+# S-SAVE-UNKNOWN, S-SAVE-BACKUP-FAILED, S-SAVE-OPAQUE, S-DEVBENCH-SAVE.)
 
 # DevBench console commands that are refused (Task 11, R14). DATA, compared on whitespace-split lower-case words, so the
 # entry is the WHOLE command: `smp reset` is listed, `smp reset <anything>` is not. The only command MEASURED to crash
@@ -304,8 +305,8 @@ RULES = {
         "legacy": False,
         "prefixes": [],
         "template": (
-        'Note: {file} run directly writes saves without the adapter\'s new-output checks; '
-        'bash tools/resaver-cli.sh with RESAVER_BACKEND=native has them.'
+        'Note: {file} run directly writes saves with no new-output check; '
+        'bash tools/resaver-cli.sh with RESAVER_BACKEND=native has that check.'
     ),
     },
     'S-EXTERNAL-OUT': {

@@ -122,7 +122,7 @@ def test_absent_script_restore_does_not_clobber_a_creator_at_publication(inst, m
 
 def test_list_shows_script_config_and_save_snapshots(inst):
     take_all(inst)
-    inst.change("bash tools/resaver-cli.sh clean Quick.ess --apply", cwd=str(inst.game))
+    inst.keep("Quick")
     rc, text = cli_run(inst, "list")
     assert rc == 0
     for sid in ids(inst, "scripts") + ids(inst, "config") + ids(inst, "save"):
@@ -164,7 +164,7 @@ def test_a_config_restore_is_the_state_at_that_snapshot_not_later(inst):
 
 
 def test_a_save_restore_gives_back_the_save_and_its_cosave(inst):
-    inst.change("bash tools/resaver-cli.sh clean Quick.ess --apply", cwd=str(inst.game))
+    inst.keep("Quick")
     put(inst.saves / "Quick.ess", b"what resaver wrote")
     out = inst.game.parent / "out"
     rc, text = cli_run(inst, "restore", ids(inst, "save")[0], "--to", str(out))
@@ -297,7 +297,7 @@ def _low_disk(monkeypatch, room):
 def test_in_place_save_restore_refuses_when_its_backup_would_fill_the_drive(inst, monkeypatch):
     """Final review B-M6: the live save (up to 192 MB) was backed up with no free-space reserve, on a drive the user
     keeps ~88% full. The backup now keeps the recovery store's reserve; when it cannot, nothing is restored."""
-    inst.change("bash tools/resaver-cli.sh clean Quick.ess --apply", cwd=str(inst.game))
+    inst.keep("Quick")
     put(inst.saves / "Quick.ess", b"what resaver wrote")
     _low_disk(monkeypatch, 10)
     rc, text = cli_run(inst, "restore", ids(inst, "save")[0], "--in-place")
@@ -316,7 +316,7 @@ def test_the_save_reserve_applies_to_saves_only(inst, monkeypatch):
 
 
 def test_in_place_save_restore_with_room_backs_the_save_up(inst, monkeypatch):
-    inst.change("bash tools/resaver-cli.sh clean Quick.ess --apply", cwd=str(inst.game))
+    inst.keep("Quick")
     put(inst.saves / "Quick.ess", b"what resaver wrote")
     _low_disk(monkeypatch, 10 * 1024 * 1024)
     rc, text = cli_run(inst, "restore", ids(inst, "save")[0], "--in-place")

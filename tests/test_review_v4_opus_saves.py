@@ -76,7 +76,7 @@ def test_a_change_with_no_session_since_the_last_look_is_raised(look):
     _project, _game, _saves, a, run, start = look
     _change(a, start + 100)
     text, loud = run(start + 200)
-    assert "did not back these up" in text and loud
+    assert "The save vault keeps every settled version" in text and loud
 
 
 def test_a_change_after_the_session_ended_is_raised(look):
@@ -87,7 +87,7 @@ def test_a_change_after_the_session_ended_is_raised(look):
     os.utime(log, (start + 50, start + 50))
     _change(a, start + 100)
     text, loud = run(start + 200)
-    assert "did not back these up" in text and loud
+    assert "The save vault keeps every settled version" in text and loud
 
 
 def test_a_bulk_change_is_never_a_play_session(look):

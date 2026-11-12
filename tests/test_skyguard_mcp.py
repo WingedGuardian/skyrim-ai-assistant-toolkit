@@ -87,9 +87,8 @@ def shell(command, roots=None, shell_name="bash", env=None):
 
 def test_there_are_t11_rows():
     assert len(ROWS) >= 30, len(ROWS)
-    # The save policy (2026-10-13): a DevBench save over an existing save is backed up and allowed (advise), one the
-    # guard cannot identify is refused; no DevBench row asks any more.
-    assert {r["decision"] for r in ROWS} == {"allow", "advise", "deny"}
+    # 4.1: a DevBench save is not judged (the save vault keeps every version); the crash command is still refused.
+    assert {r["decision"] for r in ROWS} == {"allow", "deny"}
 
 
 # The save policy: the note a DevBench save over an existing save carries once the hook has backed it up.
@@ -171,11 +170,6 @@ def test_a_non_string_console_command_is_not_judged():
 @pytest.mark.parametrize("action", ["load", "list", "loadLast", "", 7, None])
 def test_other_game_actions_never_ask(action, cfg):
     assert mcp("mcp__devbench-vr__game", {"action": action, "name": "Existing"}, _roots("saves", cfg))[0] == ("allow", "")
-
-
-def test_the_refusal_is_two_plain_lines_and_does_not_echo_the_call(cfg):
-    got, _ = mcp("mcp__devbench-vr__game", {"action": "save", "name": "a/b"}, _roots("saves", cfg))
-    assert got[0] == "deny" and len(got[1].split("\n")) == 2 and "action" not in got[1] and "{" not in got[1]
 
 
 # ---------------------------------------------------------------------------------------------- the MCP wrapper

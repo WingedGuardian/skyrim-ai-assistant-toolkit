@@ -40,10 +40,11 @@ def fired(a):
     ("start ReSaverPP.exe x.ess", "ReSaverPP.exe"),
 ], ids=["dash-o", "batch", "batch-all", "structured-apply", "quoted-exe", "bash-c", "variable-output",
         "unproven-args", "gui", "gui-via-start"])
-def test_a_direct_native_write_is_denied(tmp_path, cmd, program):
+def test_a_direct_native_write_gets_the_note(tmp_path, cmd, program):
+    """A note since 4.1 (it was a refusal): the save vault keeps the earlier version of whatever it writes."""
     v, a = run(cmd, tmp_path)
-    assert v.decision == "deny", (cmd, v)
-    assert v.reason == rules.message("S-RESAVER-NATIVE-DIRECT", file=program)
+    assert v.decision == "allow" and v.reason == "", (cmd, v)
+    assert rules.message("S-RESAVER-NATIVE-DIRECT", file=program) in v.context
     assert "S-RESAVER-NATIVE-DIRECT" in fired(a)
 
 
@@ -55,24 +56,25 @@ def test_a_direct_native_write_is_denied(tmp_path, cmd, program):
     "echo resaverpp-cli x.ess -o y.ess",
     "grep -n -- '-o' tools/resaver-plus/README.md  # resaverpp-cli",
 ], ids=["report", "decompile", "structured-read", "compare", "echo-is-text", "grep-mention"])
-def test_a_native_read_or_a_mention_is_not_denied(tmp_path, cmd):
+def test_a_native_read_or_a_mention_gets_no_note(tmp_path, cmd):
     _v, a = run(cmd, tmp_path)
     assert "S-RESAVER-NATIVE-DIRECT" not in fired(a), cmd
 
 
-def test_powershell_spelling_is_denied(tmp_path):
+def test_powershell_spelling_gets_the_note(tmp_path):
     v, _a = run("& 'C:\\kit\\tools\\resaver-plus\\build\\resaverpp-cli.exe' x.ess --remove-undefined -o y.ess",
                 tmp_path, shell="powershell")
-    assert v.decision == "deny" and "resaverpp-cli.exe" in v.reason
+    assert v.decision == "allow" and "resaverpp-cli.exe" in v.context
 
 
-def test_the_rule_is_never_shadowed():
-    assert "shell.S-RESAVER-NATIVE-DIRECT" in engine.NEVER_SHADOW
-    assert "shell.S-RESAVER-NATIVE-DIRECT" in codes.decisive_codes()
+def test_the_note_is_no_refusal_anywhere():
+    assert rules.RULES["S-RESAVER-NATIVE-DIRECT"]["decision"] == "advise"
+    assert "shell.S-RESAVER-NATIVE-DIRECT" not in engine.NEVER_SHADOW
+    assert "shell.S-RESAVER-NATIVE-DIRECT" not in codes.decisive_codes()
 
 
 def test_the_adapter_refuses_an_existing_output_even_where_the_guard_allows(tmp_path, monkeypatch):
-    """The guard backs up and allows a ReSaver write to a save it can place; the native adapter adds the stricter
+    """The guard allows a ReSaver write (no rule decides on a save); the native adapter adds the stricter
     new-output rule itself (an existing output member is refused before anything runs)."""
     import resaver_native as rn
     src, out = tmp_path / "In.ess", tmp_path / "Out.ess"

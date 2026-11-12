@@ -37,14 +37,15 @@ def judge(world, command, shell="bash", cwd=None):
 
 # ---- 1.1: PowerShell gives a positional word to the first position not filled by name
 @pytest.mark.parametrize("command", [
-    "Copy-Item -Path C:/bk/a.ess '<C>/Saves/b.ess'",
-    "Copy-Item -LiteralPath C:/bk/a.ess '<C>/Saves/b.ess'",
-    "Rename-Item -Path '<C>/Saves/main.ess' old.ess",
-    "Rename-Item -LiteralPath '<C>/Saves/main.ess' old.ess",
+    "Copy-Item -Path C:/bk/a.esp '<I>/Data/b.esp'",
+    "Copy-Item -LiteralPath C:/bk/a.esp '<I>/Data/b.esp'",
+    "Rename-Item -Path '<I>/Data/main.esp' old.esp",
+    "Rename-Item -LiteralPath '<I>/Data/main.esp' old.esp",
 ])
 @ROOTED_ON_A_DRIVE
 def test_a_named_path_leaves_the_positional_word_to_the_destination(world, command):
-    assert judge(world, command, "powershell", "C:/Temp")[2], command
+    """Seen on the plugin a copy or rename lands on in the load path (it was seen on a save until 4.1)."""
+    assert "S-COPY-PLUGIN" in judge(world, command, "powershell", "C:/Temp")[1], command
 
 
 @ROOTED_ON_A_DRIVE
