@@ -51,7 +51,8 @@ def papyrus_zone(abs_path: str, roots) -> bool:
 def decide(file_path: str, audit, roots=None, cwd: str = "", env=None, op: str = "write",
            transcript: str = "") -> Verdict:
     """op: what the call does to the file: `write` (an edit, a write, a patch that adds or updates it), `delete` or
-    `move` (a patch that deletes it or moves it away). Accepted for callers; no rule reads it since 4.1."""
+    `move` (a patch that deletes it or moves it away). A delete or move also protects a folder ABOVE a save store,
+    the session transcripts or the guards' state (W-SAVE-STORE, W-SELF-TRANSCRIPT, the self-state check)."""
     if file_path == "":
         audit.rule(HOOK, "W-INERT-NOPATH", "deny", NO_PATH_LOG, level="REFUSE")
         return Verdict("deny", NO_PATH_DENY)
@@ -65,7 +66,7 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None, op: str =
     # roots (an old caller, an unreadable paths file on Codex) the path's own words decide (self_rules.text_kind).
     env_ = os.environ if env is None else env
     placed = targets.resolve_literal(file_path, cwd, env_) if roots is not None else None
-    if placed and self_rules.save_store_target(placed, roots, holder=op in ("delete", "move")):
+    if placed and self_rules.save_store_target(placed, roots, holder=op in ("delete", "move"), env=env_):
         reason = rules.message("W-SAVE-STORE", file=file_path)
         audit.rule(HOOK, "W-SAVE-STORE", "deny", reason)
         return Verdict("deny", reason)

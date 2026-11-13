@@ -167,10 +167,25 @@ class _StoreCache:
         return shared == store or (ancestor and shared == resolved)
 
 
-def save_store_target(abs_path, roots, holder=False, cache=None):
+def vault_stores(env=None):
+    """The save vault and its INI vault (tools/save_vault.py default_root / config_root, through vault_watch's copy of
+    the same answer). They live outside the install, so no install-relative rule covers them; since 4.1 they are the
+    only way back for a changed save."""
+    from .vault_watch import vault_root
+    root = vault_root(env)
+    return [root, root.with_name(root.name + "-config")]
+
+
+def save_store_target(abs_path, roots, holder=False, cache=None, env=None):
+    from modding_harness.preservation import protects
+    for store in vault_stores(env):
+        if cache is not None:
+            if cache.protects(abs_path, str(store), holder):
+                return True
+        elif protects(abs_path, [str(store)], ancestor=holder):
+            return True
     if roots is not None:
         from modding_harness import workspace
-        from modding_harness.preservation import protects
         for root in roots.install_dirs:
             if cache is not None:
                 if cache.protects(abs_path, cache.destination(root), holder):
@@ -207,7 +222,9 @@ def shell_save_store_hit(command, parsed, roots, cwd="", env=None, target=None):
     """Recognized store mutations, including an ancestor moved/deleted or aliased."""
     from . import deletes
     env = os.environ if env is None else env
-    target = target or save_store_target
+    if target is None:
+        def target(placed, roots, holder, cache):
+            return save_store_target(placed, roots, holder, cache, env=env)
     cache = _StoreCache()
     for e in parsed.execs:
         e = deletes.substituted(e)

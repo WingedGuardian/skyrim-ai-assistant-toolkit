@@ -26,7 +26,7 @@ depend on reading anything.
 **Where it lives:** `%LOCALAPPDATA%\modding-agent-harness\save-vault\skyrim` (saves) and `...\skyrim-config` (INIs)
 on Windows; `$XDG_DATA_HOME/modding-agent-harness/save-vault/` elsewhere. `SAVE_VAULT_DIR` moves it. It is outside
 the game folder on purpose: a repair, an uninstall or a `git clean` there cannot reach it. It stops capturing when the
-drive would drop under 20 GB free (`SAVE_VAULT_RESERVE_GB` changes that) and says so.
+drive would drop under 2 GB free (`SAVE_VAULT_RESERVE_GB` changes that) and says so.
 
 ## Is it running?
 

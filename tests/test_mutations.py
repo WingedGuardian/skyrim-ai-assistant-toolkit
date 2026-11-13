@@ -9604,7 +9604,7 @@ MUTATIONS += [
                  "tests/test_save_store_rule_coverage.py::test_configured_store_mutations_are_denied_before_ordinary_location_rules[shell]",
                  id="rule-S-SAVE-STORE-configured-destination"),
     pytest.param("tools/skyguard/write_rules.py",
-                 '    if placed and self_rules.save_store_target(placed, roots, holder=op in ("delete", "move")):',
+                 '    if placed and self_rules.save_store_target(placed, roots, holder=op in ("delete", "move"), env=env_):',
                  "    if False:",
                  "tests/test_save_store_rule_coverage.py::test_configured_store_mutations_are_denied_before_ordinary_location_rules[files]",
                  id="rule-W-SAVE-STORE-configured-destination"),
@@ -11581,8 +11581,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/self_rules.py", "    return rel is not None and [p.lower() for p in rel] == SAVE_LOCK_SWITCH",
      "    return rel is not None and [p.lower() for p in rel][-1:] == SAVE_LOCK_SWITCH[-1:]",
      _SLG + "test_a_same_named_file_elsewhere_is_not_the_switch", "rule-S-SAVE-LOCK-exact-path"),
-    ("tools/skyguard/self_rules.py", "    target = target or save_store_target",
-     "    target = save_store_target",
+    ("tools/skyguard/self_rules.py", "    if target is None:\n        def target(",
+     "    if True:\n        def target(",
      _SLG + "test_a_shell_change_to_the_switch_is_refused[overwrite]", "rule-S-SAVE-LOCK-target-used"),
     ("tools/skyguard/write_rules.py", "    if (bare and self_rules.save_lock_target(bare, roots)) or (",
      "    if False or (",
@@ -12241,4 +12241,46 @@ MUTATIONS += [pytest.param(path, anchor, replacement, _RS + test, id="rs-" + nam
     ("tools/resaver_native.py", "    if digest(binary) != expected_hash:\n        raise Refused(\"The ReSaver executable changed",
      "    if False:\n        raise Refused(\"The ReSaver executable changed",
      "test_the_executable_changing_mid_call_is_refused", "exe-rehashed"),
+]]
+
+# 4.1 release review: the save vault and its INI vault are save stores (self_rules.vault_stores).
+_VS = "tests/test_save_store_rule_coverage.py::test_the_save_vault_and_its_ini_vault_are_save_stores["
+MUTATIONS += [pytest.param(path, anchor, replacement, _VS + test + "]", id="vs-" + name)
+              for path, anchor, replacement, test, name in [
+    ("tools/skyguard/self_rules.py", "    for store in vault_stores(env):\n", "    for store in []:\n",
+     "shell-delete-skyrim", "vault-checked"),
+    ("tools/skyguard/self_rules.py", '    return [root, root.with_name(root.name + "-config")]', "    return [root]",
+     "shell-delete-skyrim-config", "ini-vault-checked"),
+    ("tools/skyguard/self_rules.py", "            return save_store_target(placed, roots, holder, cache, env=env)",
+     "            return save_store_target(placed, roots, holder, cache)", "shell-write-skyrim", "shell-env"),
+    ("tools/skyguard/write_rules.py", 'holder=op in ("delete", "move"), env=env_):', 'holder=op in ("delete", "move")):',
+     "files-write-skyrim", "files-env"),
+    ("tools/skyguard/self_rules.py", "            if cache.protects(abs_path, str(store), holder):",
+     "            if cache.protects(abs_path, str(store), False):", "shell-delete-parent-skyrim", "shell-parent"),
+    ("tools/skyguard/self_rules.py", "        elif protects(abs_path, [str(store)], ancestor=holder):",
+     "        elif protects(abs_path, [str(store)], ancestor=False):", "files-delete-parent-skyrim", "files-parent"),
+]]
+
+# 4.1 release review: save vault fixes (restore keeps a set-aside pair whose bytes differ, the .tmp check by listing,
+# short link names, no live read when a link fails while the game runs, the heartbeat is the watcher's).
+_SVR = "tests/test_save_vault.py::"
+MUTATIONS += [pytest.param("tools/save_vault.py", anchor, replacement, _SVR + test, id="svr-" + name)
+              for anchor, replacement, test, name in [
+    ("                    same = want is not None and durable.digest(aside) == want\n", "                    same = True\n",
+     "test_a_same_size_same_time_rewrite_is_left_beside_the_save_never_deleted", "aside-bytes-checked"),
+    ("            if asides:\n                self.record(", "            if False:\n                self.record(",
+     "test_a_same_size_same_time_rewrite_is_left_beside_the_save_never_deleted", "restore-begin-recorded"),
+    ("                    if entry.name.casefold() in wanted:\n", "                    if False:\n",
+     "test_the_tmp_check_opens_no_handle_on_the_tmp", "tmp-by-listing"),
+    ('(uuid.uuid4().hex + ext)', '(uuid.uuid4().hex + "-" + Path(member["path"]).name)',
+     "test_the_staging_link_name_does_not_carry_the_save_name", "short-link-name"),
+    ("                        if same_volume and self.is_busy():\n", "                        if False:\n",
+     "test_a_link_that_fails_while_the_game_runs_waits_instead_of_reading_the_live_save", "failed-link-waits"),
+    ("        if beat:\n            self.heartbeat(", "        if True:\n            self.heartbeat(",
+     "test_a_one_off_sweep_writes_no_heartbeat", "cli-sweep-no-beat"),
+    ("            if beat and self.clock() - beaten >= BEAT_S:\n", "            if False:\n",
+     "test_a_long_pass_refreshes_the_heartbeat_as_it_goes", "long-pass-beats"),
+    ("    except (KeyError, TypeError, ValueError, OverflowError, OSError):\n        return 0.0",
+     "    except ():\n        return 0.0", "test_an_unreadable_or_z_suffixed_time_does_not_break_status", "bad-time-sorts"),
+    ("DEFAULT_RESERVE_GB = 2 ", "DEFAULT_RESERVE_GB = 20 ", "test_the_default_reserve_is_the_stores_own", "reserve-default"),
 ]]

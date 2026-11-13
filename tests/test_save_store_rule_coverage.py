@@ -38,3 +38,43 @@ def test_configured_store_mutations_are_denied_before_ordinary_location_rules(tm
     ordinary, _ = decide(tmp_path / "ordinary-output")
     assert ordinary.decision == "allow"
     assert target.read_bytes() == b"owned permanent recovery bytes"
+
+
+@pytest.mark.parametrize("which", ["skyrim", "skyrim-config"])
+@pytest.mark.parametrize("route", ["shell-delete", "shell-delete-parent", "shell-write", "files-write",
+                                   "files-delete-parent"])
+def test_the_save_vault_and_its_ini_vault_are_save_stores(tmp_path, route, which):
+    """4.1 review: the vault (the only way back for a changed save since 4.1) lives outside the install, under
+    SAVE_VAULT_DIR or %LOCALAPPDATA%; S-SAVE-STORE / W-SAVE-STORE must cover it and its INI sibling."""
+    project, vault = tmp_path / "toolkit", tmp_path / "data" / "save-vault" / "skyrim"
+    project.mkdir()
+    store = vault.with_name(which)
+    (store / "blobs").mkdir(parents=True)
+    env = {"SKYRIM_GAME_ROOT": str(project), "SAVE_VAULT_DIR": str(vault)}
+    roots = paths.roots(str(project), str(project), env)
+
+    def decide(path):
+        log = audit.Audit("")
+        log.raw = lambda line: None
+        p = path.as_posix()
+        if route == "shell-delete":
+            value = shell_rules.decide('rm -rf "' + p + '"', roots, log, cwd=project.as_posix(), shell="bash", env=env)
+        elif route == "shell-delete-parent":
+            value = shell_rules.decide('rm -rf "' + path.parent.as_posix() + '"', roots, log,
+                                       cwd=project.as_posix(), shell="bash", env=env)
+        elif route == "shell-write":
+            value = shell_rules.decide('printf x > "' + p + '/blobs/x"', roots, log, cwd=project.as_posix(),
+                                       shell="bash", env=env)
+        elif route == "files-write":
+            value = write_rules.decide(str(path / "blobs" / "x"), log, roots=roots, cwd=str(project), env=env)
+        else:
+            value = write_rules.decide(str(path.parent), log, roots=roots, cwd=str(project), env=env, op="delete")
+        return value, {rid for rid, _ in log.fired}
+
+    value, fired = decide(store)
+    rid = "S-SAVE-STORE" if route.startswith("shell") else "W-SAVE-STORE"
+    assert value.decision == "deny" and fired == {rid}, (value, fired)
+    other, _ = decide(tmp_path / "data" / "unrelated" / "cache")
+    if route.endswith("parent"):
+        other, _ = decide(tmp_path / "unrelated" / "x" / "cache")
+    assert other.decision == "allow"

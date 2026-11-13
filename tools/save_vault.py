@@ -67,11 +67,12 @@ VANISH_MISSES = 2      # passes a pair must be absent (its folder readable) befo
 FAIL_REPORT = 3        # passes in a row a pair may fail to capture before the heartbeat says not ok
 BUSY_TRIES = 5         # captures tried per pass while the game runs (one success ends the pass)
 STALE_S = 120          # a heartbeat older than this means the watcher is not running
+BEAT_S = 30            # a pass longer than this refreshes the heartbeat as it goes
 FOLDER_REFRESH_S = 300
 MARKED_DEPTH = 4
 BUSY_PROCESSES = ("skyrimvr.exe", "skyrimse.exe", "skyrim.exe", "vrserver.exe", "vrcompositor.exe")
 CAPTURE_RETRIES = 3
-DEFAULT_RESERVE_GB = 20   # the machine policy's system-drive floor; SAVE_VAULT_RESERVE_GB overrides
+DEFAULT_RESERVE_GB = 2    # the store's own default (preservation.DEFAULT_RESERVE); SAVE_VAULT_RESERVE_GB overrides
 
 
 class Deferred(Exception):
@@ -94,10 +95,22 @@ def now_text(ts=None):
 
 
 def parse_time(text):
+    text = text.strip()
+    if text[-1:] in ("Z", "z"):                    # Python 3.10's fromisoformat rejects a trailing Z
+        text = text[:-1] + "+00:00"
     value = datetime.fromisoformat(text)
     if value.tzinfo is None:
         value = value.astimezone()
     return value.timestamp()
+
+
+def _event_time(event):
+    """An event's time for sorting and --at; one unreadable time (a hand-edited or foreign legacy record) must not
+    make status or restore fail for that save, so it sorts first."""
+    try:
+        return parse_time(event["time"])
+    except (KeyError, TypeError, ValueError, OverflowError, OSError):
+        return 0.0
 
 
 def busy():
@@ -393,14 +406,21 @@ class Vault:
             return False
 
     def _writing_now(self, pair):
-        """A .tmp sibling younger than TMP_LIVE_S: the game started saving this pair. Stats the .tmp NAME only."""
-        for ext in self.exts:
-            try:
-                st = os.stat(os.path.join(pair["folder"], pair["stem"] + ext + ".tmp"))
-            except OSError:
-                continue
-            if self.clock() - st.st_mtime < TMP_LIVE_S:
-                return True
+        """A .tmp sibling younger than TMP_LIVE_S: the game started saving this pair. Read from a directory listing
+        (os.scandir: on Windows the times come from the listing itself), so no handle is opened on the .tmp, the
+        source of the game's own rename, at the moment the game is about to rename it."""
+        wanted = {(pair["stem"] + ext + ".tmp").casefold() for ext in self.exts}
+        try:
+            with os.scandir(pair["folder"]) as it:
+                for entry in it:
+                    if entry.name.casefold() in wanted:
+                        try:
+                            if self.clock() - entry.stat(follow_symlinks=False).st_mtime < TMP_LIVE_S:
+                                return True
+                        except OSError:
+                            return True                    # cannot tell: treat it as being written
+        except OSError:
+            return True
         return False
 
     def capture(self, key, pair, ignore_tmp=False):
@@ -427,14 +447,21 @@ class Vault:
                     member = pair["members"].get(ext)
                     if member is None:
                         continue
-                    link = self.root / "staging-links" / (uuid.uuid4().hex + "-" + Path(member["path"]).name)
+                    # uuid + extension only: Skyrim save names run past 150 characters, and the vault's own path
+                    # plus the whole name would cross MAX_PATH where long paths are not enabled.
+                    link = self.root / "staging-links" / (uuid.uuid4().hex + ext)
                     links.append(link)
                     try:
                         if not same_volume:
                             raise OSError("another volume")
                         os.link(member["path"], link)
                         held.append((ext, member, link, False))
-                    except OSError:
+                    except OSError as exc:
+                        if same_volume and self.is_busy():
+                            # A same-volume link that fails while the game may run is not proof of a lock (a long
+                            # path, a file system without links): reading the live save by name now could block the
+                            # game's replace, so it waits for the game to close.
+                            raise Deferred("could not link it ({}); waits until the game is closed".format(exc))
                         held.append((ext, member, link, True))
                 for ext, member, link, copied in held:
                     if copied:
@@ -505,9 +532,12 @@ class Vault:
                     pass
 
     # ---- one pass
-    def sweep(self, force=False, only=None, limit=None):
+    def sweep(self, force=False, only=None, limit=None, beat=True):
+        """One pass. beat: write the heartbeat. Only the watcher does; a one-off CLI sweep must not make a dead
+        watcher look alive. A long pass (the first one after a seed, the game closed) refreshes it every BEAT_S."""
         self._busy = None
         now = self.clock()
+        beaten = now
         if force and self.game_running():
             force = False                                  # never shorten the waits while the game may be writing
         pairs, readable, stale = self.scan()
@@ -541,6 +571,9 @@ class Vault:
                 errors.append("{}: {}".format(pair["stem"], exc))
                 event = None
             tried += 1
+            if beat and self.clock() - beaten >= BEAT_S:
+                beaten = self.clock()
+                self.heartbeat(True, len(queue) - len(captured), "", ["a long pass is in progress"])
             if event:
                 captured.append(event)
                 self.state["fails"].pop(key, None)
@@ -560,12 +593,13 @@ class Vault:
                          for k, n in self.state["fails"].items() if n >= FAIL_REPORT)
         notes = ["stale tmp (ignored): " + p for p in stale[:10]]
         if deferred:
-            notes.append("{} item(s) on another volume wait for the game to close".format(deferred))
+            notes.append("{} item(s) wait for the game to close (another volume, or a link that failed)".format(deferred))
         problem = "; ".join(errors + ["folder unreadable: " + f for f in self.unreadable])
         if failing:
             problem = (problem + "; " if problem else "") + "{} item(s) failed {}+ passes: {}".format(
                 len(failing), FAIL_REPORT, ", ".join(failing[:10]))
-        self.heartbeat(not problem, pending, problem[:2000], notes)
+        if beat:
+            self.heartbeat(not problem, pending, problem[:2000], notes)
         return {"captured": captured, "vanished": vanished, "pending": pending, "errors": errors,
                 "deferred": deferred, "failing": failing, "stale_tmp": stale}
 
@@ -615,7 +649,7 @@ class Vault:
             if e["event"] == "import":
                 e = dict(e, legacy=True, time=e.get("legacy_time") or e["time"])
             found.append(e)
-        found.sort(key=lambda e: parse_time(e["time"]) if e.get("time") else 0)
+        found.sort(key=_event_time)
         return found
 
     def choose(self, name, at=None, event_id=None, folder=None):
@@ -623,7 +657,7 @@ class Vault:
         if event_id:
             versions = [e for e in versions if e["id"] == event_id]
         elif at is not None:
-            versions = [e for e in versions if parse_time(e["time"]) <= at]
+            versions = [e for e in versions if _event_time(e) <= at]
         if not versions:
             raise LookupError("no stored version of {} matches".format(name))
         folders = {canonical(e["folder"]) for e in versions}
@@ -702,17 +736,30 @@ class Vault:
             if now_kept.get("sig") != pairs[key]["sig"]:
                 raise PreservationFailed("the current pair changed just now and is not kept yet; nothing was "
                                          "replaced. Retry in a few seconds.")
+            # What the set-aside members must hash to before they may go: the kept version's own bytes. A size and
+            # time match is not proof (a same-size rewrite that restores the old time, or a write after this check).
+            held = [e for e in self.versions(event["stem"], folder=event["folder"]) if e["id"] == now_kept.get("id")]
+            if not held:
+                raise PreservationFailed("the current pair's kept version could not be found; nothing was replaced")
+            kept_sha = {str(t): (held[0].get(e[1:]) or {}).get("sha256") for t, e in zip(plan["targets"], self.exts)}
+        else:
+            kept_sha = {}
         if plan["mode"] == "copy-to":
             Path(to).mkdir(parents=True, exist_ok=True)
-        plan["result"] = self._write(event, plan["targets"], overwrite=plan["mode"] == "replace")
+        plan["result"] = self._write(event, plan["targets"], overwrite=plan["mode"] == "replace", kept_sha=kept_sha)
         self.record({"event": "restored", "key": self.key_of(event["folder"], event["stem"]), "version": event["id"],
                      "mode": plan["mode"], "targets": plan["targets"]})
         return plan
 
-    def _write(self, event, targets, overwrite=False):
+    def _write(self, event, targets, overwrite=False, kept_sha=None):
         """Every stored member is staged beside its target and hash-checked FIRST; only then are they published
-        (no-clobber unless overwrite), so a bad copy never leaves half a pair. A publish failing midway is recorded."""
-        staged, published = [], []
+        (no-clobber unless overwrite), so a bad copy never leaves half a pair. A publish failing midway is recorded.
+
+        overwrite: the current members are set aside first (a restore-begin event names them before anything moves),
+        and a set-aside member is removed only when its bytes hash to kept_sha[target], the kept version's own;
+        otherwise it stays beside the save and a restore-kept-aside event names it."""
+        kept_sha = kept_sha or {}
+        staged, published, kept_aside = [], [], []
         try:
             for ext, target in zip(self.exts, targets):
                 member = event.get(ext[1:])
@@ -724,11 +771,16 @@ class Vault:
                 if info["sha256"] != member["sha256"]:
                     raise PreservationFailed("stored version failed verification")
             moved = []                                     # replace: the current members, set aside first
+            asides = {str(t): Path(t).with_name(".vault-old-" + uuid.uuid4().hex) for _, t in staged
+                      if overwrite and os.path.lexists(t)}
+            if asides:
+                self.record({"event": "restore-begin", "version": event["id"],
+                             "set_aside": {t: str(a) for t, a in asides.items()}})
             try:
                 if overwrite:
                     for part, target in staged:
-                        if os.path.lexists(target):
-                            aside = Path(target).with_name(".vault-old-" + uuid.uuid4().hex)
+                        if str(target) in asides:
+                            aside = asides[str(target)]
                             os.replace(target, aside)      # a locked save refuses here, before anything changed
                             moved.append((aside, target))
                 for part, target in staged:
@@ -753,15 +805,25 @@ class Vault:
                     raise PreservationFailed("restore failed and could not be fully undone ({}); the event log names "
                                              "every file involved".format(exc)) from exc
                 raise
-            for aside, _ in moved:
+            for aside, target in moved:
                 try:
-                    os.unlink(aside)                       # the replaced members are kept as a vault version
+                    want = kept_sha.get(str(target))
+                    same = want is not None and durable.digest(aside) == want
                 except OSError:
-                    pass
+                    same = False
+                if not same:
+                    self.record({"event": "restore-kept-aside", "version": event["id"], "target": str(target),
+                                 "aside": str(aside), "note": "its bytes are not the kept version's; left in place"})
+                    kept_aside.append(str(aside))
+                    continue
+                try:
+                    os.unlink(aside)                       # byte-identical to the kept version
+                except OSError:
+                    kept_aside.append(str(aside))
         finally:
             for part, _ in staged:
                 part.unlink(missing_ok=True)
-        return {"published": published}
+        return {"published": published, "kept_aside": kept_aside}
 
     # ---- verify
     def verify(self, sample=None):
@@ -1016,7 +1078,7 @@ def main(argv=None):
         return 0 if alive and ini_alive else 1
     vault = make()
     if a.cmd == "sweep":
-        out = vault.sweep(force=a.now, only=a.pair)
+        out = vault.sweep(force=a.now, only=a.pair, beat=False)
         print("captured {}  vanished {}  pending {}  deferred {}  errors {}".format(
             len(out["captured"]), len(out["vanished"]), out["pending"], out["deferred"], len(out["errors"])))
         for e in out["errors"][:20]:
