@@ -9603,7 +9603,7 @@ MUTATIONS += [
                  "tests/test_save_store_rule_coverage.py::test_configured_store_mutations_are_denied_before_ordinary_location_rules[shell]",
                  id="rule-S-SAVE-STORE-configured-destination"),
     pytest.param("tools/skyguard/write_rules.py",
-                 '    if placed and self_rules.save_store_target(placed, roots, holder=op in ("delete", "move"), env=env_):',
+                 '    if store_place and self_rules.save_store_target(store_place, roots, holder=op in ("delete", "move"), env=env_):',
                  "    if False:",
                  "tests/test_save_store_rule_coverage.py::test_configured_store_mutations_are_denied_before_ordinary_location_rules[files]",
                  id="rule-W-SAVE-STORE-configured-destination"),
@@ -12276,7 +12276,7 @@ MUTATIONS += [pytest.param("tools/save_vault.py", anchor, replacement, _SVR + te
      "test_a_one_off_sweep_writes_no_heartbeat", "cli-sweep-no-beat"),
     ("            if beat and self.clock() - beaten >= BEAT_S:\n", "            if False:\n",
      "test_a_long_pass_refreshes_the_heartbeat_as_it_goes", "long-pass-beats"),
-    ("    except (KeyError, TypeError, ValueError, OverflowError, OSError):\n        return 0.0",
+    ("    except (KeyError, TypeError, ValueError, OverflowError, OSError, AttributeError):\n        return 0.0",
      "    except ():\n        return 0.0", "test_an_unreadable_or_z_suffixed_time_does_not_break_status", "bad-time-sorts"),
     ("DEFAULT_RESERVE_GB = 2 ", "DEFAULT_RESERVE_GB = 20 ", "test_the_default_reserve_is_the_stores_own", "reserve-default"),
 ]]
@@ -12289,7 +12289,9 @@ MUTATIONS += [pytest.param(path, anchor, replacement, _LR + test, id="lr-" + nam
      "test_a_built_wheel_of_another_version_is_never_picked", "carried-version-only"),
     ("tools/libloot/libloot_loader.py", '    for f in target.rglob("*"):\n', "    for f in []:\n",
      "test_a_file_the_wheel_does_not_hold_is_refused", "no-unlisted-files"),
-    ("tools/loot_advisor.py", '    if plugins_txt.name.casefold() != "plugins.txt":\n', "    if False:\n",
+    ("tools/loot_advisor.py",
+     '    if (plugins_txt.name.casefold() != "plugins.txt" if os.name == "nt" else plugins_txt.name != "Plugins.txt"):\n',
+     "    if False:\n",
      "test_a_plugins_file_with_another_name_is_refused", "plugins-txt-name"),
     ("tools/loot_advisor.py", "        if version is None or version > readable:\n", "        if False:\n",
      "test_a_cached_masterlist_this_libloot_cannot_read_is_not_used", "cache-branch-readable"),
@@ -12338,4 +12340,25 @@ MUTATIONS += [pytest.param(path, anchor, replacement, test, id="rt-" + name)
     ("tools/vr_background_desktop.py", "    if not handle and ctypes.get_last_error() == 5:\n", "    if False:\n",
      "tests/test_headless_helper_exit.py::test_a_helper_that_refuses_only_the_wait_right_is_still_terminated",
      "open-without-wait-right"),
+]]
+
+# 4.1 confirmation review: link deferrals are reported, an earlier failure stays visible mid-pass, the vault check
+# needs no roots, no bytecode in the unpacked libloot. (Not twinned: sys.dont_write_bytecode = True in load() -- the
+# suite runs under -B, so the mutant is equivalent there; the planted-.pyc twin below covers the refusal.)
+MUTATIONS += [pytest.param(path, anchor, replacement, test, id="cr-" + name)
+              for path, anchor, replacement, test, name in [
+    ("tools/save_vault.py", '                self.state["fails"][key] = self.state["fails"].get(key, 0) + 1\n                link_notes',
+     "                link_notes", "tests/test_save_vault.py::test_a_link_that_keeps_failing_while_the_game_runs_is_reported",
+     "link-deferral-counts"),
+    ("tools/save_vault.py", "                self.heartbeat(not prior, len(queue) - len(captured),",
+     "                self.heartbeat(True, len(queue) - len(captured),",
+     "tests/test_save_vault.py::test_a_long_pass_keeps_an_earlier_failure_visible", "prior-failure-visible"),
+    ("tools/skyguard/write_rules.py",
+     "    store_place = placed if roots is not None else targets.resolve_literal(file_path, cwd, env_)",
+     "    store_place = placed",
+     "tests/test_save_store_rule_coverage.py::test_the_vault_is_a_save_store_even_with_no_paths_file", "vault-without-roots"),
+    ("tools/libloot/libloot_loader.py", "        if rel in listed:\n            continue",
+     '        if "__pycache__" in f.relative_to(target).parts or rel in listed:\n            continue',
+     "tests/test_loot_advisor.py::test_python_bytecode_in_the_unpacked_copy_is_refused_and_none_is_written",
+     "no-pycache"),
 ]]

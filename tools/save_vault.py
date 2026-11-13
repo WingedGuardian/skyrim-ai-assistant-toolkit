@@ -12,7 +12,8 @@ fail, with MoveFileEx and with ReplaceFileW alike. So the vault never opens a li
   * a settled member gets a second name in the vault's staging folder (a hard link, ~1 ms), and only THAT name is
     read; the link is removed before the capture returns. A handle on the link does not block the game's replace,
     and the link keeps the old bytes after it (measured);
-  * a locked save cannot be hard-linked, and the game cannot replace it either, so it is copied directly;
+  * a locked save cannot be hard-linked, and the game cannot replace it either, so it is copied directly once the
+    game is closed (while it runs, a failed link is never followed by a read of the live save);
   * a save on another volume than the vault is copied directly only while the game is NOT running; otherwise it waits.
 
 Storage is modding_harness.preservation.SaveStore (content-addressed blobs, verified copies, no-clobber publication,
@@ -79,6 +80,11 @@ class Deferred(Exception):
     """Not now (another volume while the game runs); the pair stays pending, it is not a failure."""
 
 
+class LinkDeferred(Deferred):
+    """A same-volume link failed while the game runs: the pair waits for the game to close. Unlike another volume
+    it counts toward FAIL_REPORT, so a link that keeps failing is reported, not silently waited on."""
+
+
 def default_root(env=None):
     env = os.environ if env is None else env
     if env.get("SAVE_VAULT_DIR"):
@@ -109,7 +115,7 @@ def _event_time(event):
     make status or restore fail for that save, so it sorts first."""
     try:
         return parse_time(event["time"])
-    except (KeyError, TypeError, ValueError, OverflowError, OSError):
+    except (KeyError, TypeError, ValueError, OverflowError, OSError, AttributeError):
         return 0.0
 
 
@@ -461,12 +467,12 @@ class Vault:
                             # A same-volume link that fails while the game may run is not proof of a lock (a long
                             # path, a file system without links): reading the live save by name now could block the
                             # game's replace, so it waits for the game to close.
-                            raise Deferred("could not link it ({}); waits until the game is closed".format(exc))
+                            raise LinkDeferred("could not link it ({}); waits until the game is closed".format(exc))
                         held.append((ext, member, link, True))
                 for ext, member, link, copied in held:
                     if copied:
-                        # Locked (the game cannot replace it either) or on another volume (only with the game
-                        # closed, asked again right here): one whole-file read of the live save, whose own stat must
+                        # The game is closed (a failed link while it runs raised LinkDeferred above), or another
+                        # volume (asked again right here): one whole-file read of the live save, whose own stat must
                         # still be the settled one afterwards.
                         if not same_volume and self.is_busy():
                             raise Deferred("on another volume than the vault; waits until the game is closed")
@@ -538,6 +544,7 @@ class Vault:
         self._busy = None
         now = self.clock()
         beaten = now
+        prior = sorted(k.split("|")[-1] for k, n in self.state["fails"].items() if n >= FAIL_REPORT)
         if force and self.game_running():
             force = False                                  # never shorten the waits while the game may be writing
         pairs, readable, stale = self.scan()
@@ -552,7 +559,7 @@ class Vault:
         if limit is None:
             limit = 1 if self.game_running() else len(queue)
         tries = BUSY_TRIES if self.game_running() else len(queue)
-        captured, errors, deferred, tried = [], [], 0, 0
+        captured, errors, deferred, tried, link_notes = [], [], 0, 0, []
         volume = {}
         for _, key, pair in queue:
             if len(captured) >= limit or tried >= tries:
@@ -564,6 +571,11 @@ class Vault:
                 continue
             try:
                 event = self.capture(key, pair)
+            except LinkDeferred as exc:
+                deferred += 1                                  # not a try, but it counts toward FAIL_REPORT
+                self.state["fails"][key] = self.state["fails"].get(key, 0) + 1
+                link_notes.append("{}: {}".format(pair["stem"], exc))
+                continue
             except Deferred:
                 deferred += 1                                  # not a try: it must not starve same-volume pairs
                 continue
@@ -573,7 +585,10 @@ class Vault:
             tried += 1
             if beat and self.clock() - beaten >= BEAT_S:
                 beaten = self.clock()
-                self.heartbeat(True, len(queue) - len(captured), "", ["a long pass is in progress"])
+                self.heartbeat(not prior, len(queue) - len(captured),
+                               "{} item(s) failed {}+ passes before this one: {}".format(
+                                   len(prior), FAIL_REPORT, ", ".join(prior[:10])) if prior else "",
+                               ["a long pass is in progress"])
             if event:
                 captured.append(event)
                 self.state["fails"].pop(key, None)
@@ -594,6 +609,7 @@ class Vault:
         notes = ["stale tmp (ignored): " + p for p in stale[:10]]
         if deferred:
             notes.append("{} item(s) wait for the game to close (another volume, or a link that failed)".format(deferred))
+        notes += ["link failed: " + n for n in link_notes[:5]]
         problem = "; ".join(errors + ["folder unreadable: " + f for f in self.unreadable])
         if failing:
             problem = (problem + "; " if problem else "") + "{} item(s) failed {}+ passes: {}".format(
@@ -678,8 +694,8 @@ class Vault:
     def restore(self, name, at=None, event_id=None, folder=None, to=None, as_stem=None, replace=False, apply=False):
         """Dry run unless apply. Writes come from the verified stored copies to the live paths the event recorded.
 
-        A present pair needs replace (which keeps the current one as a vault version first) or as_stem / to. Anything
-        written into the save folder waits for the game to be closed; that check comes before any look at the saves."""
+        A present pair needs replace (which keeps the current one as a vault version first) or as_stem / to. A write
+        into a save folder is refused while the game runs; that check comes before any look at the saves."""
         event = self.choose(name, at, event_id, folder)
         live = [Path(event["folder"]) / (event["stem"] + e) for e in self.exts]
         if to:
@@ -1031,7 +1047,7 @@ def install_task(args_text):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--vault", help="vault folder (default SAVE_VAULT_DIR or %%LOCALAPPDATA%%/modding-agent-harness/...)")
+    ap.add_argument("--vault", help="vault folder (default SAVE_VAULT_DIR or %%LOCALAPPDATA%%/modding-agent-harness/...); the guard protects only the default or SAVE_VAULT_DIR, so move the vault by setting SAVE_VAULT_DIR")
     ap.add_argument("--project", default=str(HERE.parent), help="toolkit or game root (env file, .protect-saves search)")
     ap.add_argument("--folder", action="append", default=[], help="an extra save folder to watch (repeatable)")
     ap.add_argument("--config", action="store_true", help="act on the INI vault (the config folders) instead of saves")
@@ -1062,6 +1078,9 @@ def main(argv=None):
     if a.cmd == "watch":
         return watch(make_saves, None, make_inis)
     if a.cmd == "install-task":
+        if a.vault and canonical(Path(a.vault)) != canonical(default_root()):
+            print("save vault: --vault {} is not SAVE_VAULT_DIR: the guard will not protect it and the session line "
+                  "will not see its watcher. Set SAVE_VAULT_DIR to that folder instead.".format(a.vault), file=sys.stderr)
         extra = "".join('--folder "{}" '.format(f) for f in a.folder)
         return install_task('--project "{}" {}{}'.format(a.project, '--vault "{}" '.format(save_root) if a.vault else "", extra))
     if a.cmd == "uninstall-task":

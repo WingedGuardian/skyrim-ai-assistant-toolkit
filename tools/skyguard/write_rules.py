@@ -66,7 +66,9 @@ def decide(file_path: str, audit, roots=None, cwd: str = "", env=None, op: str =
     # roots (an old caller, an unreadable paths file on Codex) the path's own words decide (self_rules.text_kind).
     env_ = os.environ if env is None else env
     placed = targets.resolve_literal(file_path, cwd, env_) if roots is not None else None
-    if placed and self_rules.save_store_target(placed, roots, holder=op in ("delete", "move"), env=env_):
+    # The save vault lives outside the install, so its check needs no roots (an unreadable paths file).
+    store_place = placed if roots is not None else targets.resolve_literal(file_path, cwd, env_)
+    if store_place and self_rules.save_store_target(store_place, roots, holder=op in ("delete", "move"), env=env_):
         reason = rules.message("W-SAVE-STORE", file=file_path)
         audit.rule(HOOK, "W-SAVE-STORE", "deny", reason)
         return Verdict("deny", reason)

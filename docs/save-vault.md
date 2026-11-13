@@ -24,7 +24,8 @@ depend on reading anything.
   game's save is never blocked) and it does at most one capture per look.
 
 **Where it lives:** `%LOCALAPPDATA%\modding-agent-harness\save-vault\skyrim` (saves) and `...\skyrim-config` (INIs)
-on Windows; `$XDG_DATA_HOME/modding-agent-harness/save-vault/` elsewhere. `SAVE_VAULT_DIR` moves it. It is outside
+on Windows; `$XDG_DATA_HOME/modding-agent-harness/save-vault/` elsewhere. `SAVE_VAULT_DIR` moves it (the guard protects the vault only there or at the default;
+`--vault` on the command line is for a one-off look, not a new home). It is outside
 the game folder on purpose: a repair, an uninstall or a `git clean` there cannot reach it. It stops capturing when the
 drive would drop under 2 GB free (`SAVE_VAULT_RESERVE_GB` changes that) and says so.
 

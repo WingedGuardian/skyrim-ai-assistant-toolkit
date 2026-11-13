@@ -91,8 +91,8 @@ def wheel(shipped: Path = WHEELS, built: Path = BUILT, want: str | None = None) 
 
 
 def _verified_bytes(path: Path) -> bytes:
-    """The wheel's bytes, read ONCE and checked against its folder's SHA256SUMS; everything after (the cache folder
-    name, the extraction, RECORD) uses these same bytes, so a file swapped after the check is never the one used."""
+    """The wheel's bytes, read and checked against its folder's SHA256SUMS; in load() everything after (the cache
+    folder name, the extraction, RECORD) uses these same bytes, so a file swapped after the check is never used."""
     want = sums(path.parent).get(path.name)
     if want is None:
         raise Unavailable("%s is not listed in %s; refusing an unlisted binary" % (path.name, path.parent / "SHA256SUMS"))
@@ -140,8 +140,8 @@ def _extract(data: bytes, target: Path) -> None:
 
 
 def verify_extracted(data: bytes, target: Path) -> None:
-    """Every file RECORD lists has its hash, and no other file is there (it would be importable from this folder,
-    which goes first on sys.path); __pycache__ folders are Python's own."""
+    """Every file RECORD lists has its hash, and no other file is there, __pycache__ included (a planted .pyc would
+    be imported in place of the checked source); load() imports with bytecode writing off, so none is made."""
     with zipfile.ZipFile(io.BytesIO(data)) as z:
         record = _record(z)
         listed = {n.rstrip("/") for n in z.namelist()}
@@ -152,7 +152,7 @@ def verify_extracted(data: bytes, target: Path) -> None:
                               "again" % (target, member))
     for f in target.rglob("*"):
         rel = f.relative_to(target).as_posix()
-        if "__pycache__" in f.relative_to(target).parts or rel in listed:
+        if rel in listed:
             continue
         if f.is_dir() and any(n.startswith(rel + "/") for n in listed):
             continue
@@ -171,7 +171,11 @@ def load(shipped: Path = WHEELS, built: Path = BUILT, cache: Path = CACHE):
     verify_extracted(data, target)
     if str(target) not in sys.path:
         sys.path.insert(0, str(target))
+    was = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
     try:
         return importlib.import_module("loot")
     except ImportError as exc:
         raise Unavailable("the libloot module did not import: %s" % exc) from None
+    finally:
+        sys.dont_write_bytecode = was

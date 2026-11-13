@@ -192,7 +192,7 @@ def install(tmp_path):
     names = ["Skyrim.esm", "A.esp", "B.esp", "Off.esp"]
     for n in names:
         (game / "Data" / n).write_bytes(b"TES4")
-    (local / "plugins.txt").write_text("*Skyrim.esm\n*A.esp\n*B.esp\nOff.esp\n", encoding="utf-8")
+    (local / "Plugins.txt").write_text("*Skyrim.esm\n*A.esp\n*B.esp\nOff.esp\n", encoding="utf-8")
     (local / "loadorder.txt").write_text("\n".join(names) + "\n", encoding="utf-8")
     return game, local, names
 
@@ -204,7 +204,7 @@ def _advise(install, tmp_path, fake):
     old = loot_advisor.CACHE
     loot_advisor.CACHE = cache
     try:
-        return loot_advisor.advise(local / "plugins.txt", game / "Data", game, [], loot=fake,
+        return loot_advisor.advise(local / "Plugins.txt", game / "Data", game, [], loot=fake,
                                    fetch=lambda url, timeout=20.0: net(url))
     finally:
         loot_advisor.CACHE = old
@@ -256,7 +256,7 @@ def test_unavailable_libloot_exits_2_and_never_says_clean(monkeypatch, capsys, i
         raise libloot_loader.Unavailable("no wheel here")
     monkeypatch.setattr(loot_advisor.libloot_loader, "load", unavailable)
     monkeypatch.setattr(loot_advisor, "_plugin_check", lambda: types.SimpleNamespace(mo2_folders=lambda env: ([], None)))
-    assert loot_advisor.main(["--plugins-txt", str(local / "plugins.txt"), "--offline"]) == 2
+    assert loot_advisor.main(["--plugins-txt", str(local / "Plugins.txt"), "--offline"]) == 2
     assert "not a clean result" in capsys.readouterr().err
 
 
@@ -399,7 +399,7 @@ def test_a_plugins_file_with_another_name_is_refused(install, tmp_path):
     other = local / "test-order.txt"
     other.write_text("*Skyrim.esm\n", encoding="utf-8")
     fake = FakeLoot(names, {"Skyrim.esm"}, ["Skyrim.esm"])
-    with pytest.raises(ValueError, match="named plugins.txt"):
+    with pytest.raises(ValueError, match="(?i)named plugins.txt"):
         loot_advisor.advise(other, game / "Data", game, [], loot=fake, fetch=Net())
 
 
@@ -455,5 +455,19 @@ def test_a_say_message_alone_exits_0(monkeypatch, capsys, install, tmp_path):
     monkeypatch.setattr(loot_advisor.libloot_loader, "load", lambda: fake)
     monkeypatch.setattr(loot_advisor, "CACHE", tmp_path / "cache")
     monkeypatch.setattr(loot_advisor, "_get", lambda url, timeout=20.0: Net()(url))
-    assert loot_advisor.main(["--plugins-txt", str(local / "plugins.txt")]) == 0
+    assert loot_advisor.main(["--plugins-txt", str(local / "Plugins.txt")]) == 0
     assert "just a note" in capsys.readouterr().out
+
+
+def test_python_bytecode_in_the_unpacked_copy_is_refused_and_none_is_written(tmp_path, fresh_import):
+    """Confirmation review: a planted __pycache__ .pyc would be imported in place of the checked source."""
+    make_wheel(tmp_path / "built")
+    kw = dict(shipped=tmp_path / "none", built=tmp_path / "built", cache=tmp_path / "cache")
+    libloot_loader.load(**kw)
+    [extracted] = [p for p in (tmp_path / "cache").iterdir() if p.is_dir()]
+    assert not list(extracted.rglob("__pycache__")), "the loader wrote bytecode into the checked copy"
+    sys.modules.pop("loot", None)
+    (extracted / "loot" / "__pycache__").mkdir()
+    (extracted / "loot" / "__pycache__" / "__init__.cpython-310.pyc").write_bytes(b"planted")
+    with pytest.raises(libloot_loader.Unavailable, match="does not"):
+        libloot_loader.load(**kw)

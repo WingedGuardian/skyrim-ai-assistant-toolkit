@@ -105,8 +105,8 @@ def check(meshes):
         data = json.loads(call('housecarl_asset_status', {'asset_paths': textures[i:i + 500], 'format': 'json',
                                                           'max_chars': 2000000}))
         incomplete = incomplete or bool(data.get('read_incomplete') or data.get('bsa_failures'))
-        asked = {t.lower() for t in textures[i:i + 500]}
-        told = {r['path'].lower() for r in data['results'] if isinstance(r.get('exists'), bool)}
+        asked = {norm(t).lower() for t in textures[i:i + 500]}
+        told = {norm(r['path']).lower() for r in data['results'] if isinstance(r.get('exists'), bool)}
         if asked - told:
             raise RuntimeError('asset_status gave no answer for %d texture(s), e.g. %s'
                                % (len(asked - told), sorted(asked - told)[0]))

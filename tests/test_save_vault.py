@@ -1328,3 +1328,47 @@ def test_a_long_pass_refreshes_the_heartbeat_as_it_goes(bed, monkeypatch):
 def test_the_default_reserve_is_the_stores_own():
     from modding_harness import preservation
     assert save_vault.DEFAULT_RESERVE_GB * 1024 ** 3 == preservation.DEFAULT_RESERVE
+
+
+def test_a_link_that_keeps_failing_while_the_game_runs_is_reported(bed, monkeypatch):
+    """Confirmation review: a deferred link must not stay silent for a whole session."""
+    s, v, c = bed["saves"], bed["vault"], bed["clock"]
+    write_pair(s, "Save68", age=3600)
+
+    def link(src, dst, *a, **k):
+        raise OSError("no links here")
+    monkeypatch.setattr(save_vault.os, "link", link)
+    bed["state"]["busy"] = True
+    out = None
+    for _ in range(save_vault.FAIL_REPORT):
+        out = v.sweep()
+        c.tick(save_vault.POLL_S)
+    assert out["failing"] == ["Save68"], out
+    beat = json.loads((bed["root"] / "status" / "heartbeat.json").read_text())
+    assert beat["ok"] is False and any("link failed" in n for n in beat["notes"])
+
+
+def test_a_long_pass_keeps_an_earlier_failure_visible(bed, monkeypatch):
+    s, v, c = bed["saves"], bed["vault"], bed["clock"]
+    for i in range(2):
+        write_pair(s, "Save69_{}".format(i), age=3600)
+    v.state["fails"]["x|Broken"] = save_vault.FAIL_REPORT
+    real, beats = v.capture, []
+
+    def slow(*a, **k):
+        c.tick(save_vault.BEAT_S + 1)
+        return real(*a, **k)
+    monkeypatch.setattr(v, "capture", slow)
+    real_beat = v.heartbeat
+    monkeypatch.setattr(v, "heartbeat", lambda *a, **k: (beats.append(a), real_beat(*a, **k)))
+    v.sweep()
+    assert beats and beats[0][0] is False and "Broken" in beats[0][2]
+
+
+def test_a_null_or_numeric_event_time_does_not_break_status(bed, monkeypatch):
+    s, v = bed["saves"], bed["vault"]
+    write_pair(s, "Save70", age=3600)
+    v.sweep()
+    real, good = v.events, versions(v, "Save70")[-1]
+    monkeypatch.setattr(v, "events", lambda: list(real()) + [dict(good, id="n", time=None), dict(good, id="i", time=5)])
+    assert {e["id"] for e in v.versions("Save70")} == {"n", "i", good["id"]}

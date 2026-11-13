@@ -1,7 +1,8 @@
 """Stock-build tier of the ReSaver Plus native backend: the user's own resaverpp-cli.exe, any upstream version.
 
 Imported by tools/resaver_native.py only; it has no entry point of its own, so every run goes through that adapter
-and its backups and checks. (Since 4.1 no guard rule reads ReSaver commands; the save vault keeps every version.)
+and its backups and checks. (Since 4.1 no guard rule refuses a ReSaver command; running the exe directly gets an advisory note,
+S-RESAVER-NATIVE-DIRECT, and the save vault keeps every version.)
 
 A stock build has no structured output, no preview and no save verification; those come only from the toolkit's
 patches (tools/resaver-plus/build.py). So this tier:

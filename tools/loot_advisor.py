@@ -229,11 +229,11 @@ def issues(loot, db, active, present=None):
 
 
 def advise(plugins_txt: Path, data: Path, game: Path, folders, offline=False, loot=None, fetch=_get):
-    if plugins_txt.name.casefold() != "plugins.txt":
+    if (plugins_txt.name.casefold() != "plugins.txt" if os.name == "nt" else plugins_txt.name != "Plugins.txt"):
         # libloot reads the file named Plugins.txt in the folder it is given, whatever path was passed here; a report
         # naming another file would describe a file libloot never read.
-        raise ValueError("libloot reads only a file named plugins.txt; %s is named otherwise (copy it to a folder as "
-                         "plugins.txt and pass that)" % plugins_txt)
+        raise ValueError("libloot reads only a file named Plugins.txt (any case on Windows); %s is named otherwise "
+                         "(copy it to a folder as Plugins.txt and pass that)" % plugins_txt)
     loot = loot or libloot_loader.load()
     kind = game_type(game)
     readable = (loot.LIBLOOT_VERSION_MAJOR, loot.LIBLOOT_VERSION_MINOR)

@@ -78,3 +78,14 @@ def test_the_save_vault_and_its_ini_vault_are_save_stores(tmp_path, route, which
     if route.endswith("parent"):
         other, _ = decide(tmp_path / "unrelated" / "x" / "cache")
     assert other.decision == "allow"
+
+
+def test_the_vault_is_a_save_store_even_with_no_paths_file(tmp_path):
+    """Confirmation review: an unreadable paths file gives write_rules roots=None; the vault check needs no roots."""
+    vault = tmp_path / "data" / "save-vault" / "skyrim"
+    (vault / "blobs").mkdir(parents=True)
+    log = audit.Audit("")
+    log.raw = lambda line: None
+    value = write_rules.decide(str(vault / "blobs" / "x"), log, roots=None, cwd=str(tmp_path),
+                               env={"SAVE_VAULT_DIR": str(vault)})
+    assert value.decision == "deny" and {rid for rid, _ in log.fired} == {"W-SAVE-STORE"}
