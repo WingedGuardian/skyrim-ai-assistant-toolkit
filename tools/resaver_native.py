@@ -375,13 +375,17 @@ def stock_main(argv, binary, sha, project):
     if code != 0:
         raise _stock_fail("The ReSaver executable did not print its --help", code, text, err)
     caps = resaver_stock.probe(text)
+    if not resaver_stock.is_resaver(caps):
+        raise Refused("The executable's --help has no 'ReSaver++ version' line, so it is not run on a save; point "
+                      "RESAVER_EXE (or tools/resaver-plus/stock-exe) at resaverpp-cli.exe")
     if not argv:
         raise Refused("Expected an operation and one ESS input")
     op = argv[0]
     if op in resaver_stock.STOCK_READS:
         if len(argv) < 2:
             raise Refused("Expected one ESS input")
-        if any(a.startswith("--") for a in argv[2:]):
+        if any(a.startswith("-") for a in argv[2:]):
+            # Any option, short ones too (-o, -x): a read hands its arguments to the build and takes no backup.
             raise Refused(op + " takes no options on a stock build")
         source = _ess(argv[1])
         positions = list(argv[2:])
@@ -451,7 +455,8 @@ def main(argv=None, project=ROOT):
                               "testedVersion": caps["version"] in resaver_stock.TESTED_VERSIONS,
                               "reads": sorted(op for op, (needs, _) in resaver_stock.STOCK_READS.items()
                                               if all(o in caps["options"] for o in needs)),
-                              "writes": sorted(resaver_stock.STOCK_WRITES)}))
+                              "writes": resaver_stock.writes_offered(caps),
+                              "isReSaver": resaver_stock.is_resaver(caps)}))
             return 0
         print(json.dumps(stock_main(argv, binary, binary_hash, project), ensure_ascii=True, allow_nan=False))
         return 0

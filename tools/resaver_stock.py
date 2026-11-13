@@ -56,6 +56,24 @@ def probe(text: str) -> dict:
     return {"version": m.group(1) if m else None, "options": set(OPTION.findall(text))}
 
 
+def is_resaver(caps: dict) -> bool:
+    """Its --help names itself ("ReSaver++ version N"). Without that line nothing is run: a different program, or a
+    ReSaver whose no-action default is unknown, would be handed the save."""
+    return caps["version"] is not None
+
+
+def writes_offered(caps: dict) -> list:
+    """The write operations this version's --help lists every needed option for (-o included)."""
+    out = []
+    for op, option in STOCK_WRITES.items():
+        needed = ["-o"] + ([option] if option else [])
+        if op == "clean" and not any(o in caps["options"] for o in STOCK_CLEAN.values()):
+            continue
+        if all(o in caps["options"] for o in needed):
+            out.append(op)
+    return sorted(out)
+
+
 def _needs(caps: dict, op: str, options) -> None:
     missing = [o for o in options if o not in caps["options"]]
     if missing:

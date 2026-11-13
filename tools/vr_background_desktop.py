@@ -242,7 +242,12 @@ def terminate_verified(pid, start_time: str) -> str:
     failure is excused only when the exit is proved: a complete process snapshot without the PID, or this handle
     signalling within EXIT_SETTLE_SECONDS. A live process keeps its original error."""
     _, kernel32, w = _api()
-    handle = kernel32.OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, int(pid))
+    access = PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION
+    handle = kernel32.OpenProcess(access | SYNCHRONIZE, False, int(pid))
+    if not handle and ctypes.get_last_error() == 5:
+        # A process whose access rules grant TERMINATE but not SYNCHRONIZE (4.1 review): open it without the wait
+        # right, as before 4.1. Its settle wait then fails and the original error stands; nothing is excused.
+        handle = kernel32.OpenProcess(access, False, int(pid))
     if not handle:
         error = ctypes.get_last_error()
         if error == 87 and process_generation_limited(pid) is None:

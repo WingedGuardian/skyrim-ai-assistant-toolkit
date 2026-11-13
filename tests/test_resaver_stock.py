@@ -47,12 +47,14 @@ class Stock:
         self.exit = 0
         self.reread_exit = 0
         self.on_write = None
+        self.help = None                    # a whole --help text, replacing the canned one
 
     def __call__(self, cmd):
         args = cmd[cmd.index(str(self.exe)) + 1:]
         self.calls.append(args)
         if args == ["--help"]:
-            return SimpleNamespace(stdout=help_text(self.version, self.options).encode(), stderr=b"", returncode=0)
+            text = self.help if self.help is not None else help_text(self.version, self.options)
+            return SimpleNamespace(stdout=text.encode(), stderr=b"", returncode=0)
         if "-o" in args:
             out = Path(args[args.index("-o") + 1])
             out.write_bytes(b"edited")
@@ -273,7 +275,32 @@ def test_verify_reports_the_stock_build(stock):
 
 
 def test_the_stock_module_has_no_entry_point_of_its_own():
-    """The guard judges ReSaver writes by the adapter's name (shell_rules S-RESAVER-APPLY: `resaver_native`);
-    a second runnable adapter would be an unjudged write path."""
+    """Every stock run goes through resaver_native (its backups and checks); a second runnable adapter would be a
+    write path without them."""
     source = (REPO / "tools" / "resaver_stock.py").read_text(encoding="utf-8")
     assert "__main__" not in source and "sys.argv" not in source
+
+
+# ------------------------------------------------------------------------------------------------ 4.1 review fixes
+
+def test_a_program_whose_help_does_not_name_resaver_is_not_run(stock):
+    stock.help = "usage: something-else <file>\n  --frobnicate   does a thing\n"
+    code, out = call(stock, "info", stock.source)
+    assert code == 2 and "ReSaver++ version" in out["error"], out
+    assert stock.runs() == []
+
+
+def test_a_short_option_after_a_read_is_refused(stock):
+    code, out = call(stock, "quests", stock.source, "-o")
+    assert code == 2 and "takes no options" in out["error"], out
+    assert stock.runs() == []
+
+
+def test_verify_lists_only_the_writes_this_version_can_do(stock):
+    stock.options = [o for o in SKYRIM_56 if o != "--purify-formlists"]
+    code, out = call(stock, "--verify")
+    assert code == 0 and "cleanse-formlists" not in out["writes"] and "reset-havok" in out["writes"], out
+    stock.options = [o for o in SKYRIM_56 if o != "-o"]
+    stock.help = help_text("56", stock.options).replace(" [-o <out.ess>]", "")
+    code, out = call(stock, "--verify")
+    assert code == 0 and out["writes"] == [], out

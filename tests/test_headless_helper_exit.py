@@ -198,3 +198,23 @@ def test_a_census_slower_than_the_whole_budget_still_terminates_what_it_proved(t
     monkeypatch.setattr(mod, "read_process_tree", stalled_census)
     mod.stop_owned(mod.load_state())
     assert 40 in world.terminated
+
+
+def test_a_helper_that_refuses_only_the_wait_right_is_still_terminated(monkeypatch):
+    """4.1 review: SYNCHRONIZE was added to the open; a process granting TERMINATE without it must still be stopped."""
+    import vr_background_desktop as desktop
+    desktop_, closed, sent = _fake(monkeypatch)
+    error = {"value": 0}
+    asked = []
+
+    def open_process(access, inherit, pid):
+        asked.append(access)
+        if access & desktop.SYNCHRONIZE:
+            error["value"] = 5
+            return 0
+        return 77
+    kernel = desktop._api()[1]
+    monkeypatch.setattr(kernel, "OpenProcess", open_process)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: error["value"], raising=False)
+    assert desktop.terminate_verified(55, EPOCH) == "terminated"
+    assert len(asked) == 2 and not asked[1] & desktop.SYNCHRONIZE and len(sent) == 1

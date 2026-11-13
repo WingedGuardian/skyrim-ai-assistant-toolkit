@@ -13,7 +13,7 @@ spec.loader.exec_module(mt)
 
 NIF = "\n".join([
     "nif inspect — profile 'profile'  (2 meshes)", "",
-    "meshes\\weapons\\a.nif", "  read from: \"Data\" (loose)",
+    "meshes\\weapons\\a.nif", "  read from: \"Data\" (loose)", "  version: Gamebryo File Format  [Skyrim SE]",
     "--- paths (embedded texture-set slots) ---",
     "  'Blade':", "    tex[0] (Diffuse): textures\\weapons\\a.dds", "    tex[1] (Normal): textures\\weapons\\a_n.dds",
     "  'Gem':", "    tex[0] (Diffuse): weapons\\gem.dds", "",
@@ -38,7 +38,8 @@ def fake(present, incomplete=False):
 
 
 def test_slots_shapes_and_unread_meshes_are_parsed():
-    uses, unread = mt.textures_of(NIF, ["meshes/weapons/a.nif", "meshes\\weapons\\gone.nif"])
+    uses, unread, unanswered = mt.textures_of(NIF, ["meshes/weapons/a.nif", "meshes\\weapons\\gone.nif"])
+    assert unanswered == []
     assert set(uses) == {"textures\\weapons\\a.dds", "textures\\weapons\\a_n.dds", "textures\\weapons\\gem.dds"}
     assert uses["textures\\weapons\\gem.dds"] == [("meshes/weapons/a.nif", "Gem")]       # prefix added, shape kept
     assert unread == ["meshes\\weapons\\gone.nif"]
@@ -68,3 +69,34 @@ def test_a_gateway_failure_is_could_not_check(monkeypatch, capsys):
     monkeypatch.setattr(mt, "call", broken)
     assert mt.main(["meshes\\weapons\\a.nif"]) == 2
     assert "gateway not set up" in capsys.readouterr().err
+
+
+def test_a_mesh_house_carl_gave_no_answer_for_is_could_not_check(monkeypatch, capsys):
+    """4.1 review: a mesh missing from the output, or named without being read, must never count as clean."""
+    present = {"textures\\weapons\\a.dds", "textures\\weapons\\a_n.dds", "textures\\weapons\\gem.dds"}
+    monkeypatch.setattr(mt, "call", fake(present))
+    assert mt.main(["meshes\\weapons\\a.nif", "meshes\\weapons\\never-mentioned.nif"]) == 2
+    assert "no answer" in capsys.readouterr().err
+    _, _, unanswered = mt.textures_of("meshes\\x.nif\n  could not parse: bad header", ["meshes/x.nif"])
+    assert unanswered == ["meshes/x.nif"]
+
+
+def test_a_forward_slash_header_is_matched():
+    text = NIF.replace("meshes\\weapons\\a.nif", "meshes/weapons/a.nif")
+    uses, _, unanswered = mt.textures_of(text, ["meshes\\weapons\\a.nif"])
+    assert uses and unanswered == []
+
+
+def test_a_texture_asset_status_did_not_answer_for_is_could_not_check(monkeypatch, capsys):
+    def call(tool, arguments):
+        if tool == "housecarl_nif_inspect":
+            return NIF
+        return json.dumps({"read_incomplete": False, "bsa_failures": [], "results": []})
+    monkeypatch.setattr(mt, "call", call)
+    assert mt.main(["meshes\\weapons\\a.nif"]) == 2
+    assert "no answer" in capsys.readouterr().err
+
+
+def test_an_absent_mesh_alone_is_not_clean(monkeypatch):
+    monkeypatch.setattr(mt, "call", fake(set()))
+    assert mt.main(["meshes\\weapons\\gone.nif"]) == 1

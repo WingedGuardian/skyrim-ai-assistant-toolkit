@@ -7,7 +7,8 @@ header, and reports what would stop the game loading them or make a patch built 
   unreadable  a file whose TES4 header cannot be read
   master-missing   a master that is not on disk at all
   master-inactive  a master on disk but not active
-  master-order     a master that loads AFTER the plugin that needs it
+  master-order     a master that loads AFTER the plugin that needs it (in the engine's order: master-flagged
+                   plugins load before the rest, whatever plugins.txt says)
 It is a check for the agent, not a player warning: Wrye Bash and the mod manager already show these to the player.
 It changes nothing and never fixes anything.
 
@@ -82,9 +83,8 @@ def check(plugins_txt: Path, data: Path, game: Path, folders):
     for name in implicit_masters(game, data) + listed_active:
         if name.casefold() not in {n.casefold() for n in order}:
             order.append(name)
-    position = {n.casefold(): i for i, n in enumerate(order)}
-    findings = []
-    for i, name in enumerate(order):
+    findings, headers = [], {}
+    for name in order:
         path = locate(name, data, folders)
         if path is None:
             if name in BASE[2:] and name not in listed_active:
@@ -92,9 +92,20 @@ def check(plugins_txt: Path, data: Path, game: Path, folders):
             findings.append({'kind': 'missing', 'plugin': name})
             continue
         try:
-            header = plugin_header(path)
+            headers[name] = plugin_header(path)
         except (OSError, Refusal) as exc:
             findings.append({'kind': 'unreadable', 'plugin': name, 'detail': str(exc)})
+    # The engine loads every master-flagged plugin (the ESM flag, or an .esm/.esl name) before the others, whatever
+    # plugins.txt says, so a master's position is judged in that order. A plugin with no readable header is placed
+    # by its extension.
+    def is_master(name):
+        h = headers.get(name)
+        return h['master'] if h is not None else name.lower().endswith(('.esm', '.esl'))
+    order = [n for n in order if is_master(n)] + [n for n in order if not is_master(n)]
+    position = {n.casefold(): i for i, n in enumerate(order)}
+    for i, name in enumerate(order):
+        header = headers.get(name)
+        if header is None:
             continue
         for master in header['masters']:
             j = position.get(master.casefold())

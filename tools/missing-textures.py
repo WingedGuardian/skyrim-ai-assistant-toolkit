@@ -9,7 +9,8 @@ Suggesting a replacement (the vanilla texture, a different mod's copy) is left t
 
 Needs the optional House Carl gateway (docs/housecarl.md).
 Usage:  python tools/missing-textures.py MESH [MESH...] | --under 'meshes/armor/**/*.nif'  [--json]
-Exit:   0 none missing · 1 missing textures (listed) · 2 could not check (named)
+Exit:   0 none missing · 1 missing textures or meshes (listed) · 2 could not check (named; a mesh or texture
+        House Carl gave no answer for is could-not-check, never clean)
 """
 from __future__ import annotations
 
@@ -51,16 +52,23 @@ def norm(path):
 
 
 def textures_of(text, meshes):
-    """{texture: [(mesh, shape)]} from nif_inspect's `paths` section, and the meshes it could not read."""
+    """{texture: [(mesh, shape)]} from nif_inspect's `paths` section, the meshes it says are ABSENT, and the meshes it
+    did not answer for: never named, or named without a `version:` line (read) or ABSENT. A mesh in that last list
+    makes the run COULD NOT CHECK; an unanswered mesh must never count as one with no missing textures."""
     uses, unread, mesh, shape = {}, [], None, None
     names = {m.replace('/', '\\').lower(): m for m in meshes}
+    answered = set()
     for line in text.splitlines():
-        key = line.strip().lower()
-        if not line.startswith(' ') and key in names:
-            mesh, shape = names[key], None
+        key = line.strip().replace('/', '\\').lower()
+        if not line.startswith(' ') and key.endswith('.nif'):
+            mesh, shape = names.get(key), None     # a mesh not asked about ends the previous one's block too
             continue
         if mesh is not None and line.strip().startswith('ABSENT'):
             unread.append(mesh)
+            answered.add(mesh)
+            continue
+        if mesh is not None and line.startswith('  version:'):
+            answered.add(mesh)
             continue
         m = SHAPE.match(line)
         if m:
@@ -69,7 +77,7 @@ def textures_of(text, meshes):
         m = SLOT.match(line)
         if m and mesh is not None:
             uses.setdefault(norm(m.group('path')), []).append((mesh, shape))
-    return uses, unread
+    return uses, unread, [m for m in meshes if m not in answered]
 
 
 def meshes_under(selector):
@@ -85,7 +93,9 @@ def check(meshes):
     for i in range(0, len(meshes), BATCH):
         part = meshes[i:i + BATCH]
         text = call('housecarl_nif_inspect', {'mesh_paths': part, 'sections': 'paths', 'max_chars': 2000000})
-        found, missing_meshes = textures_of(text, part)
+        found, missing_meshes, unanswered = textures_of(text, part)
+        if unanswered:
+            raise RuntimeError('nif_inspect gave no answer for %d mesh(es), e.g. %s' % (len(unanswered), unanswered[0]))
         for tex, rows in found.items():
             uses.setdefault(tex, []).extend(rows)
         unread += missing_meshes
@@ -95,6 +105,11 @@ def check(meshes):
         data = json.loads(call('housecarl_asset_status', {'asset_paths': textures[i:i + 500], 'format': 'json',
                                                           'max_chars': 2000000}))
         incomplete = incomplete or bool(data.get('read_incomplete') or data.get('bsa_failures'))
+        asked = {t.lower() for t in textures[i:i + 500]}
+        told = {r['path'].lower() for r in data['results'] if isinstance(r.get('exists'), bool)}
+        if asked - told:
+            raise RuntimeError('asset_status gave no answer for %d texture(s), e.g. %s'
+                               % (len(asked - told), sorted(asked - told)[0]))
         absent += [r['path'] for r in data['results'] if r.get('exists') is False]
     return {'meshes': len(meshes), 'unread_meshes': unread, 'textures': len(textures), 'incomplete': incomplete,
             'missing': [{'texture': t, 'used_by': [{'mesh': m, 'shape': s} for m, s in uses.get(t, uses.get(norm(t), []))]}
@@ -128,7 +143,7 @@ def main(argv=None):
     if out['incomplete']:
         print('COULD NOT CHECK: an archive could not be read, so "missing" may be wrong.', file=sys.stderr)
         return 2
-    return 1 if out['missing'] else 0
+    return 1 if out['missing'] or out['unread_meshes'] else 0
 
 
 if __name__ == '__main__':

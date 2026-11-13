@@ -716,3 +716,27 @@ def test_a_vague_token_is_rejected_by_number_never_text(tmp_path, tokens, bad):
 
 def test_sound_tokens_pass_the_floor():
     assert _mod().token_problems({"LEAK_TOKENS": TOKEN_NAME + "\n" + TOKEN_PATH + "\n/home/" + TOKEN_NAME}) == []
+
+
+def test_the_libloot_wheels_and_their_gpl_source_must_ship_and_match(tmp_path):
+    """4.1 review: the payload gate asserts the libloot binaries and the source pack the licence requires beside them."""
+    import hashlib
+    mod = _mod()
+    for sub, name, data in (("wheels", "libloot-0.29.7-cp310-cp310-win_amd64.whl", b"wheel"),
+                            ("source", "libloot-0.29.7-abc-source.tar.gz", b"pack")):
+        folder = tmp_path / "tools" / "libloot" / sub
+        folder.mkdir(parents=True)
+        (folder / name).write_bytes(data)
+        (folder / "SHA256SUMS").write_text("%s *%s\n" % (hashlib.sha256(data).hexdigest(), name))
+
+    def problems():
+        return [p for _, p in mod.check_libloot(tmp_path) if p]
+    assert problems() == []
+    assert any("tools/libloot/wheels" in name for name, _ in mod.check_shape(tmp_path))   # wired into the shape gate
+    pack = tmp_path / "tools" / "libloot" / "source" / "libloot-0.29.7-abc-source.tar.gz"
+    pack.write_bytes(b"changed")
+    assert any("not matching" in p for p in problems())
+    pack.unlink()
+    assert problems() == ["none shipped"]
+    assert "tools/save_vault.py" in mod.CORE_REQUIRED and "tools/libloot/COPYING" in mod.CORE_REQUIRED
+    assert "tools/resaver-plus/stock-exe" in mod.ABSENT_PATHS

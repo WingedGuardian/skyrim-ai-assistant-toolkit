@@ -86,6 +86,17 @@ CORE_REQUIRED = (
     "tools/skse-load-status.py",
     "tools/plugin-check.py",          # v4.1.0: load-order check for the agent
     "tools/postmortem.py",            # v4.1.0: last-session report (crash, Papyrus, SKSE)
+    "tools/crash-triage.py",          # postmortem.py imports both triage tools when it starts
+    "tools/papyrus-triage.py",
+    "tools/save_vault.py",            # v4.1.0: the save vault, the only way back for a changed save
+    "tools/skyguard/vault_watch.py",
+    "tools/loot_advisor.py",          # v4.1.0: LOOT's read-only advice, through libloot
+    "tools/libloot/libloot_loader.py",
+    "tools/libloot/build.py",
+    "tools/libloot/build-requirements.lock",
+    "tools/libloot/PROVENANCE.json",
+    "tools/libloot/NOTICE.md",
+    "tools/libloot/COPYING",          # libloot's GPL-3.0 text, beside its binaries
     "tools/missing-textures.py",      # v4.1.0: textures meshes name that nothing provides (House Carl)
     "tools/archive-triage.py",
     "tools/mirror-launch-logs.py",
@@ -162,6 +173,7 @@ ABSENT_PATHS = (
     "tools/resaver-plus/build",
     "tools/resaver-plus/work",
     "tools/resaver-plus/backend",
+    "tools/resaver-plus/stock-exe",   # the user's own path to their stock ReSaver build
     "tools/resaver-plus/contributions",
     "tools/resaver-port",
     "tools/resaver-port-contributions.py",
@@ -245,6 +257,31 @@ def check_shape(root: Path):
                     if p.is_file() and not p.name.endswith(".example")})
     yield "no dotenv-style file (.env, *.env, .env.*) anywhere", ("PRESENT: " + ", ".join(found)) if found else None
     yield from check_resaver_plus(root)
+    yield from check_libloot(root)
+
+
+LIBLOOT = "tools/libloot"
+
+
+def check_libloot(root: Path):
+    """The shipped libloot wheels and the GPL source pack they were built from: at least one of each, each listed in
+    its folder's SHA256SUMS and matching it (the licence requires the source to ship with the binaries)."""
+    import hashlib
+    for sub, pattern in (("wheels", "*.whl"), ("source", "*.tar.gz")):
+        folder = root / LIBLOOT / sub
+        listed = {}
+        sums = folder / "SHA256SUMS"
+        if sums.is_file():
+            for line in sums.read_text(encoding="utf-8").splitlines():
+                parts = line.split()
+                if len(parts) == 2:
+                    listed[parts[1].lstrip("*")] = parts[0].lower()
+        files = sorted(folder.glob(pattern)) if folder.is_dir() else []
+        bad = [f.name for f in files if listed.get(f.name) != hashlib.sha256(f.read_bytes()).hexdigest()]
+        missing = sorted(set(listed) - {f.name for f in files})
+        problem = ("none shipped" if not files else "not matching SHA256SUMS: " + ", ".join(bad) if bad
+                   else "listed but absent: " + ", ".join(missing) if missing else None)
+        yield "{}/{} ({}) shipped and matching SHA256SUMS".format(LIBLOOT, sub, pattern), problem
 
 
 def check_resaver_plus(root: Path):

@@ -89,9 +89,13 @@ line in `tools/resaver-plus/stock-exe`) at that executable's absolute path and u
 - A version whose `--help` this toolkit has not read (it has read 51, 56 and 68) still works and is marked
   "untested version".
 
-The guard denies `resaverpp-cli.exe` run directly with a save-writing flag (`-o`, `--batch`, `--batch-all`,
-`--apply`) and any launch of the GUI (`ReSaverPP.exe`, which this build does not produce): rule
-S-RESAVER-NATIVE-DIRECT.
+Running `resaverpp-cli.exe` directly with a save-writing flag (`-o`, `--batch`, `--batch-all`, `--apply`), or the
+GUI (`ReSaverPP.exe`, which this build does not produce), gets an advisory note (rule S-RESAVER-NATIVE-DIRECT), not
+a refusal: use `resaver-cli.sh` instead, which takes the pair backups and runs the checks above. Since 4.1 the save
+vault keeps every version of the save either way.
+
+- A stock executable whose `--help` has no `ReSaver++ version` line is not run on a save. `--verify` lists only the
+  reads and writes that version's `--help` covers.
 
 ## Limits (what is not qualified)
 

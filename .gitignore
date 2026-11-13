@@ -47,6 +47,7 @@ tools/vr-emu-driver/work/
 tools/resaver-plus/build/
 tools/resaver-plus/work/
 tools/resaver-plus/backend
+tools/resaver-plus/stock-exe
 .modding-agent-harness/
 # Session charters: each session's first prompt, goal and open items (private, per install).
 .agent-sessions/

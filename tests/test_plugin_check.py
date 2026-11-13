@@ -83,3 +83,14 @@ def test_the_cli_exit_codes(game, capsys, monkeypatch):
     assert pc.main(["--plugins-txt", str(root / "plugins.txt"), "--data", str(data)]) == 0
     assert pc.main(["--plugins-txt", str(root / "nope.txt"), "--data", str(data)]) == 2
     assert "not a clean result" in capsys.readouterr().err
+
+
+def test_master_order_is_judged_in_the_engines_order(game):
+    """4.1 review: master-flagged plugins load before the rest whatever plugins.txt says."""
+    data = game[1]
+    (data / "Flagged.esp").write_bytes(header(["Skyrim.esm"], flags=1))     # ESM-flagged .esp: loads with masters
+    (data / "Patch.esp").write_bytes(header(["Flagged.esp"]))
+    assert run(game, ["*Patch.esp", "*Flagged.esp"]) == []                  # listed later, still loads first
+    (data / "NeedsEsp.esm").write_bytes(header(["Plain.esp"], flags=1))
+    (data / "Plain.esp").write_bytes(header())
+    assert ("master-order", "NeedsEsp.esm", "Plain.esp") in run(game, ["*Plain.esp", "*NeedsEsp.esm"])
