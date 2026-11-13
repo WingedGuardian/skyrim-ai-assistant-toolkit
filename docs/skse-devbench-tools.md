@@ -1,8 +1,11 @@
 # SKSE plugins: register a DevBench tool, and fingerprint your build
 
 Two small techniques for SKSE plugins you write or debug alongside this toolkit. Neither is a toolkit component.
-**Status:** written from DevBench 1.32.0's own `DevBenchAPI.h` and its upstream vcpkg port README. The toolkit has not
-yet run a plugin that registers a tool on Skyrim VR. The build-number gates below are the header's own.
+**Status:** run on Skyrim VR on 2026-11-13. A throwaway test plugin built against CommonLibSSE-NG v9.3.0 (alandtse `ng`,
+one DLL for SE, AE and VR) loaded beside DevBench 1.35.0 (build `13500`) and was checked from outside with the requests
+below, at the main menu. Measured there: the tool was listed and answered, the `inspect` extension answered, the event
+arrived, and a second `RegisterTool` with the same name returned `false`. The build-number gates are the header's own;
+only the `10500` gate was exercised.
 
 ## 1. Let your plugin answer through DevBench instead of a log file
 
@@ -12,7 +15,8 @@ another SKSE plugin can add its own tool to that server. An agent then asks the 
 the plugin writes. That reuses a supported server rather than building your own pipe, socket or polling log.
 
 **Get the API.** `DevBenchAPI.h` and `DevBenchAPI.cpp` are MIT-licensed (the DevBench plugin itself is GPL-3.0), so any
-plugin may compile them in. DevBench's download installs them under `Data/Developer/`. Upstream also ships a vcpkg port
+plugin may compile them in. The 1.35.0 download does not contain them, so take both files from the upstream repository
+at the tag matching your installed DevBench (`alandtse/devbench`). Upstream also ships a vcpkg port
 (`cmake/ports/devbench-api/` in `alandtse/devbench`), and its README says to prefer it over copying the files, because
 copies drift. It is not in the official vcpkg registry, so use it as an overlay port, and check its `portfile.cmake` for
 a published `REF` before relying on it.
@@ -58,17 +62,22 @@ void OnMessage(SKSE::MessagingInterface::Message* m)
 - **Names.** A name already registered is replaced, and `RegisterTool` returns `false`. Prefix names with your mod
   (`mymod.status`).
 - **Build gates.** `GetBuildNumber()` returns `MAJOR*10000 + MINOR*100 + PATCH`. `RegisterMenuHandler` exists only on
-  builds of at least `10400` (1.4.0), and `RegisterToolExtension` only on builds of at least `10500` (1.5.0). Calling
-  either below its gate calls past the end of the interface. `RegisterToolExtension("inspect", "<key>", ...)` adds an
+  builds of at least `10400` (1.4.0), `RegisterToolExtension` only on builds of at least `10500` (1.5.0),
+  `SetTimeScale`/`GetTimeScale` from `12000` (1.20.0), and `PostNotice`/`ClearNotice` from `13400` (1.34.0). Calling
+  any of them below its gate calls past the end of the interface. `RegisterToolExtension("inspect", "<key>", ...)` adds an
   `inspect kind=<key>` instead of a new top-level tool. DevBench 1.30's `inspect kind=draws` is provided that way by a
   renderer plugin.
 - **Events.** `EmitEvent(topic, payloadJson)` publishes to MCP notifications and `GET /api/events?since=N`.
 
-**Check it live.** Start the game with a save loaded, then:
+**Check it live.** Start the game. The main menu is enough for a tool that reads only your own snapshot; a tool that
+reads game state needs a save loaded. Then:
 ```bash
 curl -s http://127.0.0.1:8921/api/tools | grep mymod
 curl -s -X POST http://127.0.0.1:8921/api/tool/mymod.status -H "Content-Type: application/json" -d '{}'
+curl -s "http://127.0.0.1:8921/api/events" | grep mymod      # after an EmitEvent
 ```
+At the main menu DevBench 1.35 adds its own `"blockedBy":[{"name":"Main Menu",...}]` field to your tool's JSON answer.
+That field is DevBench's, not yours, so a test of your tool's answer must allow fields it did not write.
 
 ## 2. Fingerprint the build your plugin was compiled as
 
@@ -87,6 +96,11 @@ Compare that line with the values you expect for the runtime. A mismatch is a wr
 in one log line instead of a crash.
 - **VR differs.** Its node and geometry classes are larger: CommonLib asserts `BSGeometry` at 416 bytes on VR against
   344 on AE.
+- **In one DLL for SE, AE and VR, `sizeof` is not the engine's size.** Members whose layout differs by runtime are read
+  through accessors there, so the declared struct stops early: the multi-runtime test build logged `Actor 192 |
+  PlayerCharacter 488` on VR, far below the engine's real objects. In that build the line identifies the headers the DLL
+  was compiled with, and `REL::Module::IsVR()` gives the runtime; compare its sizes only against another build of the
+  same kind. In a single-runtime build the values are the runtime's own.
 - **Only log what you read.** Log the members your plugin actually reads, not a fixed list.
 - **Credit.** The idea comes from the `LayoutValidator` plugin in ByteBard97/skyrim-re-toolkit (MIT), whose runtime
   checks were run on AE 1.6.1170.
