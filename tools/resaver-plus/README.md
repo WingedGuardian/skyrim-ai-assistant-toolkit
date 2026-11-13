@@ -86,7 +86,7 @@ line in `tools/resaver-plus/stock-exe`) at that executable's absolute path and u
   the result in game. (User ruling 2026-11-05: stock builds may edit, with these checks.)
 - The structured operations (`find-refs`, `changeform`, `freeze-report`, `verify-roundtrip` and the others) need the
   patched build and exit 3 on stock.
-- A version whose `--help` this toolkit has not read (it has read 51 and 56) still works and is marked
+- A version whose `--help` this toolkit has not read (it has read 51, 56 and 68) still works and is marked
   "untested version".
 
 The guard denies `resaverpp-cli.exe` run directly with a save-writing flag (`-o`, `--batch`, `--batch-all`,

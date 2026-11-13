@@ -20,7 +20,7 @@ import re
 
 # The upstream versions whose --help this toolkit has read. Any other version still works when its --help lists the
 # options; its results say "untested version".
-TESTED_VERSIONS = {"51", "56"}
+TESTED_VERSIONS = {"51", "56", "68"}     # 68: its --help read 2026-11-12, every option below listed
 CAPABILITY_EXIT = 3
 VERSION = re.compile(r"ReSaver\+\+ version (\S+)")
 OPTION = re.compile(r"(?<![\w-])(--[a-z][a-z0-9-]*|-o)(?![\w-])")
