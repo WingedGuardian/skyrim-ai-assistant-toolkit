@@ -266,17 +266,17 @@ def _b64(data):
     return base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
 
 
-def make_wheel(folder, body=b"VALUE = 'fake loot'\n", extra=None, list_it=True, platform=None):
+def make_wheel(folder, body=b"VALUE = 'fake loot'\n", extra=None, list_it=True, platform=None, version="0.29.7"):
     tag = "cp%d%d" % sys.version_info[:2]
     plat = platform or ("win_amd64" if sys.platform == "win32" else "linux_x86_64")
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / "libloot-0.29.7-{0}-{0}-{1}.whl".format(tag, plat)
+    path = folder / "libloot-{2}-{0}-{0}-{1}.whl".format(tag, plat, version)
     files = {"loot/__init__.py": body}
     record = "".join("%s,sha256=%s,%d\n" % (n, _b64(d), len(d)) for n, d in files.items())
     with zipfile.ZipFile(path, "w") as z:
         for n, d in files.items():
             z.writestr(n, d)
-        z.writestr("libloot-0.29.7.dist-info/RECORD", record + "libloot-0.29.7.dist-info/RECORD,,\n")
+        z.writestr("libloot-%s.dist-info/RECORD" % version, record + "libloot-%s.dist-info/RECORD,,\n" % version)
         for n, d in (extra or {}).items():
             z.writestr(n, d)
     if list_it:
@@ -329,7 +329,7 @@ def test_a_wheel_member_outside_its_folder_is_refused_and_nothing_is_left(tmp_pa
 @pytest.mark.skipif(sys.platform != "win32", reason="the shipped wheels are for Windows x64 only")
 def test_a_shipped_wheel_for_another_platform_is_not_used(tmp_path):
     make_wheel(tmp_path / "shipped", platform="linux_x86_64")
-    with pytest.raises(libloot_loader.Unavailable, match="no libloot wheel"):
+    with pytest.raises(libloot_loader.Unavailable, match="no libloot [0-9.]+ wheel"):
         libloot_loader.wheel(shipped=tmp_path / "shipped", built=tmp_path / "none")
 
 
@@ -367,3 +367,93 @@ def test_record_refuses_an_artifact_that_does_not_match_its_run(tmp_path):
     with pytest.raises(SystemExit, match="does not match"):
         libloot_build.record(art, "124", wheels=tmp_path / "w2", source=tmp_path / "s2", provenance=prov)
     assert not (tmp_path / "w2").exists()
+
+
+# ---- 4.1 release review fixes
+
+def test_a_built_wheel_of_another_version_is_never_picked(tmp_path, fresh_import):
+    """A stale (or newer) build left in the build folder must not beat the carried version (PROVENANCE.json)."""
+    assert libloot_loader.version() == "0.29.7"
+    make_wheel(tmp_path / "built", version="0.29.6", body=b"VALUE = 'stale'\n")
+    if sys.platform == "win32":
+        shipped = make_wheel(tmp_path / "shipped")
+        assert libloot_loader.wheel(shipped=tmp_path / "shipped", built=tmp_path / "built") == shipped
+    else:
+        with pytest.raises(libloot_loader.Unavailable, match="no libloot 0.29.7 wheel"):
+            libloot_loader.wheel(shipped=tmp_path / "shipped", built=tmp_path / "built")
+
+
+def test_a_file_the_wheel_does_not_hold_is_refused(tmp_path, fresh_import):
+    make_wheel(tmp_path / "built")
+    kw = dict(shipped=tmp_path / "none", built=tmp_path / "built", cache=tmp_path / "cache")
+    libloot_loader.load(**kw)
+    sys.modules.pop("loot", None)
+    [extracted] = [p for p in (tmp_path / "cache").iterdir() if p.is_dir()]
+    (extracted / "json.py").write_text("planted = True\n")
+    with pytest.raises(libloot_loader.Unavailable, match="does not"):
+        libloot_loader.load(**kw)
+
+
+def test_a_plugins_file_with_another_name_is_refused(install, tmp_path):
+    game, local, names = install
+    other = local / "test-order.txt"
+    other.write_text("*Skyrim.esm\n", encoding="utf-8")
+    fake = FakeLoot(names, {"Skyrim.esm"}, ["Skyrim.esm"])
+    with pytest.raises(ValueError, match="named plugins.txt"):
+        loot_advisor.advise(other, game / "Data", game, [], loot=fake, fetch=Net())
+
+
+def test_a_cached_masterlist_this_libloot_cannot_read_is_not_used(tmp_path):
+    net = Net()
+    loot_advisor.masterlist("SkyrimVR", (0, 29), fetch=net, cache=tmp_path)      # caches branch v0.26
+    net.down = True
+    with pytest.raises(ValueError, match="does not read"):
+        loot_advisor.masterlist("SkyrimVR", (0, 21), fetch=net, cache=tmp_path)
+
+
+def test_a_fresh_masterlist_that_does_not_parse_never_becomes_the_cache(tmp_path):
+    net = Net()
+    loot_advisor.masterlist("SkyrimVR", (0, 21), fetch=net, cache=tmp_path)
+    meta = (tmp_path / "skyrimvr" / "meta.json").read_bytes()
+    net2 = Net(ml_commit="c" * 40)
+
+    def bad(ml, pre):
+        raise RuntimeError("unknown key")
+    ml, _, src = loot_advisor.masterlist("SkyrimVR", (0, 21), fetch=net2, cache=tmp_path, validate=bad)
+    assert src["from_cache"] is True and "did not parse" in src["fetch_problem"]
+    assert (tmp_path / "skyrimvr" / "meta.json").read_bytes() == meta
+
+
+def test_a_malformed_commit_id_is_refused():
+    net = Net(ml_commit="../../x")
+    with pytest.raises(ValueError, match="malformed commit"):
+        loot_advisor.newest_branch("skyrimvr", (0, 21), net)
+
+
+def test_an_oversized_download_is_refused(monkeypatch):
+    class Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self, n=-1):
+            return b"x" * (n if n > 0 else loot_advisor.MAX_DOWNLOAD + 1)
+    monkeypatch.setattr(loot_advisor.urllib.request, "urlopen", lambda req, timeout=0: Resp())
+    with pytest.raises(ValueError, match="refused"):
+        loot_advisor._get("https://example.invalid/x")
+
+
+def test_a_say_message_alone_exits_0(monkeypatch, capsys, install, tmp_path):
+    game, local, names = install
+    fake = FakeLoot(names, {"Skyrim.esm", "A.esp", "B.esp"}, ["Skyrim.esm", "A.esp", "B.esp"],
+                    general=[Msg("say", "just a note")])
+    monkeypatch.setattr(loot_advisor.skyrim_paths, "game_root", lambda: (game, "test"))
+    monkeypatch.setattr(loot_advisor, "_plugin_check", lambda: types.SimpleNamespace(
+        mo2_folders=lambda env: ([], None), locate=lambda n, d, f: str(game / "Data" / n)))
+    monkeypatch.setattr(loot_advisor.libloot_loader, "load", lambda: fake)
+    monkeypatch.setattr(loot_advisor, "CACHE", tmp_path / "cache")
+    monkeypatch.setattr(loot_advisor, "_get", lambda url, timeout=20.0: Net()(url))
+    assert loot_advisor.main(["--plugins-txt", str(local / "plugins.txt")]) == 0
+    assert "just a note" in capsys.readouterr().out

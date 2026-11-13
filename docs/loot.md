@@ -3,7 +3,8 @@
 `tools/loot_advisor.py` tells the agent what LOOT would say about the active load order. It changes nothing: it
 never writes `plugins.txt`, `loadorder.txt` or LOOT's own files, and it never calls libloot's order-writing
 functions (a test runs it against a fake libloot that fails on any such call, and a mutation test proves that test
-goes red when one is added).
+goes red when one is added). That test cannot see inside the real libloot; the E2E run on a real install compares
+`plugins.txt` and `loadorder.txt` byte for byte before and after.
 
 ```bash
 python tools/loot_advisor.py            # summary
@@ -20,8 +21,11 @@ python tools/loot_advisor.py --offline  # the last fetched masterlist, no networ
   counts when active, any other file when it is on disk under Data or an enabled MO2 mod folder); incompatibilities
   where both sides are active.
 
-Exit 0 when LOOT has nothing to add, 1 with findings, 2 when it could not check (the reason is printed; it is never
-reported as clean).
+Exit 0 when LOOT would move nothing and has nothing but notes (its `say` messages are listed, not counted), 1 with
+moves or findings, 2 when it could not check (the reason is printed; it is never reported as clean).
+
+`--plugins-txt` must name a file called `plugins.txt`: libloot reads the file of that name in the folder it is
+given, so any other name is refused rather than reported under a name libloot never read.
 
 ## A move is advice
 
@@ -32,9 +36,11 @@ the order.
 ## The masterlist
 
 LOOT's masterlist and prelude are fetched from LOOT's GitHub repositories at run time: the newest `vX.Y` branch this
-libloot can read (the report names the branch and commit). They are cached in `.skyguard/loot/masterlists/` (the
-current and previous copy). When the fetch fails, the last copy is used and the report says CACHED with the reason;
-with no copy at all the result is could-not-check.
+libloot can read (the report names the branch and commit). A fresh download is parsed by libloot before it replaces
+the cached copy, so a masterlist libloot cannot read never becomes the cache. They are cached in
+`.skyguard/loot/masterlists/` (the current copy and at most one earlier). When the fetch fails, the last copy is used
+and the report says CACHED with the reason, but only when its branch is one this libloot reads; with no usable copy
+the result is could-not-check.
 
 ## libloot
 
@@ -51,7 +57,9 @@ python -m pip install --only-binary=:all: --require-hashes -r tools/libloot/buil
 python tools/libloot/build.py build      # needs Rust (https://rustup.rs); about a minute
 ```
 
-The build goes to `.skyguard/loot/built/`, which the loader prefers over the shipped wheels.
+The build goes to `.skyguard/loot/built/`, which the loader prefers over the shipped wheels. Only a wheel of the
+version in `PROVENANCE.json` is ever taken, from either folder: an older or newer build left there is ignored. The
+loader also refuses a file in the unpacked copy that the wheel does not hold.
 
 ## Limits
 

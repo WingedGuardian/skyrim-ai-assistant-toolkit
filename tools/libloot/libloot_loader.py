@@ -16,6 +16,7 @@ import csv
 import hashlib
 import importlib
 import io
+import json
 import os
 import shutil
 import sys
@@ -59,30 +60,47 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _candidates(folder: Path, platform_ok) -> list:
+def version() -> str:
+    """The libloot version this toolkit carries (PROVENANCE.json): the only version a wheel is taken at."""
+    return json.loads((HERE / "PROVENANCE.json").read_text(encoding="utf-8"))["upstream"]["version"]
+
+
+def _candidates(folder: Path, platform_ok, want: str) -> list:
     tag = _tag()
-    return sorted(p for p in folder.glob("libloot-*-%s-%s-*.whl" % (tag, tag)) if platform_ok(p.stem.rsplit("-", 1)[-1]))
+    return sorted(p for p in folder.glob("libloot-%s-%s-%s-*.whl" % (want, tag, tag))
+                  if platform_ok(p.stem.rsplit("-", 1)[-1]))
 
 
-def wheel(shipped: Path = WHEELS, built: Path = BUILT) -> Path:
-    """The wheel for this interpreter, verified against its folder's SHA256SUMS. A local build wins over a shipped wheel
+def wheel(shipped: Path = WHEELS, built: Path = BUILT, want: str | None = None) -> Path:
+    """The wheel for this interpreter AT THE CARRIED VERSION (an older or newer build left in the build folder is
+    never picked), verified against its folder's SHA256SUMS. A local build of that version wins over a shipped wheel
     (it was built here on purpose); a shipped wheel is used only on Windows x64, the one platform it is built for."""
-    found = [(p, built) for p in _candidates(built, lambda plat: True)]
+    want = want or version()
+    found = [(p, built) for p in _candidates(built, lambda plat: True, want)]
     if sys.platform == "win32":
-        found += [(p, shipped) for p in _candidates(shipped, lambda plat: plat == SHIPPED_PLATFORM)]
+        found += [(p, shipped) for p in _candidates(shipped, lambda plat: plat == SHIPPED_PLATFORM, want)]
     if not found:
         where = "the shipped wheels cover Python 3.10-3.13 on Windows x64" if sys.platform == "win32" else \
             "the shipped wheels are Windows-only"
-        raise Unavailable("no libloot wheel for Python %d.%d here (%s); build one with `python tools/libloot/build.py "
-                          "build` (needs Rust; about a minute)" % (sys.version_info[0], sys.version_info[1], where))
+        raise Unavailable("no libloot %s wheel for Python %d.%d here (%s); build one with `python "
+                          "tools/libloot/build.py build` (needs Rust; about a minute)"
+                          % (want, sys.version_info[0], sys.version_info[1], where))
     path, folder = found[0]
-    want = sums(folder).get(path.name)
+    _verified_bytes(path)
+    return path
+
+
+def _verified_bytes(path: Path) -> bytes:
+    """The wheel's bytes, read ONCE and checked against its folder's SHA256SUMS; everything after (the cache folder
+    name, the extraction, RECORD) uses these same bytes, so a file swapped after the check is never the one used."""
+    want = sums(path.parent).get(path.name)
     if want is None:
-        raise Unavailable("%s is not listed in %s; refusing an unlisted binary" % (path.name, folder / "SHA256SUMS"))
-    got = _sha256(path)
+        raise Unavailable("%s is not listed in %s; refusing an unlisted binary" % (path.name, path.parent / "SHA256SUMS"))
+    data = path.read_bytes()
+    got = hashlib.sha256(data).hexdigest()
     if got != want:
         raise Unavailable("%s does not match SHA256SUMS (%s, expected %s); refusing it" % (path.name, got[:16], want[:16]))
-    return path
+    return data
 
 
 def _record(z: zipfile.ZipFile) -> dict:
@@ -101,11 +119,11 @@ def _b64(path: Path) -> str:
     return base64.urlsafe_b64encode(bytes.fromhex(_sha256(path))).rstrip(b"=").decode("ascii")
 
 
-def _extract(path: Path, target: Path) -> None:
+def _extract(data: bytes, target: Path) -> None:
     part = target.with_name(target.name + ".part-" + uuid.uuid4().hex[:8])
     part.mkdir(parents=True)
     try:
-        with zipfile.ZipFile(path) as z:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
             for member in z.namelist():
                 dest = (part / member).resolve()
                 if dest != part.resolve() and part.resolve() not in dest.parents:
@@ -121,24 +139,36 @@ def _extract(path: Path, target: Path) -> None:
             shutil.rmtree(part)              # our own unfinished extraction, made above
 
 
-def verify_extracted(path: Path, target: Path) -> None:
-    with zipfile.ZipFile(path) as z:
+def verify_extracted(data: bytes, target: Path) -> None:
+    """Every file RECORD lists has its hash, and no other file is there (it would be importable from this folder,
+    which goes first on sys.path); __pycache__ folders are Python's own."""
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
         record = _record(z)
+        listed = {n.rstrip("/") for n in z.namelist()}
     for member, want in record.items():
         f = target / member
         if not f.is_file() or _b64(f) != want:
             raise Unavailable("the extracted libloot in %s does not match its wheel (%s); delete that folder and run "
                               "again" % (target, member))
+    for f in target.rglob("*"):
+        rel = f.relative_to(target).as_posix()
+        if "__pycache__" in f.relative_to(target).parts or rel in listed:
+            continue
+        if f.is_dir() and any(n.startswith(rel + "/") for n in listed):
+            continue
+        raise Unavailable("the extracted libloot in %s holds a file its wheel does not (%s); delete that folder and "
+                          "run again" % (target, rel))
 
 
 def load(shipped: Path = WHEELS, built: Path = BUILT, cache: Path = CACHE):
     """Import and return the `loot` module from the verified wheel."""
     path = wheel(shipped, built)
-    target = cache / _sha256(path)[:16]
+    data = _verified_bytes(path)
+    target = cache / hashlib.sha256(data).hexdigest()[:16]
     if not target.is_dir():
         target.parent.mkdir(parents=True, exist_ok=True)
-        _extract(path, target)
-    verify_extracted(path, target)
+        _extract(data, target)
+    verify_extracted(data, target)
     if str(target) not in sys.path:
         sys.path.insert(0, str(target))
     try:

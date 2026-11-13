@@ -689,7 +689,9 @@ caught two of its own guards asserting nothing.
 
 ## License
 
-MIT -- see [LICENSE](LICENSE).
+MIT -- see [LICENSE](LICENSE). One exception: `tools/libloot/` carries libloot, the LOOT Team's library, as compiled
+wheels plus its complete source, under its own GPL-3.0-or-later license (`tools/libloot/NOTICE.md`, `tools/libloot/COPYING`).
+Only `tools/loot_advisor.py` uses it.
 
 ## Credits
 
@@ -702,6 +704,7 @@ MIT -- see [LICENSE](LICENSE).
 - [Blender](https://www.blender.org/) and [NifSkope](https://github.com/hexabits/nifskope) (v2.0.dev9, the maintained hexabits fork) -- mesh repair and independent render verification
 - [FallrimTools / ReSaver](https://www.nexusmods.com/skyrimspecialedition/mods/5031) -- save-file (.ess) parsing library driven headlessly by the ReSaver CLI
 - [ReSaver++ / ReSaver Plus](https://github.com/Tonycubed2/ResaverPP) by Tonycubed2 (Apache-2.0) -- the C++ port of Mark Fairchild's ReSaver behind the opt-in native ReSaver backend; built locally from a pinned commit plus the toolkit's patches (`tools/resaver-plus/NOTICE.md`), with LZ4 (Yann Collet) and miniz (Rich Geldreich) linked into its CLI
+- [libloot](https://github.com/loot/libloot) by the LOOT Team (GPL-3.0-or-later) -- the library behind LOOT; `tools/loot_advisor.py` asks it for LOOT's order and masterlist messages, read-only
 - [DevBench](https://www.nexusmods.com/skyrimspecialedition/mods/181326) by alandtse ([source](https://github.com/alandtse/devbench)) -- the live in-game REST/MCP channel the `devbench-cli.sh` wrapper drives
 - [@aaronputty](https://github.com/aaronputty) ([fork](https://github.com/aaronputty/putty-skyrim-claude-toolkit)) -- the MO2 path-detection insight that shaped v3.4, and the devcontainer + `docs/container-vs-windows.md` foundation for v3.5
 - [Claude Code](https://claude.ai/code) by Anthropic

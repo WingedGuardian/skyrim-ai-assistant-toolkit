@@ -12198,7 +12198,7 @@ MUTATIONS += [pytest.param(path, anchor, replacement, _LA + test, id="la-" + nam
      "test_an_unlisted_or_changed_wheel_is_refused", "changed-wheel"),
     ("tools/libloot/libloot_loader.py", "                if dest != part.resolve() and part.resolve() not in dest.parents:\n",
      "                if False:\n", "test_a_wheel_member_outside_its_folder_is_refused_and_nothing_is_left", "zip-escape"),
-    ("tools/libloot/libloot_loader.py", "    verify_extracted(path, target)\n", "    pass\n",
+    ("tools/libloot/libloot_loader.py", "    verify_extracted(data, target)\n", "    pass\n",
      "test_a_changed_extracted_file_is_refused", "extracted-reverified"),
     ("tools/libloot/libloot_loader.py", "lambda plat: plat == SHIPPED_PLATFORM", "lambda plat: True",
      "test_a_shipped_wheel_for_another_platform_is_not_used", "shipped-platform"),
@@ -12283,4 +12283,26 @@ MUTATIONS += [pytest.param("tools/save_vault.py", anchor, replacement, _SVR + te
     ("    except (KeyError, TypeError, ValueError, OverflowError, OSError):\n        return 0.0",
      "    except ():\n        return 0.0", "test_an_unreadable_or_z_suffixed_time_does_not_break_status", "bad-time-sorts"),
     ("DEFAULT_RESERVE_GB = 2 ", "DEFAULT_RESERVE_GB = 20 ", "test_the_default_reserve_is_the_stores_own", "reserve-default"),
+]]
+
+# 4.1 release review: LOOT advisor and loader fixes.
+_LR = "tests/test_loot_advisor.py::"
+MUTATIONS += [pytest.param(path, anchor, replacement, _LR + test, id="lr-" + name)
+              for path, anchor, replacement, test, name in [
+    ("tools/libloot/libloot_loader.py", '"libloot-%s-%s-%s-*.whl" % (want, tag, tag)', '"libloot-*-%s-%s-*.whl" % (tag, tag)',
+     "test_a_built_wheel_of_another_version_is_never_picked", "carried-version-only"),
+    ("tools/libloot/libloot_loader.py", '    for f in target.rglob("*"):\n', "    for f in []:\n",
+     "test_a_file_the_wheel_does_not_hold_is_refused", "no-unlisted-files"),
+    ("tools/loot_advisor.py", '    if plugins_txt.name.casefold() != "plugins.txt":\n', "    if False:\n",
+     "test_a_plugins_file_with_another_name_is_refused", "plugins-txt-name"),
+    ("tools/loot_advisor.py", "        if version is None or version > readable:\n", "        if False:\n",
+     "test_a_cached_masterlist_this_libloot_cannot_read_is_not_used", "cache-branch-readable"),
+    ("tools/loot_advisor.py", "            if validate is not None:\n", "            if False:\n",
+     "test_a_fresh_masterlist_that_does_not_parse_never_becomes_the_cache", "validated-before-meta"),
+    ("tools/loot_advisor.py", '            if not re.fullmatch(r"[0-9a-f]{40}", sha):\n', "            if False:\n",
+     "test_a_malformed_commit_id_is_refused", "commit-id-checked"),
+    ("tools/loot_advisor.py", "    if len(data) > MAX_DOWNLOAD:\n", "    if False:\n",
+     "test_an_oversized_download_is_refused", "download-capped"),
+    ("tools/loot_advisor.py", '    findings = [i for i in report["issues"] if str(i.get("type", "")).lower() != "say"]',
+     '    findings = report["issues"]', "test_a_say_message_alone_exits_0", "say-is-not-a-finding"),
 ]]

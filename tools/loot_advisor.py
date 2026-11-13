@@ -15,7 +15,8 @@ plugins.txt, loadorder.txt or LOOT's own files. Wrye Bash / the mod manager stay
 are keeping, read KNOWLEDGEBASE.local.md `## My preferences` before reordering anything.
 
 Usage:  python tools/loot_advisor.py [--plugins-txt PATH] [--data DIR] [--json] [--offline]
-Exit:   0 LOOT has nothing to add · 1 findings (listed) · 2 could not check (named), never "clean"
+Exit:   0 no moves and nothing but notes · 1 moves or findings (listed) · 2 could not check (named), never "clean"
+        --plugins-txt must name a file called plugins.txt (libloot reads that name in the folder it is given)
 """
 from __future__ import annotations
 
@@ -42,6 +43,7 @@ API = "https://api.github.com/repos/loot/{repo}/branches?per_page=100"
 RAW = "https://raw.githubusercontent.com/loot/{repo}/{commit}/{file}"
 CACHE = skyrim_paths.TOOLKIT_ROOT / ".skyguard" / "loot" / "masterlists"
 UA = {"User-Agent": "skyrim-toolkit-loot-advisor", "Accept": "application/vnd.github+json"}
+MAX_DOWNLOAD = 32 * 1024 * 1024        # a masterlist is ~2 MB; anything this large is not one
 
 
 def _plugin_check():
@@ -62,7 +64,10 @@ def game_type(game: Path) -> str:
 def _get(url: str, timeout: float = 20.0) -> bytes:
     req = urllib.request.Request(url, headers=UA)
     with urllib.request.urlopen(req, timeout=timeout) as r:           # noqa: S310 (fixed https hosts above)
-        return r.read()
+        data = r.read(MAX_DOWNLOAD + 1)
+    if len(data) > MAX_DOWNLOAD:
+        raise ValueError("%s answered more than %d bytes; refused" % (url, MAX_DOWNLOAD))
+    return data
 
 
 def _replace(path: Path, data: bytes) -> None:
@@ -81,14 +86,27 @@ def newest_branch(repo: str, readable: tuple, fetch=_get):
             continue
         version = (int(m.group(1)), int(m.group(2)))
         if version <= readable and (best is None or version > best[0]):
-            best = (version, row["name"], row["commit"]["sha"])
+            sha = str(row["commit"]["sha"])
+            if not re.fullmatch(r"[0-9a-f]{40}", sha):
+                raise ValueError("loot/%s branch %s has a malformed commit id" % (repo, row["name"]))
+            best = (version, row["name"], sha)
     if best is None:
         raise ValueError("loot/%s has no branch this libloot (%d.%d) can read" % ((repo,) + readable))
     return best[1], best[2]
 
 
-def masterlist(game: str, readable: tuple, offline: bool = False, fetch=_get, cache: Path | None = None):
-    """Paths of the masterlist and prelude to use, plus where they came from."""
+def _branch_version(branch) -> tuple | None:
+    m = re.fullmatch(r"v(\d+)\.(\d+)", str(branch or ""))
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def masterlist(game: str, readable: tuple, offline: bool = False, fetch=_get, cache: Path | None = None,
+               validate=None):
+    """Paths of the masterlist and prelude to use, plus where they came from.
+
+    validate(masterlist, prelude) parses a fresh download BEFORE meta.json names it: a branch this libloot turns out
+    not to read never becomes the cached copy (the fetch then falls back to the cache). A cached copy is used only
+    when its branch is one this libloot reads."""
     folder = (CACHE if cache is None else cache) / REPOS[game]
     meta_path = folder / "meta.json"
     if not offline:
@@ -103,6 +121,12 @@ def masterlist(game: str, readable: tuple, offline: bool = False, fetch=_get, ca
             store.mkdir(parents=True, exist_ok=True)
             _replace(store / "masterlist.yaml", ml)
             _replace(store / "prelude.yaml", pre)
+            if validate is not None:
+                try:
+                    validate(store / "masterlist.yaml", store / "prelude.yaml")
+                except Exception as exc:                          # noqa: BLE001 (libloot raises its own types)
+                    raise ValueError("the fetched masterlist %s@%s did not parse: %s: %s"
+                                     % (branch, commit[:7], type(exc).__name__, exc)) from None
             meta = {"masterlist": {"repo": REPOS[game], "branch": branch, "commit": commit},
                     "prelude": {"repo": "prelude", "branch": pbranch, "commit": pcommit},
                     "folder": store.name, "fetched_unix": int(time.time())}
@@ -122,6 +146,11 @@ def masterlist(game: str, readable: tuple, offline: bool = False, fetch=_get, ca
     store = folder / str(meta.get("folder", ""))
     if not (meta.get("folder") and (store / "masterlist.yaml").is_file() and (store / "prelude.yaml").is_file()):
         raise ValueError("no masterlist: the fetch failed (%s) and none was fetched before" % reason)
+    for part in ("masterlist", "prelude"):
+        version = _branch_version((meta.get(part) or {}).get("branch"))
+        if version is None or version > readable:
+            raise ValueError("the cached %s is from branch %s, which this libloot (%d.%d) does not read; the fetch "
+                             "failed (%s)" % ((part, (meta.get(part) or {}).get("branch")) + tuple(readable) + (reason,)))
     return store / "masterlist.yaml", store / "prelude.yaml", dict(meta, from_cache=True, fetch_problem=reason)
 
 
@@ -200,11 +229,17 @@ def issues(loot, db, active, present=None):
 
 
 def advise(plugins_txt: Path, data: Path, game: Path, folders, offline=False, loot=None, fetch=_get):
+    if plugins_txt.name.casefold() != "plugins.txt":
+        # libloot reads the file named Plugins.txt in the folder it is given, whatever path was passed here; a report
+        # naming another file would describe a file libloot never read.
+        raise ValueError("libloot reads only a file named plugins.txt; %s is named otherwise (copy it to a folder as "
+                         "plugins.txt and pass that)" % plugins_txt)
     loot = loot or libloot_loader.load()
     kind = game_type(game)
     readable = (loot.LIBLOOT_VERSION_MAJOR, loot.LIBLOOT_VERSION_MINOR)
-    ml, pre, source = masterlist(kind, readable, offline, fetch)
     g = loot.Game(getattr(loot.GameType, kind), game, plugins_txt.parent)
+    ml, pre, source = masterlist(kind, readable, offline, fetch,
+                                 validate=lambda m, p: g.database().load_masterlist_with_prelude(m, p))
     if folders:
         g.set_additional_data_paths([Path(f) for f in folders])
     g.load_current_load_order_state()
@@ -267,7 +302,9 @@ def main(argv=None):
             detail = {k: v for k, v in i.items() if k not in ("kind", "plugin")}
             print("  %-19s %s %s" % (i["kind"], i.get("plugin", ""), json.dumps(detail, ensure_ascii=False)))
         print(report["note"])
-    return 1 if report["moves"] or report["issues"] else 0
+    # A masterlist "say" message is information, not a finding: it is listed, and does not make the exit 1.
+    findings = [i for i in report["issues"] if str(i.get("type", "")).lower() != "say"]
+    return 1 if report["moves"] or findings else 0
 
 
 if __name__ == "__main__":
