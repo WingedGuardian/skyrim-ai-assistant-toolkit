@@ -20,7 +20,9 @@ def test_setup_summary_scopes_its_backups_and_script_snapshots(game_dir):
     assert "Auto-backups (Edit/Write/NotebookEdit)" in result.stdout
     assert "shell/script writes are not backed up" in result.stdout
     assert "ordinary shell/script writes are not backed up by the edit hook" in result.stdout
-    assert "one or two saves with verified permanent backups" in result.stdout
-    assert "bound human approval for bulk save access" in result.stdout
+    # 4.1: the save vault replaced the approval-gated save backups; the old promise must not come back.
+    assert "Keep every version of every save and config INI (the save vault" in result.stdout
+    assert "one or two saves with verified permanent backups" not in result.stdout
+    assert "bound human approval for bulk save access" not in result.stdout
     assert "Snapshot Papyrus files before non-read-only shell commands" in result.stdout
     assert "recognized raw writes to ESP/ESM/ESL/BSA/BA2" in result.stdout

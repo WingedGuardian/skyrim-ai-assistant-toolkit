@@ -1267,12 +1267,17 @@ def test_the_tmp_check_opens_no_handle_on_the_tmp(bed, monkeypatch):
     def stat(path, *a, **k):
         assert not str(path).endswith(".tmp"), "a handle was opened on the game's .tmp"
         return real(path, *a, **k)
-    monkeypatch.setattr(save_vault.os, "stat", stat)
     pair = {"folder": str(s), "stem": "Save63"}
     bed["clock"].t = time.time()
-    assert v._writing_now(pair) is True
+    # The spy is live only around the vault's own calls: the test's unlink below is resolved by CI's isolation
+    # audit hook (an os.stat on the .tmp that is not the vault's).
+    with monkeypatch.context() as m:
+        m.setattr(save_vault.os, "stat", stat)
+        assert v._writing_now(pair) is True
     (s / "Save63.ess.tmp").unlink()
-    assert v._writing_now(pair) is False
+    with monkeypatch.context() as m:
+        m.setattr(save_vault.os, "stat", stat)
+        assert v._writing_now(pair) is False
 
 
 def test_the_staging_link_name_does_not_carry_the_save_name(bed, monkeypatch):
@@ -1282,7 +1287,8 @@ def test_the_staging_link_name_does_not_carry_the_save_name(bed, monkeypatch):
     seen, real = [], os.link
 
     def link(src, dst, *a, **k):
-        seen.append(Path(dst).name)
+        if Path(dst).parent.name == "staging-links":   # the store's own publishes are named by hash, not checked here
+            seen.append(Path(dst).name)
         return real(src, dst, *a, **k)
     monkeypatch.setattr(save_vault.os, "link", link)
     v.sweep()
