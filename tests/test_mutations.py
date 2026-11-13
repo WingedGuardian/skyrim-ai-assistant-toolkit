@@ -12205,3 +12205,40 @@ MUTATIONS += [pytest.param(path, anchor, replacement, _LA + test, id="la-" + nam
     ("tools/libloot/build.py", "            if not f.is_file() or _sha256(f) != want:\n", "            if not f.is_file():\n",
      "test_record_refuses_an_artifact_that_does_not_match_its_run", "record-checks-hash"),
 ]]
+
+# ReSaver Plus stock tier (4.1): one twin per guarded clause of tools/resaver_stock.py and resaver_native.stock_main.
+_RS = "tests/test_resaver_stock.py::"
+MUTATIONS += [pytest.param(path, anchor, replacement, _RS + test, id="rs-" + name)
+              for path, anchor, replacement, test, name in [
+    ("tools/resaver_stock.py", "    if missing:\n        raise CannotDo(", "    if False:\n        raise CannotDo(",
+     "test_an_option_the_version_lacks_exits_3_and_runs_nothing", "missing-option"),
+    ("tools/resaver_stock.py", '    _needs(caps, op, stock + ["-o"])', "    _needs(caps, op, stock)",
+     "test_a_build_without_a_new_output_option_exits_3", "write-needs-new-output"),
+    ("tools/resaver_stock.py", '    _needs(caps, op, stock + ["-o"])', '    _needs(caps, op, ["-o"])',
+     "test_a_missing_write_option_exits_3_before_any_backup", "write-needs-its-option"),
+    ("tools/resaver_stock.py", "    if len(positions) not in allowed:\n", "    if False:\n",
+     "test_a_read_takes_no_options_and_checks_its_arguments", "read-argument-count"),
+    ("tools/resaver_stock.py", "        if not flags:\n            raise ValueError(\"clean on a stock build",
+     "        if False:\n            raise ValueError(\"clean on a stock build",
+     "test_clean_needs_a_named_kind_on_a_stock_build", "clean-needs-a-kind"),
+    ("tools/resaver_stock.py", '    if not out["testedVersion"]:\n', "    if False:\n",
+     "test_an_untested_version_still_works_and_says_so", "untested-version-said"),
+    ("tools/resaver_stock.py", "    if not path.is_absolute():\n", "    if False:\n",
+     "test_a_relative_or_missing_stock_path_is_refused", "stock-path-absolute"),
+    ("tools/resaver_native.py", '        if "--apply" not in argv:\n            raise resaver_stock.CannotDo(',
+     '        if False:\n            raise resaver_stock.CannotDo(',
+     "test_without_apply_a_stock_build_cannot_preview_and_nothing_runs", "no-preview"),
+    ("tools/resaver_native.py", "        backups = backup(project, source, output, op)\n        code, text, err = run_text(binary, native, sha)\n",
+     "        backups = []\n        code, text, err = run_text(binary, native, sha)\n",
+     "test_a_stock_write_is_backed_up_first_written_new_and_reread", "backup-first"),
+    ("tools/resaver_native.py", "        code, text, err = run_text(binary, native, sha)\n        if pair_hashes(source) != before:\n",
+     "        code, text, err = run_text(binary, native, sha)\n        if False:\n",
+     "test_a_source_changed_during_the_write_fails", "source-unchanged"),
+    ("tools/resaver_native.py", '        if before[".skse"] is not None and not output.with_suffix(".skse").is_file():\n',
+     "        if False:\n", "test_a_missing_cosave_fails_and_keeps_the_candidate", "cosave-came-along"),
+    ("tools/resaver_native.py", "        if reread != 0:\n", "        if False:\n",
+     "test_an_output_the_build_cannot_reread_fails", "output-reread"),
+    ("tools/resaver_native.py", "    if digest(binary) != expected_hash:\n        raise Refused(\"The ReSaver executable changed",
+     "    if False:\n        raise Refused(\"The ReSaver executable changed",
+     "test_the_executable_changing_mid_call_is_refused", "exe-rehashed"),
+]]

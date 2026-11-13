@@ -1,7 +1,7 @@
 """Stock-build tier of the ReSaver Plus native backend: the user's own resaverpp-cli.exe, any upstream version.
 
-Imported by tools/resaver_native.py only; it has no entry point of its own, so every run still goes through the
-adapter the guard recognizes (S-RESAVER-APPLY reads `resaver_native` and `resaver-cli.sh`).
+Imported by tools/resaver_native.py only; it has no entry point of its own, so every run goes through that adapter
+and its backups and checks. (Since 4.1 no guard rule reads ReSaver commands; the save vault keeps every version.)
 
 A stock build has no structured output, no preview and no save verification; those come only from the toolkit's
 patches (tools/resaver-plus/build.py). So this tier:
@@ -40,7 +40,7 @@ STOCK_READS = {
     "charged": (("--charged",), 0),
     "spawned": (("--spawned",), 0),
 }
-# Writes, all already save writes to the guard (S-RESAVER-APPLY's RESAVER_OPS): toolkit flag -> stock option.
+# Writes (each makes a new output beside the save): toolkit flag -> stock option.
 STOCK_CLEAN = {"--unattached": "--remove-unattached", "--undefined": "--remove-undefined",
                "--terminate-threads": "--terminate-undefined"}
 STOCK_WRITES = {"clean": None, "reset-havok": "--reset-havok", "cleanse-formlists": "--purify-formlists"}

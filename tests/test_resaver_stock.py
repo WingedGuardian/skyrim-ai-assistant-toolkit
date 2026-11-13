@@ -180,6 +180,18 @@ def test_a_missing_write_option_exits_3_before_any_backup(stock):
     assert not store.exists() or not any(store.rglob("*.ess"))
 
 
+def test_a_build_without_a_new_output_option_exits_3(stock, monkeypatch):
+    """Every stock write goes to a separate new file (-o); a version that cannot name one is never asked to write.
+    The usage line lists -o too, so the fake's --help drops it from both places."""
+    real = help_text
+    monkeypatch.setattr(sys.modules[__name__], "help_text",
+                        lambda version, options: real(version, options).replace(" [-o <out.ess>]", ""))
+    stock.options = [o for o in SKYRIM_56 if o != "-o"]
+    code, out = call(stock, "reset-havok", stock.source, stock.out, "--apply")
+    assert code == 3 and "-o" in out["error"], out
+    assert stock.runs() == []
+
+
 def test_clean_needs_a_named_kind_on_a_stock_build(stock):
     code, out = call(stock, "clean", stock.source, stock.out, "--apply")
     assert code == 2 and "needs at least one of" in out["error"], out
