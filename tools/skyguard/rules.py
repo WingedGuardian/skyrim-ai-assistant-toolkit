@@ -450,8 +450,8 @@ RULES = {
     # user asked for, against a pre-committed bar of <= 25 %. The ask text, if a later pricing flips it back:
     #   'This edits {file}, part of the safety guards themselves.' / 'Yes applies it; the next session start lists
     #   guard files that differ from the release.' (W-: 'Yes saves it; ...'). The session-start banner ships either way.
-    # User ruling 2026-10-20 (v4.0.0 review L2 MEDIUM-3): the agent's own session transcripts are where the bulk-save
-    # approval reader looks for the user's typed line. No agent write, append, move or delete may reach one (NEVER_SHADOW).
+    # User ruling 2026-10-20 (v4.0.0 review L2 MEDIUM-3): the agent's own session transcripts are the user's record of
+    # the session (typed save approvals were read there until 4.1). No agent write, append, move or delete may reach one.
     'S-SELF-TRANSCRIPT': {
         "decision": 'deny',
         "hook": 'protect-bash',
@@ -459,7 +459,7 @@ RULES = {
         "prefixes": [],
         "template": (
         "Blocked: {file} is an agent session transcript; only the agent host writes it.\n"
-        'Reading it is fine. Save approvals are read from it, so no agent may change it.'
+        'Reading it is fine. It is your record of the session, so no agent may change it.'
     ),
     },
     'S-SELF-GUARD': {
@@ -520,7 +520,7 @@ RULES = {
         "prefixes": [],
         "template": (
         "Blocked: {file} is an agent session transcript; only the agent host writes it.\n"
-        'Reading it is fine. Save approvals are read from it, so no agent may edit it.'
+        'Reading it is fine. It is your record of the session, so no agent may edit it.'
     ),
     },
     'W-SELF-GUARD': {

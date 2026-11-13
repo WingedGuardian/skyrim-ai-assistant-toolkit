@@ -210,3 +210,23 @@ def test_upgrade_docs_say_new_folder_is_the_zips_inner_versioned_folder():
     slug = json.loads(_read("package.json"))["name"] + "-<version>/"
     for rel in ("README.md", "docs/upgrading-native-hooks.md", "CHANGELOG.md"):
         assert slug in _read(rel), rel
+
+
+def test_no_shipped_text_still_describes_the_retired_save_gate():
+    """4.1 release review: guard-coverage rows, setup's install text, the philosophy page, the ReSaver Plus README and
+    the skyrim-save skill still described hook backups, typed approvals and S-SAVE-* refusals after the gate was
+    retired. The vault protection they promise must also be stated (S-SAVE-STORE covers the vault since the review)."""
+    retired = ("S-SAVE-BACKUP", "S-SAVE-APPROVAL", "S-SAVE-OPAQUE", "S-SAVE-UNKNOWN", "SAVE_ACCESS_APPROVAL",
+               "verified save-pair backups", "bound human approval", "Save approvals are read",
+               "backs up and protects", "denies them (S-RESAVER-NATIVE-DIRECT)", "The guard denies `resaverpp-cli.exe`",
+               "waits until the game is closed", "two things are judged")
+    for rel in ("docs/guard-coverage.md", "setup.sh", "docs/safety-philosophy.md", "tools/resaver-plus/README.md",
+                "agent/skills/skyrim-save/SKILL.md", "docs/save-vault.md", "README.md", "tools/skyguard/rules.py",
+                ".claude/skyrim-paths.env.example", "docs/skse-devbench-tools.md"):
+        text = _read(rel)
+        if rel == "tools/skyguard/rules.py":
+            text = text.split("REMOVED", 1)[-1].split("\n# ", 1)[-1]     # its list of retired ids is the record
+            text = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+        for phrase in retired:
+            assert phrase not in text, (rel, phrase)
+    assert "S-SAVE-STORE" in _read("docs/save-vault.md")

@@ -137,7 +137,7 @@ def decide(command: str, roots: paths.Roots, audit: _audit.Audit, cwd: str = "",
     lock_command = lift_rules.save_lock_change(parsed)
     if lock_command:
         return deny("S-SAVE-LOCK", lock_command)
-    # User ruling 2026-10-20: an agent session transcript (where save approvals are read) is never an agent's to change.
+    # User ruling 2026-10-20: an agent session transcript (the user's record of the session) is never an agent's to change.
     spoken = self_rules.shell_transcript_hit(command, parsed, cwd, env, transcript)
     if spoken:
         return deny("S-SELF-TRANSCRIPT", os.path.basename(spoken.rstrip("/")) or spoken)
@@ -175,7 +175,7 @@ def _unfinished(parsed, command) -> bool:
 # `Invoke-Expression $s`, `source "$f"`), and awk's system(). "Names a protected path": one of those execs' own words
 # resolves to the install folder itself, anything under its Data folder, the settings folder or MO2's folders, or is
 # a plugin or archive file (a whole word: `'x.esp'` inside interpreter code is not one); or the command TEXT spells one
-# of those folders absolutely (a string a variable holds, a here-string) or a Bethesda registry key. A save keeps S-SAVE-OPAQUE, which is checked first. Ordinary commands that run a
+# of those folders absolutely (a string a variable holds, a here-string) or a Bethesda registry key. Ordinary commands that run a
 # named program, and an opaque program on anything else (`"$PY" tools/x.py`, `$EDITOR notes.txt`), stay as they were.
 _EVAL_PROGRAMS = frozenset(("eval", "source", ".", "invoke-expression", "iex"))
 _AWK_PROGRAMS = frozenset(("awk", "gawk", "mawk", "nawk", "busybox-awk"))

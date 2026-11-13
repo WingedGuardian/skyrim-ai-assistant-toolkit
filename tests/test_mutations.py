@@ -9448,7 +9448,6 @@ MUTATIONS.append(pytest.param(_TGT, '("ini", SKYRIM_INI, "S-WRITE-INI"), ', "",
 # No twin, said so: the fsync on a save copy (nothing short of a power loss can show it), the read-back after the final
 # os.replace (needs the disk to change the bytes between two reads), and the `rest.decision in ("deny", "ask")` half of
 # judge's early return (_with_note returns a deny/ask unchanged: equivalent).
-_SV = "tools/skyguard/saves.py"
 _AP = "tools/modding_harness/approval.py"
 _SPT = "tests/test_save_policy.py::"
 _SAT = "tests/test_save_approvals.py::"
@@ -10803,9 +10802,6 @@ MUTATIONS += [pytest.param(_HKD, before, after, _HKDT + test, id="hk-derived-" +
 ]]
 
 # H1 ordered-upgrade integration: current guard policies and exact historical definitions.
-_H1O = "tools/skyguard/ordered_upgrade.py"
-_H1OC = 'CLAUDE_BLOCKING = frozenset(("protect-bash.sh", "protect-files.sh", "protect-mcp.sh"))'
-_H1OU = _H1T + "test_ordered_upgrade_uses_the_shipped_guard_failure_policy"
 
 # Task 7 A2: unreadable authority is never an empty live set.
 _RR7 = "tests/test_review_recovery.py::"

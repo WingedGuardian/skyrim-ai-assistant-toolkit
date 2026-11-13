@@ -614,7 +614,7 @@ if MO2_INI="$(find_mo2_instance)"; then
         CONFIG_DIR="$MO2_PROFILE_DIR"
     fi
     # Profile-local saves (#23): with LocalSaves=true in a profile's settings.ini, MO2 keeps that profile's saves in
-    # <profile>/saves. Every such profile is declared, not only the selected one, so the guard backs up and protects
+    # <profile>/saves. Every such profile is declared, not only the selected one, so the save vault watches
     # the saves of the list's other profiles too. A saves/ folder alone also counts: it holds saves either way.
     for pd in "$MO2_PROFILES"/*/; do
         pd="${pd%/}"
@@ -1400,11 +1400,11 @@ echo "  skyrim-paths.env                 -- The paths the safety hooks guard (ma
 echo "  .claude/settings.json            -- Hook configuration"
 echo "  .claude/hooks/protect-bash.sh    -- Guards dangerous commands"
 echo "  .claude/hooks/protect-files.sh   -- Guards file edits"
-echo "  .claude/hooks/protect-mcp.sh     -- Guards DevBench (smp reset denied, verified save-pair backups, bulk approval)"
+echo "  .claude/hooks/protect-mcp.sh     -- Guards DevBench (smp reset denied)"
 echo "  .claude/hooks/backup-before-edit.sh -- Auto-backups (Edit/Write/NotebookEdit) with audit trail"
 echo "  .claude/hooks/snapshot-before-tool.sh -- Snapshots .psc/.pex before non-read-only shell commands"
 echo "  .claude/hooks/session-kb-guard.sh -- Snapshots KNOWLEDGEBASE/CLAUDE.md/AGENTS.md once per session"
-echo "  .claude/hooks/save-sentinel.sh   -- After each call: reports saves changed with no backup first"
+echo "  .claude/hooks/save-sentinel.sh   -- After each call: reports changed saves (and locks new ones when locking is on)"
 echo "  tools/                           -- Helper scripts (AutoMod wrapper, esp-verify, NIF tools, nexus.sh, resaver-cli.sh)"
 echo "  .claude/backups/                 -- Backup storage"
 echo ""
@@ -1412,10 +1412,10 @@ echo "Configured safety hooks, once your agent loads them, can:"
 echo "  - Advise on ordinary game-file edits"
 echo "  - Block recognized raw writes to ESP/ESM/ESL/BSA/BA2"
 echo "  - Back up edit-tool changes; ordinary shell/script writes are not backed up by the edit hook"
-echo "  - Preserve one or two saves with verified permanent backups before recognized mutations"
+echo "  - Keep every version of every save and config INI (the save vault; tools/save_vault.py status)"
 echo "  - Snapshot Papyrus files before non-read-only shell commands"
-echo "  - Require bound human approval for bulk save access; Codex refuses calls needing confirmation"
-echo "  - Ask before discarding protected uncommitted changes or replacing live files during restore"
+echo "  - Refuse deleting or moving a whole Saves folder, the vault or a backup store"
+echo "  - Ask before discarding protected uncommitted changes or replacing live files during restore (Codex refuses calls needing confirmation)"
 echo "Verify actual coverage with: bash tools/hook-canary.sh"
 echo ""
 echo "--------------------------------------------"

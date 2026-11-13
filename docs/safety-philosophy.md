@@ -35,7 +35,7 @@ Six thin wrappers over the Python engine `tools/skyguard/` intercept Claude's to
 
 - **protect-bash.sh** -- Blocks destructive commands; **advises** on file operations in the game directory (a note to Claude, not a prompt to you)
 - **protect-files.sh** -- Blocks writes to plugin/archive binaries through the Edit/Write tools; **advises** on all other edits in the install
-- **protect-mcp.sh** -- Guards the DevBench MCP tools (and the curl / `devbench-cli.sh` route to the same tools): denies the one console command measured to crash a large load order (`smp reset`). Recognized changes to one or two saves require verified permanent save-pair backups before proceeding; bulk access needs the bound human approval described below.
+- **protect-mcp.sh** -- Guards the DevBench MCP tools (and the curl / `devbench-cli.sh` route to the same tools): denies the one console command measured to crash a large load order (`smp reset`). Since 4.1 no hook judges a save: the save vault keeps every version (`docs/save-vault.md`).
 - **backup-before-edit.sh** -- Copies a file before Claude modifies it **through the Edit/Write/NotebookEdit tools**. ⚠ Anything written by a script run through Bash is invisible to it -- that is a property of hooks, not a bug here. MEASURED: zero backups of a 177,459-byte `KNOWLEDGEBASE.md` across seven months, because it is written by a script. `session-kb-guard.sh` below covers that channel.
 - **snapshot-before-tool.sh** -- Snapshots Papyrus source/compiled scripts before shell commands
 - **session-kb-guard.sh** -- At SessionStart, copies the files nothing can rebuild

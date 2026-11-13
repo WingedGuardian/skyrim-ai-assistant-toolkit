@@ -84,8 +84,8 @@ which is system software: give the user the manual steps (`tools/resaver-plus/RE
 - **JSON:** the native schema, close to but NOT identical to Java's (native report wording, warnings and changeform
   trees). Never diff native output against Java output and call the difference a save change.
 - **Read-only reports:** `python tools/resaver-plus.py report|compare|decompile|disassemble`.
-- **Never** run `resaverpp-cli.exe` directly with `-o`, `--batch` or `--apply`, or the GUI `ReSaverPP.exe`: the guard
-  denies them (S-RESAVER-NATIVE-DIRECT) because they skip every check above.
+- **Never** run `resaverpp-cli.exe` directly with `-o`, `--batch` or `--apply`, or the GUI `ReSaverPP.exe`: they skip
+  every check above. The guard only adds a note (S-RESAVER-NATIVE-DIRECT); the save vault keeps the version before.
 - **Limits:** one real edited save was load-tested in game on one machine; for saves unlike that one confidence is
   moderate, so the user's own in-game load of the new output is the final check. Crash atomicity is unqualified.
   Windows only: elsewhere use Java.
@@ -102,7 +102,7 @@ if it says NOT RUNNING, tell the user before changing a save.
   the current one now.
 - **Getting one back:** `python tools/save_vault.py restore <SAVE> [--at TIME | --id ID] --to <folder>` (a copy),
   `--as <NEWNAME>`, or `--replace` (the current pair is kept first). Nothing is written without `--apply`; a
-  restore into a save folder waits until the game is closed.
+  restore into a save folder is refused while the game runs; run it again once the game is closed.
 - **Still refused:** deleting or moving the `Saves` folder itself, the settings folder holding it, or everything in
   it at once; writing into the vault or an old backup store. A locked save (the optional OS locks) cannot be
   changed at all: ask the user, never work around it.

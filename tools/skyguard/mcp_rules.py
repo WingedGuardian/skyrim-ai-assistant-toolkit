@@ -24,11 +24,10 @@ KNOWN LIMITS (recorded in the pricing ledger, not handled):
   - interpreter code (python requests, node fetch) that posts to the console is not read. A first version denied code
     that held both the endpoint and `smp reset`; priced over history it hit 3 items, all scripts written to TEST this
     rule (strings, not calls), and none a real call, so it was dropped (approval fatigue outweighs an unseen shape);
-  - the `papyrus` tool: `Game.SaveGame` and the ExecuteCommand-style functions in _CONSOLE_FUNCTIONS are read
-    (rt-fix-b); any other function that saves or runs a console line is not, and console `bat` files can do either
-    thing without being named here;
+  - the `papyrus` tool: every string in its arguments is read for a deny-listed console line; a function that runs
+    a console line it builds itself is not, and console `bat` files can run one without it being named here;
   - `replay` (and any tool that plays back a stored recording or input script): the recording's contents are not in
-    the call, so the console lines or saves it replays are not judged; a deny-listed line is caught only when it is
+    the call, so the console lines it replays are not judged; a deny-listed line is caught only when it is
     written into the call itself (a scenario step is, since its steps travel in the call);
   - a URL held in a variable that is not a same-command literal.
 """
@@ -155,7 +154,6 @@ def saves_folder(roots, env) -> Optional[str]:
     return next((c for c in cands if os.path.isdir(c)), None)
 
 
-_CONSOLE_FUNCTIONS = ("executecommand", "executeconsole", "executeconsolecommand", "runconsolecommand")
 
 
 def judge(tool: str, args, roots, memo: Optional[dict] = None, env=None, depth: int = 0) -> Optional[Hit]:

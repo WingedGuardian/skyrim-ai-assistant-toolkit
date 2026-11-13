@@ -879,9 +879,9 @@ def shell_scan(command: str, parsed, roots, cwd: str = "", env: Optional[Mapping
 
 
 # ------------------------------------------------------------------------- the agent's own session transcripts
-# User ruling 2026-10-20 (v4.0.0 review L2 MEDIUM-3): the bulk-save approval reader (modding_harness/approval.py) reads
-# the user's typed SAVE_ACCESS_APPROVAL from the agent's session transcript. An agent that could append a "typed human"
-# line there could approve its own bulk save change, so no agent write, append, move or delete may reach a transcript.
+# User ruling 2026-10-20 (v4.0.0 review L2 MEDIUM-3): the agent's session transcript is the user's record of the
+# session (until 4.1 the bulk-save approval reader also read the user's typed line there). An agent that could append
+# a "typed human" line could forge that record, so no agent write, append, move or delete may reach a transcript.
 # Reading one stays free. Covered: the payload's own transcript_path, Claude Code's `<config>/projects/**/*.jsonl`
 # (`~/.claude`, or CLAUDE_CONFIG_DIR) and Codex's `<home>/sessions/**` and `archived_sessions/**` (`~/.codex`, or
 # CODEX_HOME), through the file tools, apply_patch and every shell write/copy/move/delete route self_rules reads.

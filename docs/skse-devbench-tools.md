@@ -58,8 +58,9 @@ void OnMessage(SKSE::MessagingInterface::Message* m)
 - **One answer.** Call `write(sink, json)` exactly once before returning. The host owns the buffer, so no string
   crosses the DLL boundary.
 - **Descriptor:** `{"description": str, "inputSchema": obj, "readOnly": bool}`. Mark a tool that changes nothing
-  `readOnly: true`. The toolkit's guards treat every non-read-only DevBench call as a change.
-- **Names.** A name already registered is replaced, and `RegisterTool` returns `false`. Prefix names with your mod
+  `readOnly: true`, so an agent can tell your tool reads only.
+- **Names.** Registering a name a second time returns `false` (measured on VR); the header says the new handler
+  replaces the old one. Prefix names with your mod
   (`mymod.status`).
 - **Build gates.** `GetBuildNumber()` returns `MAJOR*10000 + MINOR*100 + PATCH`. `RegisterMenuHandler` exists only on
   builds of at least `10400` (1.4.0), `RegisterToolExtension` only on builds of at least `10500` (1.5.0),

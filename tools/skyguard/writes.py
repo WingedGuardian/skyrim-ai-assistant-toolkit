@@ -442,8 +442,8 @@ _READ_ONLY_IMPORTS = frozenset((
     "enum", "fnmatch", "fractions", "functools", "glob", "hashlib", "html", "itertools", "json", "locale", "math",
     "os", "os.path", "pathlib", "platform", "pprint", "random", "re", "statistics", "string", "struct",
     "sys", "textwrap", "time", "typing", "unicodedata", "xml.etree", "xml.etree.ElementTree"))
-# `from <module> import *` names: built below the change tables, from every module-level call they count (#26
-# round 8 review: a hand-kept list missed io.FileIO, gzip/tarfile/zipfile classes, os.link, shutil.unpack_archive).
+# `from <module> import *` names: a hand-kept list below the change tables (#26 round 8 review: an earlier list
+# missed io.FileIO, gzip/tarfile/zipfile classes, os.link, shutil.unpack_archive).
 _READ_OPEN = re.compile(
     r"""(?<![.\w])open\(\s*(?:[rRbBuU]{0,2}"[^"\n]*"|[rRbBuU]{0,2}'[^'\n]*'|[\w.\[\]]+)\s*"""
     r"""(?:,\s*(?:mode\s*=\s*)?['"](?:r|rb|rt|br|tr)['"])?\s*"""
@@ -595,7 +595,7 @@ def _python_write_targets(code: str) -> List[str]:
             items = first.elts if isinstance(first, (ast.List, ast.Tuple, ast.Set)) else [first] if first is not None else []
             words = [w for w in (literal(i) or path_argument(i) for i in items) if w]
             if words:
-                out += [_CopyWord(w, moved=True, removed=True) for w in words]   # read for saves; deletes.py has the rest
+                out += [_CopyWord(w, moved=True, removed=True) for w in words]   # deletes.py has the rest
                 continue
         keyword = "path" if name == "os.truncate" else "file"
         argument = node.args[0] if node.args else next((k.value for k in node.keywords if k.arg == keyword), None)

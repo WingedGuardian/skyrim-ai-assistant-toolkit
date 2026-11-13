@@ -35,7 +35,7 @@ ENV_KEYS = ("SKYRIM_GAME_ROOT", "SKYRIM_CONFIG_DIR", "SKYRIM_DOCUMENTS_DIR", "SK
 PROTECTION_KEYS = ("SKYRIM_GAME_ROOT", "SKYRIM_CONFIG_DIR", "SKYRIM_DOCUMENTS_DIR", "SKYRIM_MO2_MODS", "SKYRIM_MO2_OVERWRITE",
                    "SKYRIM_PROFILE_SAVES")
 # SKYRIM_PROFILE_SAVES (one line per folder, issue #23): every MO2 profile that keeps its own saves (LocalSaves). Each is a
-# settings folder whose `saves` the guard protects and backs up, like SKYRIM_CONFIG_DIR, which names only the SELECTED
+# settings folder whose `saves` the save vault watches and the delete rules protect, like SKYRIM_CONFIG_DIR, which names only the SELECTED
 # profile. A separate key, because a shell that sources the paths file keeps only the last line of a repeated key.
 CONFIG_KEYS = ("SKYRIM_CONFIG_DIR", "SKYRIM_DOCUMENTS_DIR", "SKYRIM_PROFILE_SAVES")
 # Plan 8 T8: the paths file lives at the TOOLKIT ROOT (the install folder the hooks sit two levels below). The 3.x /

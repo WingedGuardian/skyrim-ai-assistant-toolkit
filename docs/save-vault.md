@@ -42,7 +42,9 @@ Windows: `bash setup.sh --save-vault-task` (or answering yes at setup) adds a si
 while no agent session is open. It needs no administrator rights; `python tools/save_vault.py uninstall-task` removes
 it. Linux: run `python tools/save_vault.py watch` from a `systemd --user` unit.
 
-`SKYGUARD_SAVE_VAULT=off` stops the session line and the automatic start.
+`SKYGUARD_SAVE_VAULT=off` stops the session line and the automatic start. `SKYGUARD_HOUSEKEEP_SWEEP=off` (no
+background jobs at all) also stops the automatic start; the session line still says when the watcher is not
+running.
 
 ## Finding and restoring a version
 
@@ -58,7 +60,9 @@ python tools/save_vault.py restore Quicksave0 --at 2026-11-10T21:00 --to C:/Temp
   name), or `--replace` (over the current pair, which is kept as a version first). With none of these it puts a
   vanished pair back where it was.
 - **Nothing is written without `--apply`.** A restore is all-or-nothing: every file is hash-checked before any is
-  written. A restore into a save folder waits until the game is closed.
+  written. A restore into a save folder is refused while the game (or SteamVR) runs; run it again once it is
+  closed. `--replace` removes the set-aside current pair only when its bytes are the kept version's; otherwise
+  it stays beside the save as `.vault-old-*` and the event log names it.
 - `--config` acts on the INI vault: `python tools/save_vault.py --config restore SkyrimPrefs --to C:/Temp/ini`.
 
 Backups the 4.0 save gate took stay where they were and stay restorable:

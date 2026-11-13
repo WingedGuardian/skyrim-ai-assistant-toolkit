@@ -71,16 +71,16 @@ AN EXEC:
              never resolves (it expands %K% before `set` runs).
 
 KNOWN LIMITS -- each gives a PARTIAL answer: the rules judge only what the parser could read. Where the program
-itself cannot be named, the rules ask the user when the command names a protected path (shell_rules: S-SAVE-OPAQUE
-for a save, S-OPAQUE-PROTECTED for the install's Data, the settings or MO2 folders, a plugin or archive file, or a
+itself cannot be named, the rules ask the user when the command names a protected path (shell_rules:
+S-OPAQUE-PROTECTED for the install's Data, the settings or MO2 folders, a plugin or archive file, or a
 Bethesda key); on any other path such a command is allowed as read, and the verdict is marked "partial":
   - a program held in a variable (`$R reset-havok`): program "?", argv kept; rules must treat "?" as opaque.
     In bash the words after it are ALSO read as the command (`$R rm x`: $R may be empty or a wrapper, and rm runs);
     so are cmd's (`%R% del x`, `!R! del x`) and a PowerShell `&`/`.` call's (`& $R Remove-Item x`). When a quoted word
     follows, the joined words are also read as code (`$R 'rm x'` with R=eval, `& $R 'Remove-Item x'` with
     Invoke-Expression). A concatenated name offers the programs its literal part can end (`%R%del`, `"$($R)-Item"`).
-    It stays "?" beside those readings, and a save in its words asks (S-SAVE-OPAQUE), as does a protected path in
-    its words or in the command text (S-OPAQUE-PROTECTED). Not parsed: a name built entirely from variables (`$A$B`),
+    It stays "?" beside those readings, and a protected path in its words or in the command text asks
+    (S-OPAQUE-PROTECTED). Not parsed: a name built entirely from variables (`$A$B`),
     and a string that a variable holds and an eval runs (`eval "$CODE"`, `iex $s`) unless that variable is a certain
     same-command literal (guard3: then the literal is parsed as the command it is); both ask only through the
     S-OPAQUE-PROTECTED text check, so a protected path spelled relatively inside such a string is not seen.
@@ -144,7 +144,7 @@ class Parsed(NamedTuple):
     codes: Tuple[Tuple[str, str], ...] = ()
     xargs: Tuple[str, ...] = ()     # RT-A G2: the program each `xargs` runs (its first word after the options)
     # The "?" execs whose program word offered NO candidate (no same-command assignment, default or literal part):
-    # the guard has no idea what runs. A save in their words asks the user (shell_rules, S-SAVE-OPAQUE).
+    # the guard has no idea what runs. A protected path in their words asks the user (S-OPAQUE-PROTECTED).
     unnamed: Tuple[Exec, ...] = ()
 
 
@@ -3420,7 +3420,7 @@ def _records_to_execs(sc: _Scanner, recurse: bool = True) -> None:
             if not known:                    # `cat s.sh | bash`, `printf ... | sh`: code the parser never saw
                 unknown = reader._replace(program="?", argv=(reader.program,), quoted=(False,))
                 ctx.out.append(unknown)
-                ctx.unnamed.append(unknown)     # guard3: no candidate either (S-OPAQUE-PROTECTED, S-SAVE-OPAQUE)
+                ctx.unnamed.append(unknown)     # guard3: no candidate either (S-OPAQUE-PROTECTED)
             elif reader.program in ALL_SHELLS or _ps_reads_commands(reader):
                 # I6: a PowerShell string stage is text too (`'Remove-Item X' | pwsh -Command -`, `'...' | iex`).
                 dialect = "powershell" if reader.program == "invoke-expression" else _shell_dialect(reader.program)

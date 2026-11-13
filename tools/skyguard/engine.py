@@ -19,7 +19,8 @@ from .verdict import Advice, Verdict
 
 # apply_patch ops that take a file away from where it is (a Move only when it leaves that folder).
 DELETE_OPS = ("delete", "move_from")
-# What a patch op does to a file, as write_rules.decide's `op` (kept for callers; no rule reads it since 4.1).
+# What a patch op does to a file, as write_rules.decide's `op`: a delete or move also protects a folder above a
+# save store, the session transcripts or the guards' state.
 SAVE_OP = {"delete": "delete", "move_from": "move"}
 
 _RANK = {"evaluated": 0, "partial": 1, "failed": 2}
@@ -194,8 +195,8 @@ def _failed(reason: str, code: str) -> Verdict:
 
 
 def _soft_roots(roots_fn):
-    """The roots for rules that only ADVISE on location (writes) or read one optional fact (the DevBench save
-    check): an unreadable paths file costs those answers, never a refusal (as on Claude, Plan 5 Task 9).
+    """The roots for rules that only ADVISE on location (writes): an unreadable paths file costs those answers,
+    never a refusal (as on Claude, Plan 5 Task 9).
     None = the legacy text tests."""
     try:
         return roots_fn()
@@ -261,8 +262,8 @@ def _unhooked(req) -> bool:
 def side_effects(req, project, audit, v, roots_fn=None, deadline=None) -> Verdict:
     """Snapshot and backups, whatever the decision (as on Claude, where those hooks run beside the guard).
     Each step has its own try: one failing never skips the next and never changes the decision. Task 15: the recovery
-    snapshot (load order, INIs) goes first, inside `deadline` (a time.monotonic time). A save the call changes was
-    backed up before this, by portable.check in pre_tool: its result decides the call, so it is no side effect."""
+    snapshot (load order, INIs) goes first, inside `deadline` (a time.monotonic time). A save the call changes is kept
+    by the save vault (tools/save_vault.py), not here."""
     partial = False
     if req.kind == "shell":
         try:

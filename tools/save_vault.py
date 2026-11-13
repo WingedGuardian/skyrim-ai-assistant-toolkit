@@ -684,7 +684,7 @@ class Vault:
         live = [Path(event["folder"]) / (event["stem"] + e) for e in self.exts]
         if to:
             if apply and self.is_busy() and canonical(to) in {canonical(f) for f in self.folders + [Path(event["folder"])]}:
-                raise PreservationFailed("--to names a save folder: it waits until the game is closed")
+                raise PreservationFailed("--to names a save folder: refused while the game runs; run it again once it is closed")
             targets = [Path(to) / (event["stem"] + e) for e in self.exts]
             clash = [str(x) for x in targets if x.name.lower() in self._listed(to)]
             if clash:
