@@ -76,9 +76,9 @@ def _replace(path: Path, data: bytes) -> None:
     os.replace(part, path)
 
 
-def newest_branch(repo: str, readable: tuple, fetch=_get):
+def newest_branch(repo: str, readable: tuple, fetch=None):
     """(branch, commit) of the newest vX.Y branch no newer than what this libloot reads."""
-    rows = json.loads(fetch(API.format(repo=repo)))
+    rows = json.loads((fetch or _get)(API.format(repo=repo)))
     best = None
     for row in rows:
         m = re.fullmatch(r"v(\d+)\.(\d+)", row.get("name", ""))
@@ -100,7 +100,7 @@ def _branch_version(branch) -> tuple | None:
     return (int(m.group(1)), int(m.group(2))) if m else None
 
 
-def masterlist(game: str, readable: tuple, offline: bool = False, fetch=_get, cache: Path | None = None,
+def masterlist(game: str, readable: tuple, offline: bool = False, fetch=None, cache: Path | None = None,
                validate=None):
     """Paths of the masterlist and prelude to use, plus where they came from.
 
@@ -111,6 +111,9 @@ def masterlist(game: str, readable: tuple, offline: bool = False, fetch=_get, ca
     meta_path = folder / "meta.json"
     if not offline:
         try:
+            # _get is looked up at call time (a fetch=_get default is bound once, at import, and a patched
+            # module _get would then never be used).
+            fetch = fetch or _get
             branch, commit = newest_branch(REPOS[game], readable, fetch)
             pbranch, pcommit = newest_branch("prelude", readable, fetch)
             ml = fetch(RAW.format(repo=REPOS[game], commit=commit, file="masterlist.yaml"))
@@ -228,7 +231,7 @@ def issues(loot, db, active, present=None):
     return out
 
 
-def advise(plugins_txt: Path, data: Path, game: Path, folders, offline=False, loot=None, fetch=_get):
+def advise(plugins_txt: Path, data: Path, game: Path, folders, offline=False, loot=None, fetch=None):
     if (plugins_txt.name.casefold() != "plugins.txt" if os.name == "nt" else plugins_txt.name != "Plugins.txt"):
         # libloot reads the file named Plugins.txt in the folder it is given, whatever path was passed here; a report
         # naming another file would describe a file libloot never read.

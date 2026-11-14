@@ -20,6 +20,15 @@ from libloot import build as libloot_build  # noqa: E402
 from libloot import libloot_loader  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch):
+    """No test here reaches the real GitHub: a leak once passed for weeks and failed only when CI was rate-limited.
+    A test that exercises _get itself patches urlopen again, which wins."""
+    def refuse(*a, **k):
+        raise AssertionError("a LOOT test reached the real network")
+    monkeypatch.setattr(loot_advisor.urllib.request, "urlopen", refuse)
+
+
 # ---- moves
 
 @pytest.mark.parametrize("current,proposed,moved", [
