@@ -20,7 +20,8 @@ Steps, each red on its own:
      tools/ or scripts/ module runs every tests/test_*<its stem>*.py; the guard adapters run the wrapper tests; and
      EVERY test file whose text names a changed file's basename runs, since that is the test that goes red on it).
      One process per test file, at most eight at once. The timing/deadline files, the corpus rows and the rule messages
-     are left to CI: they are the slow ones (~6-10 min each) and the ones a busy machine fails on its own (2026-11-15:
+     are left to CI, and so are the whole-setup and release end-to-end files: they are the slow ones (3-12 min each)
+     and the ones a busy machine fails on its own (2026-11-15:
      every local refusal that day was load, not code). Then a spread sample of at most 50 mutation twins of the changed
      files; a twin that cannot be judged here (its anchor skipped, e.g. at idle priority while a game runs) is left to
      CI instead of refusing the push. CI runs every twin.
@@ -63,7 +64,10 @@ SENTINELS = [
     # audits that actually went stale (thirdparty, spriggit) are above. They still run when the push changes them.
 ]
 TIMING_SENTINELS = {"tests/test_skyguard_timing.py", "tests/test_python_fallback.py", "tests/test_hook_deadline.py"}
-CI_ONLY = TIMING_SENTINELS | {"tests/test_guard_corpus.py", "tests/test_rule_messages.py"}
+CI_ONLY = TIMING_SENTINELS | {"tests/test_guard_corpus.py", "tests/test_rule_messages.py",
+                              # whole-setup / release end-to-end runs: 3-12 min each (2026-11-15: 703 s, 449 s, 333 s, 176 s)
+                              "tests/test_setup_agent.py", "tests/test_setup_paths.py", "tests/test_verify_release.py",
+                              "tests/test_setup_smoke.py"}
 # changed path prefix -> extra test files (a changed test file always runs itself)
 PATH_TESTS = {
     "agent/guards/": ["tests/test_python_fallback.py", "tests/test_hook_deadline.py", "tests/test_skyguard_shell.py",
@@ -375,11 +379,9 @@ def main(argv=None) -> int:
     # The cap catches a hang in one file; it must not refuse a merely large push.
     steps = [(name + " ({} files)".format(len(fs)), verbose + fs, cap) for name, fs, cap in groups if fs]
     steps += [(name, verbose + [name], 1200) for name in rest]
-    g.parallel(steps, workers=8)
-    if not g.failed:
-        twins = twin_steps(py, base, changed)
-        if twins:
-            g.parallel(twins)
+    # The twins run beside the rest now: they were kept apart only so they could not starve the timing tests, which are
+    # CI-only since 2026-11-15. Run after everything, they added their whole time (~3.5 min) to the wall clock.
+    g.parallel(steps + twin_steps(py, base, changed), workers=8)
     total = time.time() - g.t0
     if g.failed:
         print("prepush-gate: FAILED ({}) in {:.0f}s -- fix before pushing; CI would have gone red on it".format(
