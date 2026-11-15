@@ -127,7 +127,7 @@ def test_release_stale_is_logged_and_the_old_owner_is_told(ledger):
     session_claim()
     sc.release_stale(SHARED, "delirium", now=at(45), alive=dead, games=nothing_running)
     value = json.loads(ledger.read_text())
-    assert value[SHARED] is None and sc.key(SHARED) not in value[sc.DETAILS]
+    assert value[SHARED] is None and sc.key(SHARED) not in value.get(sc.DETAILS, {})
     assert value[sc.RELEASES][sc.key(SHARED)]["prior_owner"] == "gateway"
     log = [json.loads(line) for line in open(str(ledger) + ".claims-log.jsonl", encoding="utf-8")]
     assert log[-1]["event"] == "release-stale" and log[-1]["by"] == "delirium"
@@ -251,7 +251,7 @@ def test_a_foreign_rewrite_makes_details_untrusted_until_the_owner_touches(ledge
 def test_a_released_slot_keeps_no_details(ledger):
     session_claim("gateway")
     sc.release(SHARED, "gateway")
-    assert sc.key(SHARED) not in json.loads(ledger.read_text())[sc.DETAILS]
+    assert sc.key(SHARED) not in json.loads(ledger.read_text()).get(sc.DETAILS, {})
 
 
 def test_a_new_ledger_has_both_slots_for_older_tools(tmp_path, monkeypatch):
@@ -308,3 +308,12 @@ def test_unreadable_detail_tables_are_errors_not_tracebacks(ledger, capsys):
     value[sc.DETAILS] = ["not", "an", "object"]
     ledger.write_text(json.dumps(value))
     assert sc.main(["status"]) == 2
+
+
+def test_a_full_release_leaves_no_details_table(ledger):
+    before = json.loads(ledger.read_text())
+    session_claim("gateway")
+    sc.release(SHARED, "gateway")
+    after = json.loads(ledger.read_text())
+    after.pop("updated"), before.pop("updated")
+    assert after == before

@@ -284,7 +284,12 @@ class Ledger:
                 table.pop(key(slot), None)
         mark = moment.astimezone().isoformat(timespec="microseconds")
         self.value["updated"] = mark
-        table[WRITTEN] = mark
+        if any(key(slot) in table for slot in SLOTS):
+            table[WRITTEN] = mark
+        else:
+            self.value.pop(DETAILS, None)     # nothing claimed: leave the file as other tools wrote it
+        if not self.value.get(RELEASES):
+            self.value.pop(RELEASES, None)
         text = json.dumps(self.value, indent=1, ensure_ascii=False) + "\n"
         if self.crlf:
             text = text.replace("\n", "\r\n")
