@@ -44,6 +44,10 @@ House Carl is a separate optional install, not part of core setup. For an author
 follow `docs/housecarl.md` and skill `toolkit-housecarl`; identify the load-order authority separately
 from deployment, then use its explicit setup command. Missing .NET prerequisites remain manual steps.
 
+SkyLink AI is a recommended optional mod (VR: Nexus 195413; SE/AE: Nexus 175682). Tell the user about it;
+the user installs it with their mod manager. If they have, register its MCP server for this folder only as
+`docs/skylink.md` shows, ask whether to turn off its save and load tools, and leave the .NET 10 Runtime to them.
+
 ## What an install command looks like
 
 <!-- install-form -->
