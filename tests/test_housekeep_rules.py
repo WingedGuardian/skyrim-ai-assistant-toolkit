@@ -306,3 +306,35 @@ class DailyRunPriority(unittest.TestCase):
         if before != "0x20":                # a job object (the local resource runner) pins the class: nothing to measure
             self.skipTest("COULD NOT CHECK: this runner pins the priority class at " + before)
         self.assertEqual(after, "0x40", r.stdout)
+
+
+class DeadlineAndStaleReview(unittest.TestCase):
+    """2026-11-15: every daily run since 11-06 applied nothing ('deferred (deadline)'), because the time box was
+    counted from the START of the run and planning alone outlasted it; and an approved install kept announcing
+    'housekeep code changed' because a stale REVIEW-NEEDED.md receipt was still on disk."""
+
+    def test_the_time_box_starts_after_planning(self):
+        import housekeep_daily as daily
+        cfg = h.load_config(None)
+        calls = {}
+
+        def slow_plan(c):
+            calls["planned"] = time.time()
+            return {"actions": [{"bytes": 1}], "rows": [], "coverage": {}}
+        with patch.object(daily, "approved", return_value=True), \
+             patch.object(daily.housekeep, "plan", side_effect=slow_plan), \
+             patch.object(daily.housekeep, "print_coverage"), patch.object(daily.housekeep, "print_rows"), \
+             patch.object(daily.housekeep, "apply", return_value={"gib": 0, "failed": 0, "deferred": 0}) as apply, \
+             patch.object(daily, "write_alerts"), patch.object(daily, "log"), \
+             patch.object(daily, "f", side_effect=lambda c, n: Path(tempfile.mkdtemp()) / n):
+            daily.run(cfg, now=time.time() - 3600)          # the run "started" an hour ago
+        self.assertGreater(apply.call_args.kwargs["deadline"], time.time())
+
+    def test_an_approved_install_does_not_announce_a_stale_review(self):
+        with patch.object(h, "_daily_module") as module:
+            module.return_value.approved.return_value = True
+            self.assertTrue(h._code_approved({}))
+            module.return_value.approved.return_value = False
+            self.assertFalse(h._code_approved({}))
+            module.side_effect = ImportError("broken")
+            self.assertFalse(h._code_approved({}))

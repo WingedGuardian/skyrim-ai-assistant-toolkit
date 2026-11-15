@@ -170,7 +170,8 @@ def write_alerts(doc, cfg):
 
 
 def run(cfg, dry=False, now=None) -> str:
-    """Plan, then (approved code only) apply within daily_minutes. Returns the one-line summary for the next session."""
+    """Plan, then (approved code only) apply within daily_minutes, counted from the end of planning (a plan longer
+    than the box once left every action deferred, day after day). Returns the one-line summary for the next session."""
     now = time.time() if now is None else now
     stamp = datetime.datetime.fromtimestamp(now).strftime("%Y-%m-%d %H:%M")
     f(cfg, "STAMP").parent.mkdir(parents=True, exist_ok=True)
@@ -191,7 +192,7 @@ def run(cfg, dry=False, now=None) -> str:
         else:
             # Keep the previous review receipt: approval does not prove its notes obsolete.
             if not dry and doc["actions"]:
-                done = housekeep.apply(doc, cfg, deadline=now + cfg["daily_minutes"] * 60, summary=True)
+                done = housekeep.apply(doc, cfg, deadline=time.time() + cfg["daily_minutes"] * 60, summary=True)
     if not dry:                     # the docstring's "plan and report only": a dry run must not move the growth baseline
         write_alerts(doc, cfg)
     if not ok:
