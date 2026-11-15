@@ -24,7 +24,7 @@ the union of the targets and refuses two targets emitting one path; `--target cl
 
 Skills (`skills/<name>/SKILL.md`): `create-mod`, `devbench`, `find-session`, `inspect-esp`, `logging-registry`, `mod-release-review`, `mod-update-check`, `port-to-vr`, `skyrim-audio`,
 `skyrim-bsa`, `skyrim-context`, `skyrim-mcm`, `skyrim-nif`, `skyrim-save`, `toolkit-housecarl`, `toolkit-setup`,
-`triage-and-conflicts`, `xelib`.
+`triage-and-conflicts`, `quest-doctor`, `xelib`.
 `devbench`, `triage-and-conflicts` and `xelib` hold what used to be bulk in `core.md`; the core points at
 them from its *Where the rest lives* table.
 

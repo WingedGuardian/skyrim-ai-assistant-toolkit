@@ -34,7 +34,11 @@ def _tick() -> int:
 def health_body() -> dict:
     n = _tick()
     common = {"pid": 4242, "port": PORT, "exe": "SkyrimVR.exe", "vr": True}
-    if MODE in ("running", "bench"):
+    if MODE == "loading":
+        # Frames tick on the loading screen, but the last lifecycle event is the load starting.
+        return {"ok": True, "lastLifecycle": "preLoadGame", "frame": 1000 + n * 90,
+                "lastTaskFrame": 990 + n * 90, "pendingTasks": 0, **common}
+    if MODE in ("running", "bench", "blocked", "killmove"):
         return {"ok": True, "lastLifecycle": "postLoadGame", "frame": 1000 + n * 90,
                 "lastTaskFrame": 990 + n * 90, "pendingTasks": 0, **common}
     if MODE == "paused":
@@ -111,12 +115,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(400, {"error": "kind must be a string", "code": 400})
         if MODE == "bench":
             return self._bench(body)
+        if os.environ.get("MOCK_LOG"):
+            with open(os.environ["MOCK_LOG"], "a", encoding="utf-8") as fh:
+                fh.write(self.path + " " + json.dumps(body) + "\n")
+        if self.path == "/api/tool/papyrus" and body.get("function") == "IsInKillMove":
+            return self._send(200, {"called": True, "returned": MODE == "killmove", "returnedType": "Bool"})
         if self.path == "/api/tool/ping":
             return self._send(200, {"ok": True})
         if self.path == "/api/tool/inspect":
             # Legacy path: the main-thread frame counter, advancing.
-            return self._send(200, {"plugin": "devbench", "vr": True,
-                                    "playerLoaded": True, "frame": 2000 + _tick() * 90})
+            state = {"plugin": "devbench", "vr": True, "playerLoaded": True, "frame": 2000 + _tick() * 90}
+            if MODE == "blocked":
+                state["blockedBy"] = [{"name": "Tutorial Menu", "hint": "menu accept"}]
+            return self._send(200, state)
         self._send(200, {"ok": True})
 
 
