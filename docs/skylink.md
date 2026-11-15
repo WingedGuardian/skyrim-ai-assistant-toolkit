@@ -1,4 +1,4 @@
-# SkyLink AI (optional, recommended)
+# SkyLink AI (optional)
 
 SkyLink AI is an SKSE plugin plus a local MCP server that gives your agent about 90 live tools inside the
 running game: quests (stages, aliases, variables), followers, inventory, the player's build, weather, nearby
@@ -11,7 +11,7 @@ The toolkit does not bundle or install it. Like DevBench it is a **mod**: instal
 
 | Game | Mod | Notes |
 |---|---|---|
-| Skyrim VR | **SkyLink AI VR**, Nexus mod 195413 (a separate port) | tested here: VR 1.2.3 (server `SkyLink AI VR`, 91 tools), on VR Address Library 0.304.0 |
+| Skyrim VR | **SkyLink AI VR**, Nexus mod 195413 (a separate port) | VR 1.2.3 checked here: the plugin loads (`sksevr.log`) and the server lists 91 tools; its tools have **not yet been used in a running game**, and its own guide says this version is untested in game |
 | Skyrim SE / AE | **SkyLink AI**, Nexus mod 175682 | SE 1.5.97, AE 1.6.1130–1.6.1170 and 1.7.104 with the matching SKSE; not VR |
 
 The SE/AE build does not load on VR, and the two have their own update pages: an update to one is not an
