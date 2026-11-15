@@ -166,7 +166,8 @@ inactive counts as adding it. Between waves the user plays and confirms the game
 problem traces back to one small wave.
 
 Before each wave: the user backs up the save they continue (the `.ess` **and** its `.skse`) and the
-load order. If the user installs by hand, `python tools/mod-install.py <archive>` is a dry run first,
+load order. With the game running on that save, take a snapshot: `python tools/game_snapshot.py capture
+before-<wave>.json` (read-only DevBench `inspect`: player, inventory, quests, effects, state). If the user installs by hand, `python tools/mod-install.py <archive>` is a dry run first,
 then backs up what it replaces and records what it wrote.
 
 ## After installing (every wave)
@@ -174,7 +175,9 @@ then backs up what it replaces and records what it wrote.
 The SKSE log line for each touched DLL (`python tools/skse-load-status.py <filter>`). The Papyrus
 log for `does not match existing signature`, `Cannot open store`, and `Replacing native function`
 (a stale duplicate plugin): `python tools/papyrus-triage.py`. A load in game, by the user or through
-DevBench (skill `devbench`). RISKY items one at a time, with a checkpoint save between.
+DevBench (skill `devbench`). On that load, `python tools/game_snapshot.py capture after-<wave>.json` and
+`python tools/game_snapshot.py diff before-<wave>.json after-<wave>.json`: every lost perk, item, spell, effect
+or quest change is listed, matched by id. Explain each difference before the next wave. RISKY items one at a time, with a checkpoint save between.
 
 ## Record what you learn
 

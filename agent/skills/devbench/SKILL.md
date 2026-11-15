@@ -32,7 +32,13 @@ bash tools/devbench-cli.sh exec "player.getav health"  # console exec + capture 
 bash tools/devbench-cli.sh call Actor IsInCombat '[]' '{"form":"0x14"}'
 bash tools/devbench-cli.sh notify "Test 3 of 5: swing now"   # HUD narration
 bash tools/devbench-cli.sh tool menu '{"action":"accept"}'   # raw: any tool, any JSON
+bash tools/devbench-cli.sh safe                        # is it safe to ACT now? SAFE / UNSAFE: why
 ```
+
+**Writes are gated.** `exec`, `call`, `notify` and `tool` (except `inspect`, `ping`, `capture`) run `safe` first and
+refuse with exit 4 while the game is loading, saving, paused, busy on its main thread, behind a blocking menu
+(tutorial, message box) or in a kill move. Wait and retry; pass `--force` right after the command only for a
+deliberate override (it says so on stderr). Reads are never gated.
 
 **Hard requirement: the game must be running.** The server only exists while the game is genuinely
 running with a save loaded. In VR that normally means the headset is on (Skyrim VR errors at VR-init

@@ -21,6 +21,11 @@
 #   bash tools/devbench-cli.sh call Utility GetCurrentGameTime
 #   bash tools/devbench-cli.sh call Actor IsInCombat '[]' '{"form":"0x14"}'
 #   bash tools/devbench-cli.sh tool menu '{"action":"accept"}'   # raw escape hatch: any tool, any JSON
+#   bash tools/devbench-cli.sh safe                       # is it safe to ACT right now? (SAFE / UNSAFE: why)
+#
+# exec, call, notify and tool (except read-only inspect/ping/capture) first run `safe` and refuse with
+# exit 4 while the game is loading, saving, paused, busy, behind a blocking menu or in a kill move.
+# Override deliberately with --force right after the command (or DEVBENCH_FORCE=1).
 #
 # Port: read from Data/SKSE/Plugins/devbench/runtime.json when present, else the per-runtime default
 # (VR 8921, SE/AE 8920). Override with DEVBENCH_PORT=nnnn.
@@ -118,7 +123,51 @@ legacy_alive() {
     return 2
 }
 
+# --- Is it safe to ACT on the game right now? -------------------------------
+# A console command or Papyrus call landing mid-load, mid-save or during a kill move is how a live
+# session gets wedged (this install once hung on a save queued from here). Reads stay ungated.
+safe_check() {
+    local h1 h2 rc f1 f2 pend life st blocked km ret
+    h1=$(http GET /api/health); rc=$?
+    [ $rc -eq 5 ] && { echo "UNSAFE: this DevBench predates /api/health, so safety cannot be checked"; return 4; }
+    [ $rc -eq 0 ] || return 1
+    sleep 0.5
+    h2=$(http GET /api/health) || return 1
+    f1=$(printf '%s' "$h1" | jget '.frame'); f2=$(printf '%s' "$h2" | jget '.frame')
+    pend=$(printf '%s' "$h2" | jget '.pendingTasks'); life=$(printf '%s' "$h2" | jget '.lastLifecycle')
+    [ -n "$f2" ] || { echo "UNSAFE: /api/health carried no frame counter"; return 4; }
+    [ "${f2#-}" = "$f2" ] || { echo "UNSAFE: no save loaded (frame $f2)"; return 4; }
+    [ "$life" = "preLoadGame" ] && { echo "UNSAFE: a load is in progress (last lifecycle preLoadGame)"; return 4; }
+    [ "$f1" != "$f2" ] || { echo "UNSAFE: frames are not advancing ($f2): paused, loading or saving"; return 4; }
+    [ "${pend:-0}" = "0" ] || { echo "UNSAFE: the main thread has $pend task(s) queued"; return 4; }
+    st=$(post inspect '{"kind":"state"}') || return 1
+    if [ "$HAVE_JQ" -eq 1 ]; then
+        blocked=$(printf '%s' "$st" | jq -r '[.blockedBy[]?.name] | join(", ")' 2>/dev/null)
+    else
+        blocked=$(printf '%s' "$st" | tr -d '\n' | sed -n 's/.*"blockedBy"[[:space:]]*:[[:space:]]*\[[^]]*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    fi
+    [ -z "$blocked" ] || { echo "UNSAFE: a blocking menu is open ($blocked)"; return 4; }
+    km=$(post papyrus '{"action":"call","script":"Actor","function":"IsInKillMove","args":[],"self":{"form":"0x14"}}') || return 1
+    ret=$(printf '%s' "$km" | jget '.returned')
+    [ "$ret" = "true" ] && { echo "UNSAFE: the player is in a kill move"; return 4; }
+    [ "$ret" = "false" ] || { echo "UNSAFE: the kill-move check gave no answer"; return 4; }
+    echo "SAFE (frame $f1 -> $f2, nothing queued, no blocking menu, no kill move)"
+}
+
+# Writes refuse unless safe; --force (or DEVBENCH_FORCE=1) is a deliberate, visible override.
+gate() {
+    [ "$FORCE" -eq 1 ] && { echo "NOTE: --force: safety check skipped" >&2; return 0; }
+    local out rc
+    out=$(safe_check); rc=$?
+    [ $rc -eq 0 ] && return 0
+    [ -n "$out" ] && echo "$out" >&2
+    echo "  refusing to act; retry when \`devbench-cli.sh safe\` says SAFE, or pass --force deliberately" >&2
+    exit 4
+}
+
 CMD="${1:-}"; shift 2>/dev/null || true
+FORCE=0; [ "${DEVBENCH_FORCE:-0}" = "1" ] && FORCE=1
+[ "${1:-}" = "--force" ] && { FORCE=1; shift; }
 
 case "$CMD" in
   ping)
@@ -189,6 +238,9 @@ case "$CMD" in
   state)
       post inspect '{"kind":"state"}' | pretty ;;
 
+  safe)
+      safe_check ;;
+
   inspect)
       kind="${1:-state}"
       post inspect "{\"kind\":\"$kind\"}" | pretty ;;
@@ -196,6 +248,7 @@ case "$CMD" in
   exec)
       # Console output capture is a two-step fence: exec with capture, then read the slice.
       [ $# -ge 1 ] || { echo "usage: devbench-cli.sh exec \"<console command>\"" >&2; exit 1; }
+      gate
       cmd="$*"
       if [ "$HAVE_JQ" -eq 1 ]; then payload=$(jq -nc --arg c "$cmd" '{action:"exec",command:$c,capture:true}')
       else payload="{\"action\":\"exec\",\"command\":\"$cmd\",\"capture\":true}"; fi
@@ -211,6 +264,7 @@ case "$CMD" in
   call)
       # papyrus call: globals/native omit `self`; member functions pass it.
       [ $# -ge 2 ] || { echo "usage: devbench-cli.sh call <Script> <Function> [argsJson] [selfJson]" >&2; exit 1; }
+      gate
       script="$1"; func="$2"; args="${3:-[]}"; slf="${4:-}"
       if [ -n "$slf" ]; then
           payload="{\"action\":\"call\",\"script\":\"$script\",\"function\":\"$func\",\"args\":$args,\"self\":$slf}"
@@ -232,12 +286,14 @@ case "$CMD" in
       # HUD narration -- the user cannot see this chat while in the headset. Narrate live tests
       # in-game so the whole sequence is self-explaining.
       [ $# -ge 1 ] || { echo "usage: devbench-cli.sh notify \"text\"" >&2; exit 1; }
+      gate
       if [ "$HAVE_JQ" -eq 1 ]; then payload=$(jq -nc --arg t "$*" '{action:"call",script:"Debug",function:"Notification",args:[$t]}')
       else payload="{\"action\":\"call\",\"script\":\"Debug\",\"function\":\"Notification\",\"args\":[\"$*\"]}"; fi
       post papyrus "$payload" | pretty ;;
 
   tool)
       [ $# -ge 1 ] || { echo "usage: devbench-cli.sh tool <name> [json]" >&2; exit 1; }
+      case "$1" in inspect|ping|capture) ;; *) gate ;; esac
       post "$1" "${2:-}" | pretty ;;
 
   tools)
@@ -247,10 +303,10 @@ case "$CMD" in
       echo "$PORT" ;;
 
   ""|-h|--help|help)
-      sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//' ;;
+      sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//' ;;
 
   *)
       echo "Unknown command: $CMD" >&2
-      echo "Try: ping | alive | health | state | inspect <kind> | exec | call | describe | notify | tool | tools | port" >&2
+      echo "Try: ping | alive | health | state | safe | inspect <kind> | exec | call | describe | notify | tool | tools | port" >&2
       exit 1 ;;
 esac

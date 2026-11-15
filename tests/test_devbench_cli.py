@@ -231,3 +231,60 @@ def test_liveness_still_works_without_jq(server, code, words):
     assert "instance:" in r.stdout, r.stdout + r.stderr
     assert r.returncode == code, r.stdout + r.stderr
     assert any(w in r.stdout for w in words), r.stdout
+
+
+# ----------------------------------------------------------------- the safety gate in front of every write
+
+def _gated(mode, args, tmp_path, monkeypatch, mask_jq=False):
+    """Run a write command against a mock in `mode`; return the result and the writes the mock received."""
+    log = tmp_path / "requests.log"
+    monkeypatch.setenv("MOCK_LOG", str(log))
+    s = Server(mode)
+    try:
+        r = run_cli(*args, port=s.port, mask_jq=mask_jq)
+    finally:
+        s.stop()
+    lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+    writes = [x for x in lines if x.startswith("/api/tool/console") or
+              (x.startswith("/api/tool/papyrus") and "IsInKillMove" not in x)]
+    return r, writes
+
+
+@pytest.mark.parametrize("mode,why", [
+    ("paused", "not advancing"), ("hung", "not advancing"), ("notingame", "no save loaded"),
+    ("loading", "load is in progress"), ("blocked", "Tutorial Menu"), ("killmove", "kill move"),
+])
+@pytest.mark.parametrize("args", [("exec", "player.getav health"), ("call", "Utility", "GetCurrentGameTime"),
+                                  ("notify", "hello"), ("tool", "menu", '{"action":"accept"}')])
+def test_writes_refuse_and_send_nothing_when_unsafe(mode, why, args, tmp_path, monkeypatch):
+    r, writes = _gated(mode, args, tmp_path, monkeypatch)
+    assert r.returncode == 4, r.stdout + r.stderr
+    assert why in r.stderr and "refusing to act" in r.stderr
+    assert writes == [], writes
+
+
+def test_a_safe_game_lets_the_write_through(tmp_path, monkeypatch):
+    r, writes = _gated("running", ("exec", "player.getav health"), tmp_path, monkeypatch)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert len(writes) >= 1 and '"exec"' in writes[0]
+
+
+def test_force_skips_the_check_visibly(tmp_path, monkeypatch):
+    r, writes = _gated("paused", ("exec", "--force", "player.getav health"), tmp_path, monkeypatch)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "--force" in r.stderr and writes
+
+
+def test_reads_are_never_gated(tmp_path, monkeypatch):
+    for args in (("inspect", "state"), ("tool", "inspect", '{"kind":"state"}')):
+        r, _ = _gated("paused", args, tmp_path, monkeypatch)
+        assert r.returncode == 0, r.stdout + r.stderr
+
+
+@pytest.mark.parametrize("mode,code,why", [("running", 0, "SAFE"), ("blocked", 4, "Tutorial Menu"),
+                                          ("killmove", 4, "in a kill move")])
+@pytest.mark.parametrize("mask_jq", [False, True])
+def test_safe_reports_the_reason(mode, code, why, mask_jq, tmp_path, monkeypatch):
+    r, _ = _gated(mode, ("safe",), tmp_path, monkeypatch, mask_jq=mask_jq)
+    assert r.returncode == code, r.stdout + r.stderr
+    assert why in r.stdout

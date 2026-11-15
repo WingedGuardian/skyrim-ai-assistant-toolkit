@@ -186,7 +186,17 @@ SHARED_CLAIMS_MUTATIONS = [pytest.param("tools/shared_claims.py", before, after,
      "test_run_holds_the_live_test_slot_and_releases_it_after_a_refusal", "run-releases"),
 )]
 
-MUTATIONS = E2E_VERDICT_MUTATIONS + SHARED_CLAIMS_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + SPRIGGIT_RACE_MUTATIONS + EVIDENCE_STATUS_MUTATIONS + COMPOUND_SNAPSHOT_MUTATIONS + PRESERVATION_STATUS_MUTATIONS + RELOCK_RETRY_MUTATIONS + CLI_FLOOR_MUTATIONS + [
+DEVBENCH_SAFE_MUTATIONS = [pytest.param("tools/devbench-cli.sh", before, after, "tests/test_devbench_cli.py::" + test,
+    id="devbench-safe-" + name) for before, after, test, name in (
+    ('    [ "$f1" != "$f2" ] || { echo "UNSAFE: frames are not advancing', '    true || { echo "UNSAFE: frames are not advancing',
+     "test_writes_refuse_and_send_nothing_when_unsafe", "frames"),
+    ('    [ "$life" = "preLoadGame" ] && {', '    false && {', "test_writes_refuse_and_send_nothing_when_unsafe", "loading"),
+    ('    [ -z "$blocked" ] || {', '    true || {', "test_safe_reports_the_reason", "blocked"),
+    ('    [ "$ret" = "true" ] && {', '    false && {', "test_safe_reports_the_reason", "killmove"),
+    ("      gate\n      cmd=", "      cmd=", "test_writes_refuse_and_send_nothing_when_unsafe", "exec-gated"),
+)]
+
+MUTATIONS = E2E_VERDICT_MUTATIONS + SHARED_CLAIMS_MUTATIONS + DEVBENCH_SAFE_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + SPRIGGIT_RACE_MUTATIONS + EVIDENCE_STATUS_MUTATIONS + COMPOUND_SNAPSHOT_MUTATIONS + PRESERVATION_STATUS_MUTATIONS + RELOCK_RETRY_MUTATIONS + CLI_FLOOR_MUTATIONS + [
     pytest.param("tools/" + name,
                  'if "%SG_FILE_PY:~0,1%%SG_FILE_PY:~-1%"=="\'\'" set "SG_FILE_PY=%SG_FILE_PY:~1,-1%"',
                  "rem outer quote decoding removed",
