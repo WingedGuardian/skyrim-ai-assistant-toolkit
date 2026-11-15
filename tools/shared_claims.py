@@ -102,22 +102,40 @@ def process_start(pid: int):
             return "ticks:" + ticks
         except (OSError, IndexError) as error:
             raise Unknown("process {} start could not be read: {}".format(pid, error)) from error
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    import vr_background_desktop as desktop
+    return _windows_start(int(pid))
+
+
+def _windows_start(pid: int):
+    """Self-contained (the toolkit's process helpers differ between installs): OpenProcess + GetProcessTimes."""
+    import ctypes
+    from ctypes import wintypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel32.OpenProcess(0x1000 | 0x00100000, False, pid)   # QUERY_LIMITED_INFORMATION | SYNCHRONIZE
+    if not handle:
+        error = ctypes.get_last_error()
+        if error == 87:                                                # ERROR_INVALID_PARAMETER: no such PID
+            return None
+        raise Unknown("process {} could not be opened (error {})".format(pid, error))
     try:
-        generation = desktop.process_generation(pid)
-    except OSError as error:
-        if isinstance(error, PermissionError) or getattr(error, "winerror", None) == 5:
-            try:
-                generation = desktop.process_generation_limited(pid)
-            except (OSError, ValueError, TypeError) as native:
-                raise Unknown("process {} identity could not be read: {}".format(pid, native)) from native
-        else:
-            raise Unknown("process {} could not be opened: {}".format(pid, error)) from error
-    if generation is None:
-        return None
-    created, running = generation
-    return stamp(created) if running else None
+        times = [wintypes.FILETIME() for _ in range(4)]
+        if not kernel32.GetProcessTimes(handle, *[ctypes.byref(t) for t in times]):
+            raise Unknown("process {} times could not be read (error {})".format(pid, ctypes.get_last_error()))
+        state = kernel32.WaitForSingleObject(handle, 0)
+        if state == 0:                                                 # signalled: it has exited
+            return None
+        if state != 0x102:                                             # not WAIT_TIMEOUT: cannot tell
+            raise Unknown("process {} state could not be read".format(pid))
+        ticks = (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
+        created = datetime.datetime(1601, 1, 1, tzinfo=datetime.timezone.utc) + datetime.timedelta(
+            microseconds=ticks // 10)
+        return stamp(created)
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def process_alive(pid: int, start: str) -> bool:
