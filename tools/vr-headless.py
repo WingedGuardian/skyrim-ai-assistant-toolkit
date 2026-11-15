@@ -2,7 +2,7 @@
 """vr-headless -- boot Skyrim VR with no headset, on SteamVR's null driver, so DevBench can drive the game.
 
     bash tools/vr-headless.sh status
-    bash tools/vr-headless.sh run --desktop background|current [--park] [--emu] [--force]
+    bash tools/vr-headless.sh run --desktop background|current [--park] [--emu] [--force] [--owner NAME]
                                                # the managed session: prepare, launch, wait for the game to
                                                # exit, then restore when ownership and runtime checks permit
     bash tools/vr-headless.sh on [--force] [--park]   # headless: SteamVR null driver (and Valve's openvr_api.dll)
@@ -19,6 +19,13 @@ left alone: no frontend, no input injection, no cursor capture, no foreground ac
 control is DevBench's. `current` asks Windows not to activate the new windows, but SteamVR/Skyrim may still
 activate themselves; agree that with the user. A wrapper that starts `run` from another program must start it
 fully detached (stdin/stdout/stderr closed or redirected to a file), or the caller hangs until the game exits.
+
+Shared claims (tools/shared_claims.py): `run` and `launch` refuse while a shared slot in the claims ledger is held by
+anyone but `--owner NAME` (no `--owner`: any held slot refuses). A configured ledger that is missing or unreadable
+refuses too; with none configured the launch goes ahead and says it is not coordinated. `run` then holds the
+live-test slot for its own process (as NAME, default `vr-headless`) until restoration has finished, unless NAME
+already holds it. It records activity at launch and again when the game exits, so the quiet period that lets another
+session release a forgotten claim starts only after the game has stopped.
 
 What `on` changes, and nothing else:
   * <Steam>/config/steamvr.vrsettings: the null driver is enabled and forced, the HMD requirement dropped,
@@ -949,6 +956,74 @@ def cmd_emu(arg) -> int:
     return 2
 
 
+CLAIM_OWNER = None   # `--owner NAME`: the shared-claims owner this run works under (tools/shared_claims.py)
+
+
+def refuse_foreign_claims(owner) -> None:
+    """Refuse while a shared slot is held by anyone but `owner`. A configured ledger that is missing or unreadable
+    refuses: it proves nothing. With no ledger configured at all, say that the launch is not coordinated."""
+    import shared_claims
+    try:
+        ledger, configured = shared_claims.resolve_ledger()
+        if not ledger.exists():
+            if configured:
+                raise Refused("the configured shared-claims ledger {} does not exist; not launching".format(ledger))
+            print("note: no shared-claims ledger is configured (tools/shared_claims.py); this launch is not "
+                  "coordinated with other sessions", file=sys.stderr)
+            return
+        value = shared_claims.Ledger(ledger).value
+    except (OSError, ValueError) as e:
+        raise Refused("the shared-claims ledger cannot be read ({}); not launching".format(e))
+    held = ["{} = {!r}".format(slot, value.get(slot)) for slot in shared_claims.SLOTS
+            if value.get(slot) not in (None, owner)]
+    if held:
+        raise Refused("a shared slot is held by another session ({}). Never clear someone else's claim: check "
+                      "`python tools/shared_claims.py status` and ask its owner".format("; ".join(held)))
+
+
+def claim_live_test(owner):
+    """`run` holds the live-test slot for its own process while it runs. Returns the owner it claimed for, or None
+    when there is no ledger, or the slot was already this owner's (then that claim is only touched, never released)."""
+    import shared_claims
+    ledger, configured = shared_claims.resolve_ledger()
+    if not configured and not ledger.exists():
+        return None
+    name = owner or "vr-headless"
+    slot = shared_claims.SLOTS[1]
+    try:
+        if shared_claims.Ledger(ledger).value.get(slot) == name:
+            touch_claim(name)
+            return None
+        shared_claims.claim(slot, name, "vr-headless run", pid=os.getpid(), also_free=shared_claims.SLOTS)
+    except shared_claims.Refused as e:
+        raise Refused("cannot claim the live-test slot: {}".format(e))
+    except (OSError, ValueError, shared_claims.Unknown) as e:
+        raise Refused("cannot claim the live-test slot ({}); not launching".format(e))
+    return name
+
+
+def release_live_test(name) -> None:
+    if not name:
+        return
+    import shared_claims
+    try:
+        shared_claims.release(shared_claims.SLOTS[1], name)
+    except (shared_claims.Refused, OSError, ValueError) as e:
+        print("WARNING: the live-test slot was not released ({}); release it with tools/shared_claims.py".format(e),
+              file=sys.stderr)
+
+
+def touch_claim(owner) -> None:
+    """Record activity on the slots `owner` holds. A failure warns: it must never abort a game session."""
+    if not owner:
+        return
+    import shared_claims
+    try:
+        shared_claims.touch(owner)
+    except (shared_claims.Refused, shared_claims.Unknown, OSError, ValueError) as e:
+        print("note: claim activity not recorded: {}".format(e), file=sys.stderr)
+
+
 def cmd_launch(desktop) -> dict:
     """Start SteamVR and the game for a prepared (`on`) session and record what this run owns."""
     from vr_background_desktop import parse_start
@@ -960,6 +1035,8 @@ def cmd_launch(desktop) -> dict:
         raise Refused("enable a headless session first (`on`)")
     if st.get("session"):
         raise Refused("this headless session already launched once; `stop` it, then start a new one")
+    refuse_foreign_claims(CLAIM_OWNER)
+    touch_claim(CLAIM_OWNER)
     if not p["loader"].is_file():
         raise Refused("no sksevr_loader.exe in {}: SKSE VR is required to launch the game".format(p["game"]))
     try:
@@ -1219,9 +1296,23 @@ def cmd_stop() -> int:
 
 
 def cmd_run(desktop, park=False, emu=False, force=False) -> int:
-    """The managed lifecycle: prepare, launch, wait for the game to exit, restore -- restoration is in `finally`."""
+    """The managed lifecycle, holding the shared live-test slot from before `on` until restoration has finished."""
     if not IS_WINDOWS:
         raise Refused("`run` starts processes on a Windows desktop; this is not Windows")
+    global CLAIM_OWNER
+    refuse_foreign_claims(CLAIM_OWNER)    # before `on` changes anything
+    claimed = claim_live_test(CLAIM_OWNER)
+    requested = CLAIM_OWNER
+    CLAIM_OWNER = claimed or requested    # `launch` inside the run must accept the run's own claim
+    try:
+        return _run_session(desktop, park=park, emu=emu, force=force)
+    finally:
+        CLAIM_OWNER = requested
+        release_live_test(claimed)
+
+
+def _run_session(desktop, park=False, emu=False, force=False) -> int:
+    """Prepare, launch, wait for the game to exit, restore -- restoration is in `finally`."""
     st = load_state()
     if st and (st.get("mode") != "on" or st.get("session")):
         raise Refused("`run` needs a fresh session or one prepared by `on`; finish the existing one first (`stop`)")
@@ -1246,6 +1337,7 @@ def cmd_run(desktop, park=False, emu=False, force=False) -> int:
         if not games:
             raise Refused("the launch did not record the game's identity")
         wait_until_exited(games, session.get("port", 8921))
+        touch_claim(CLAIM_OWNER)              # the quiet period starts when the game stops, not at launch
         print("the owned game has exited; restoring")
     except BaseException as e:
         error = e
@@ -1300,11 +1392,12 @@ def cmd_status() -> int:
     return 0
 
 
-USAGE = ("usage: vr-headless {status | run --desktop background|current [--park] [--emu] [--force] | "
-         "on [--force] [--park] | launch --desktop background|current | stop | off | emu on|off}")
+USAGE = ("usage: vr-headless {status | run --desktop background|current [--park] [--emu] [--force] [--owner NAME] | "
+         "on [--force] [--park] | launch --desktop background|current [--owner NAME] | stop | off | emu on|off}")
 
 
 def main(argv) -> int:
+    global CLAIM_OWNER
     args = list(argv) or ["status"]
     try:
         if args == ["status"]:
@@ -1317,6 +1410,12 @@ def main(argv) -> int:
             return cmd_stop()
         if args[0] == "emu" and len(args) == 2:
             return cmd_emu(args[1])
+        if args[0] in ("run", "launch") and "--owner" in args:
+            i = args.index("--owner")
+            if i + 1 >= len(args) or args[i + 1].startswith("--"):
+                raise Refused("--owner needs a name")
+            CLAIM_OWNER = args[i + 1]
+            args = args[:i] + args[i + 2:]
         if args[0] in ("run", "launch") and "--desktop" in args:
             i = args.index("--desktop")
             desktop = args[i + 1] if i + 1 < len(args) else None

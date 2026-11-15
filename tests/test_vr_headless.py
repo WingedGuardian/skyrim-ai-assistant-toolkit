@@ -892,3 +892,96 @@ def test_stop_after_a_missed_game_listing_still_quits_it_before_any_helper(tree,
     assert order and order[0] == "quit", order
     assert all(step[0] == "game gone" for step in order[1:]), "a helper was terminated under the live game"
     assert mod.load_state() is None
+
+
+# --------------------------------------------------------------------------- shared claims (tools/shared_claims.py)
+
+def _claims_ledger(tmp_path, monkeypatch, shared=None, live=None):
+    path = tmp_path / "claims.json"
+    path.write_text(json.dumps({"active_shared_config_owner": shared, "active_live_test_owner": live}, indent=1))
+    monkeypatch.setenv("SHARED_CLAIMS_LEDGER", str(path))
+    return path
+
+
+def test_run_refuses_a_foreign_claim_before_changing_anything(tmp_path, monkeypatch):
+    mod = load()
+    _claims_ledger(tmp_path, monkeypatch, shared="gateway-uat-cutover")
+    monkeypatch.setattr(mod, "IS_WINDOWS", True)
+    monkeypatch.setattr(mod, "load_state", lambda: None)
+
+    def on_must_not_run(**_):
+        raise AssertionError("`on` ran despite a foreign claim")
+    monkeypatch.setattr(mod, "cmd_on", on_must_not_run)
+    with pytest.raises(mod.Refused, match="held by another session"):
+        mod.cmd_run("background")
+
+
+def test_the_claims_check_passes_its_own_owner_and_a_free_ledger(tmp_path, monkeypatch):
+    mod = load()
+    _claims_ledger(tmp_path, monkeypatch, live="souls")
+    mod.refuse_foreign_claims("souls")                    # own claim: allowed
+    with pytest.raises(mod.Refused, match="active_live_test_owner = 'souls'"):
+        mod.refuse_foreign_claims(None)                  # no --owner: any held slot refuses
+    _claims_ledger(tmp_path, monkeypatch)
+    mod.refuse_foreign_claims(None)                      # both free
+    import shared_claims
+    monkeypatch.delenv("SHARED_CLAIMS_LEDGER")
+    monkeypatch.setattr(shared_claims, "CONF", tmp_path / "no.conf")
+    monkeypatch.setattr(shared_claims, "DEFAULT_LEDGER", tmp_path / "absent.json")
+    mod.refuse_foreign_claims(None)                      # nothing configured: the launch is not coordinated
+
+
+def test_an_unreadable_claims_ledger_refuses(tmp_path, monkeypatch):
+    mod = load()
+    path = _claims_ledger(tmp_path, monkeypatch)
+    path.write_text("{ not json")
+    with pytest.raises(mod.Refused, match="cannot be read"):
+        mod.refuse_foreign_claims("anyone")
+
+
+def test_owner_flag_reaches_the_run(monkeypatch):
+    mod = load()
+    seen = {}
+
+    def fake_run(desktop, park=False, emu=False, force=False):
+        seen.update(desktop=desktop, park=park, owner=mod.CLAIM_OWNER)
+        return 0
+    monkeypatch.setattr(mod, "cmd_run", fake_run)
+    assert mod.main(["run", "--owner", "souls-run04", "--desktop", "background", "--park"]) == 0
+    assert seen == {"desktop": "background", "park": True, "owner": "souls-run04"}
+    assert mod.main(["run", "--desktop", "background", "--owner"]) == 2
+
+
+def test_a_configured_but_missing_ledger_refuses(tmp_path, monkeypatch):
+    mod = load()
+    monkeypatch.setenv("SHARED_CLAIMS_LEDGER", str(tmp_path / "gone.json"))
+    with pytest.raises(mod.Refused, match="does not exist"):
+        mod.refuse_foreign_claims("anyone")
+
+
+def test_run_holds_the_live_test_slot_and_releases_it_after_a_refusal(tmp_path, monkeypatch):
+    mod = load()
+    path = _claims_ledger(tmp_path, monkeypatch)
+    monkeypatch.setattr(mod, "IS_WINDOWS", True)
+    seen = {}
+
+    def session(desktop, **_):
+        seen["live"] = json.loads(path.read_text())["active_live_test_owner"]
+        seen["owner_for_launch"] = mod.CLAIM_OWNER
+        raise mod.Refused("later refusal")
+    monkeypatch.setattr(mod, "_run_session", session)
+    with pytest.raises(mod.Refused, match="later refusal"):
+        mod.cmd_run("background")
+    assert seen == {"live": "vr-headless", "owner_for_launch": "vr-headless"}
+    assert json.loads(path.read_text())["active_live_test_owner"] is None
+    assert mod.CLAIM_OWNER is None
+
+
+def test_run_never_releases_a_claim_its_owner_already_held(tmp_path, monkeypatch):
+    mod = load()
+    path = _claims_ledger(tmp_path, monkeypatch, live="souls")
+    monkeypatch.setattr(mod, "IS_WINDOWS", True)
+    monkeypatch.setattr(mod, "_run_session", lambda desktop, **_: 0)
+    monkeypatch.setattr(mod, "CLAIM_OWNER", "souls")
+    assert mod.cmd_run("background") == 0
+    assert json.loads(path.read_text())["active_live_test_owner"] == "souls"

@@ -149,7 +149,44 @@ CLI_FLOOR_MUTATIONS = [pytest.param(path, before, after, "tests/test_cli_python_
      "test_cmd_cli_checks_version_and_disables_manager_installation", "cmd-minimum"),
 )]
 
-MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + SPRIGGIT_RACE_MUTATIONS + EVIDENCE_STATUS_MUTATIONS + COMPOUND_SNAPSHOT_MUTATIONS + PRESERVATION_STATUS_MUTATIONS + RELOCK_RETRY_MUTATIONS + CLI_FLOOR_MUTATIONS + [
+SHARED_CLAIMS_MUTATIONS = [pytest.param("tools/shared_claims.py", before, after, "tests/test_shared_claims.py::" + test,
+    id="shared-claims-" + name) for before, after, test, name in (
+    ('            if alive(int(pid), str(details.get("pid_start") or "")):', "            if False:",
+     "test_a_running_holder_process_keeps_the_claim_live_however_old", "holder-alive"),
+    ("    if running:\n", "    if False:\n", "test_a_running_game_keeps_the_claim_live", "game-running"),
+    ("    if quiet < QUIET_MINUTES:", "    if False:",
+     "test_a_quiet_session_claim_is_releasable_only_after_thirty_minutes", "quiet-period"),
+    ('    if details is None or details.get("owner") != owner:', "    if details is None:",
+     "test_details_for_a_different_owner_do_not_count", "legacy-owner-match"),
+    ('        except (Unknown, ValueError, TypeError) as error:\n            return dict(row, verdict="unknown"',
+     '        except (Unknown, ValueError, TypeError) as error:\n            return dict(row, verdict="quiet-releasable"',
+     "test_an_unreadable_process_is_unknown_never_releasable", "process-unknown"),
+    ('    except Unknown as error:\n        return dict(row, verdict="unknown"',
+     '    except Unknown as error:\n        return dict(row, verdict="quiet-releasable"',
+     "test_an_unreadable_process_list_is_unknown_never_releasable", "games-unknown"),
+    ('        if result["verdict"] != "quiet-releasable":', "        if False:",
+     "test_release_stale_refuses_a_live_claim", "release-stale-gate"),
+    ("            if ledger.value.get(name) not in (None, owner):", "            if False:",
+     "test_a_foreign_holder_refuses_the_claim", "foreign-claim"),
+    ("    if not ledger.trusted():", "    if False:",
+     "test_a_foreign_rewrite_makes_details_untrusted_until_the_owner_touches", "foreign-rewrite"),
+    ('    if current.startswith("ticks:") != start.startswith("ticks:"):\n        raise Unknown',
+     '    if False:\n        raise Unknown',
+     "test_a_start_recorded_on_another_platform_is_unknown", "cross-platform-start"),
+)] + [pytest.param("tools/vr-headless.py", before, after, "tests/test_vr_headless.py::" + test,
+    id="shared-claims-headless-" + name) for before, after, test, name in (
+    ("            if value.get(slot) not in (None, owner)]", "            if False]",
+     "test_run_refuses_a_foreign_claim_before_changing_anything", "foreign-slot"),
+    ("    refuse_foreign_claims(CLAIM_OWNER)    # before `on` changes anything", "    pass",
+     "test_run_refuses_a_foreign_claim_before_changing_anything", "run-checks-first"),
+    ('            if configured:\n                raise Refused("the configured shared-claims ledger',
+     '            if False:\n                raise Refused("the configured shared-claims ledger',
+     "test_a_configured_but_missing_ledger_refuses", "configured-missing"),
+    ("        release_live_test(claimed)", "        pass",
+     "test_run_holds_the_live_test_slot_and_releases_it_after_a_refusal", "run-releases"),
+)]
+
+MUTATIONS = E2E_VERDICT_MUTATIONS + SHARED_CLAIMS_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + SPRIGGIT_RACE_MUTATIONS + EVIDENCE_STATUS_MUTATIONS + COMPOUND_SNAPSHOT_MUTATIONS + PRESERVATION_STATUS_MUTATIONS + RELOCK_RETRY_MUTATIONS + CLI_FLOOR_MUTATIONS + [
     pytest.param("tools/" + name,
                  'if "%SG_FILE_PY:~0,1%%SG_FILE_PY:~-1%"=="\'\'" set "SG_FILE_PY=%SG_FILE_PY:~1,-1%"',
                  "rem outer quote decoding removed",
