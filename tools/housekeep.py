@@ -2110,7 +2110,8 @@ def session(cfg, state: Path) -> int:
         notes.append("worktree inventory unavailable: {}".format(exc))
         r["failed"] += 1
     review = cfg["root"] / ".claude" / "diag" / "housekeep" / "REVIEW-NEEDED.md"
-    if review.is_file() and not daily_due:          # a run that just happened already said so in its summary
+    # Only while the code is still unapproved: the receipt is kept after approval, and must not nag forever.
+    if review.is_file() and not daily_due and not _code_approved(cfg):   # a run just now said so already
         notes.append("housekeep code changed: the daily run only PLANNED; read {} and approve it".format(review))
     alerts = cfg["root"] / ".claude" / "diag" / "housekeep" / "alerts.txt"
     try:
@@ -2148,6 +2149,14 @@ def _daily_module():
 
 
 # --------------------------------------------------------------------------- report
+
+def _code_approved(cfg) -> bool:
+    """Whether the housekeep code matches its approval. Unknown counts as not approved, so the note still shows."""
+    try:
+        return _daily_module().approved(cfg)
+    except Exception:
+        return False
+
 
 def dir_size(p: Path) -> int:
     """Report only, so unlike walk_files it steps over a link or a file another program just removed."""
