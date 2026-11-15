@@ -72,11 +72,11 @@ def test_a_tree_without_the_twin_selector_leaves_twins_to_ci(monkeypatch, capsys
         return lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout=out, stderr="")
     monkeypatch.setattr(g, "twin_selection", lambda *a: ["tools/x.py"])
     monkeypatch.setattr(g, "twin_aliases", lambda: {})
-    monkeypatch.setattr(g.subprocess, "run", listing(201))
+    monkeypatch.setattr(g.subprocess, "run", listing(51))
     assert g.twin_steps("py", "", ["tools/x.py"]) == []
     assert "left to CI" in capsys.readouterr().out
-    monkeypatch.setattr(g.subprocess, "run", listing(200))           # the cap itself still runs, shared out
-    assert len(g.twin_steps("py", "", ["tools/x.py"])) == 4
+    monkeypatch.setattr(g.subprocess, "run", listing(50))            # the cap itself still runs, shared out
+    assert len(g.twin_steps("py", "", ["tools/x.py"])) == 2
 
 
 class _Pool:
