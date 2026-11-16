@@ -22,9 +22,9 @@ Steps, each red on its own:
      One process per test file, at most eight at once. The timing/deadline files, the corpus rows and the rule messages
      are left to CI, and so are the whole-setup and release end-to-end files: they are the slow ones (3-12 min each)
      and the ones a busy machine fails on its own (2026-11-15:
-     every local refusal that day was load, not code). Then a spread sample of at most 50 mutation twins of the changed
-     files; a twin that cannot be judged here (its anchor skipped, e.g. at idle priority while a game runs) is left to
-     CI instead of refusing the push. CI runs every twin.
+     every local refusal that day was load, not code). Mutation twins run on CI only (user ruling 2026-11-15: CI
+     never blocks work, and this gate is a quick sanity check); `--twins` adds a spread sample of at most 50 twins
+     of the changed files, and a twin that cannot be judged here is left to CI instead of refusing the push.
 
 BASE defaults to the branch's upstream (a base it cannot read stops the gate: it would select no tests), else the merge-base with origin/master. A dirty working tree is reported
 (the gate runs on the tree, the push sends the commits). Exit 0 = passed, 1 = a step failed, 2 = could not run.
@@ -300,6 +300,7 @@ def main(argv=None) -> int:
     ap.add_argument("--python", default=sys.executable, help="interpreter that has pytest (default: this one)")
     ap.add_argument("--root", type=Path, default=None,
                     help="the checkout to gate (default: this script's repo); the hook passes the tree being pushed")
+    ap.add_argument("--twins", action="store_true", help="also run a capped sample of the changed files' mutation twins")
     a = ap.parse_args(argv)
     for stream in (sys.stdout, sys.stderr):
         try:
@@ -379,9 +380,13 @@ def main(argv=None) -> int:
     # The cap catches a hang in one file; it must not refuse a merely large push.
     steps = [(name + " ({} files)".format(len(fs)), verbose + fs, cap) for name, fs, cap in groups if fs]
     steps += [(name, verbose + [name], 1200) for name in rest]
-    # The twins run beside the rest now: they were kept apart only so they could not starve the timing tests, which are
-    # CI-only since 2026-11-15. Run after everything, they added their whole time (~3.5 min) to the wall clock.
-    g.parallel(steps + twin_steps(py, base, changed), workers=8)
+    # Mutation twins are CI's job (user ruling 2026-11-15, "CI never blocks work"): the local gate is a quick sanity
+    # check, and the twins were its single largest cost. --twins runs the capped sample here when you want it.
+    if a.twins:
+        steps += twin_steps(py, base, changed)
+    else:
+        print("   mutation twins: left to CI (--twins runs a sample here)", flush=True)
+    g.parallel(steps, workers=8)
     total = time.time() - g.t0
     if g.failed:
         print("prepush-gate: FAILED ({}) in {:.0f}s -- fix before pushing; CI would have gone red on it".format(
