@@ -15,7 +15,7 @@ same rule holds in the shared core and the X4 toolkit (owner ruling 2026-11-16).
 - **Nothing local waits for CI:** deploying tools, skills, docs and guard/hook code into your own install, continuing
   work, running an approved test, or reporting work done (say "CI pending" once).
 - **Guard and hook code reaches the game folder after two local checks:** an independent review of the change and the
-  local hook tests passing on that commit; keep the previous copy as the rollback. Never deploy unreviewed guard code.
+  local hook tests passing on that commit; rollback is re-deploying the previous reviewed commit. Never deploy unreviewed guard code.
 - **Push a session branch once per batch,** never just to see CI or to wait on it. A CI failure is fixed in the next
   batch.
 - **The local pre-push gate stays a quick sanity check;** full suites, mutation shards and slow legs run on CI.
