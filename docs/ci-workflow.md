@@ -5,6 +5,21 @@
 CI uses the [core-owned policy](https://github.com/WingedGuardian/modding-agent-harness/blob/50a993ba807d4c1e513cedef19b709fa2cf91ce0/CONTRIBUTING.md),
 pinned independently of the runtime harness revision.
 
+## CI gates releases, not local work
+
+CI on GitHub is the check on what goes out to other people, not a gate between a change and your own install. The
+same rule holds in the shared core and the X4 toolkit (owner ruling 2026-11-16).
+
+- **CI gates releases only:** a tag, a GitHub release, a version bump, a merge to `master`, a new core pin. Nothing is
+  released on a red or missing run, read per job on the exact commit.
+- **Nothing local waits for CI:** deploying tools, skills, docs and guard/hook code into your own install, continuing
+  work, running an approved test, or reporting work done (say "CI pending" once).
+- **Guard and hook code reaches the game folder after two local checks:** an independent review of the change and the
+  local hook tests passing on that commit; rollback is re-deploying the previous reviewed commit. Never deploy unreviewed guard code.
+- **Push a session branch once per batch,** never just to see CI or to wait on it. A CI failure is fixed in the next
+  batch.
+- **The local pre-push gate stays a quick sanity check;** full suites, mutation shards and slow legs run on CI.
+
 Develop in a draft PR. Draft updates run the existing shell, Python, Node,
 configuration and setup smoke checks. The merge qualification check deliberately
 remains blocked while full testing is deferred; green fast checks are not full

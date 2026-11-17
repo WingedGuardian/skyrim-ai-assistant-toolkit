@@ -61,6 +61,7 @@ any agent can read one directly. Read the skill BEFORE the work:
 | use the Linux devcontainer | `docs/container-vs-windows.md` |
 | understand why the guards behave as they do | `docs/safety-philosophy.md` |
 | review, debug or build a check | `docs/verify-from-the-outside.md` |
+| work on this toolkit: CI gates releases, never local work | `docs/ci-workflow.md` |
 | adapt an unsupported agent, or Python, Git or Node is missing or broken | `ADAPTING.md`, skill `toolkit-setup` |
 
 ## PyFFI / PyNifly (NIF geometry + animation authoring)
