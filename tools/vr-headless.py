@@ -1055,6 +1055,9 @@ def cmd_launch(desktop) -> dict:
                                   "it was not recorded and will not be stopped")
                 session["processes"].append(x)
                 save_state(st)
+        gone = {x["Id"] for x in candidates} - {p["Id"] for p in now}
+        if gone:                                # a candidate proved exited above is not boundary evidence either
+            boundary = {k: ([i for i in v if i not in gone] if isinstance(v, list) else v) for k, v in boundary.items()}
         session["boundary"] = boundary          # persist only boundary evidence whose identities were proved
         save_state(st)
         return now

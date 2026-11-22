@@ -13,7 +13,8 @@ def test_foreign_process_seen_before_start_is_never_owned(tree, world, monkeypat
 
     def race():
         found = read()
-        if world.reads > 1:
+        if world.reads == 2:
+            world.procs.append(foreign)        # live from here on: in every read and in the census
             return found + [foreign]
         return found
 
@@ -28,6 +29,21 @@ def test_foreign_process_seen_before_start_is_never_owned(tree, world, monkeypat
     assert world.terminated == []
 
 
+def test_a_process_proved_exited_leaves_no_pid_in_the_saved_boundary(tree, world, monkeypatch):
+    """Seen by Get-Process, gone from the census and proved exited: ignored, and its PID (which Windows may hand
+    to another process later) is not kept as boundary evidence."""
+    mod = tree["mod"]
+    assert mod.cmd_on() == 0
+    foreign = proc(27, "vrmonitor", str(tree["vr"] / "bin" / "vrmonitor.exe"))
+    read = world.read
+    monkeypatch.setattr(mod, "read_processes", lambda: read() + ([foreign] if world.reads > 1 else []))
+    world.isolated = False
+    with pytest.raises(mod.Refused):
+        mod.cmd_launch("background")
+    saved = mod.load_state()["session"].get("boundary", {})
+    assert not any(27 in v for v in saved.values() if isinstance(v, list)), saved
+
+
 @pytest.mark.parametrize("refusal", ["ancestry", "boundary", "census"])
 def test_managed_run_keeps_files_when_ownership_refusal_is_followed_by_a_missed_read(tree, world, monkeypatch, refusal):
     mod = tree["mod"]
@@ -36,7 +52,12 @@ def test_managed_run_keeps_files_when_ownership_refusal_is_followed_by_a_missed_
     read = world.read
     def race():
         found = read()
-        if refusal in ("ancestry", "census"):
+        if refusal == "ancestry" and world.reads == 2:
+            # A live process of unproved ancestry: in every later read and in the census, so only the ownership
+            # proof can refuse it (one that is gone again by the census is proved exited and ignored).
+            world.procs.append(foreign)
+            return found + [foreign]
+        if refusal == "census":
             return found + ([foreign] if world.reads == 2 else [])
         return [p for p in found if p["ProcessName"] not in mod.VR_NAMES] if world.reads > 3 else found
     monkeypatch.setattr(mod, "read_processes", race)

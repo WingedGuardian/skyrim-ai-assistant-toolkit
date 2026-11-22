@@ -34,7 +34,9 @@
   ([evidence](docs/evidence/2026-11-21-opencode-live-free-model.md)).
 - Headless VR test sessions: Devkit mouse-look controls are saved, disabled and restored on exit; a runtime helper
   that exits between two process snapshots no longer stops startup once its exit is proven.
-- Shared preservation core: unchanged from 4.1 (b86c709).
+- Shared preservation core pinned to b86c709, unchanged from 4.1.
+- Headless VR test sessions no longer keep the process ID of a helper proved exited as window evidence (Windows can
+  reuse that number for another process).
 
 ## v4.1.0 — 2026-11-14
 
