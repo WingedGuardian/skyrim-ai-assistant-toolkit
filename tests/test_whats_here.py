@@ -1040,3 +1040,17 @@ def test_look_attaches_an_external_pick_unparsed_and_labelled(endpoint):
 def test_look_without_an_external_pick_adds_nothing(endpoint):
     run, *_ = endpoint
     assert 'externalPick' not in json.loads(run('look').stdout)
+
+
+def test_an_external_pick_that_vanishes_mid_read_never_fails_look(tmp_path, monkeypatch):
+    sys.path.insert(0, str(CLI.parent))
+    from whats_here import enrichment
+    folder = tmp_path / 'Data/SKSE/Plugins'
+    folder.mkdir(parents=True)
+    (folder / 'last-pick.json').write_text('{}', encoding='utf-8')
+    # Listed by the glob, then replaced or deleted before its time is read (the mod rewrites it on every click).
+    def vanished(*args, **kwargs):
+        raise FileNotFoundError(2, 'gone', 'last-pick.json')
+    monkeypatch.setattr(enrichment, 'max', vanished, raising=False)
+    pick = enrichment.external_pick(tmp_path)
+    assert pick['status'] == 'not read' and pick['reason'] == 'FileNotFoundError'

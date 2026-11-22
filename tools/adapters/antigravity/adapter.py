@@ -30,7 +30,7 @@ ASK_PREFIX = ("NEEDS YOUR CONFIRMATION -- the toolkit cannot ask through Antigra
               "tell the user what you wanted to run and why; if they agree, they run it themselves. ")
 # Every Antigravity tool that writes a file or runs a command (docs "Supported tools"), by its own name.
 WRITE_TOOLS = ("write_to_file", "replace_file_content", "multi_replace_file_content")
-SHELL_TOOLS = ("run_command",)
+SHELL_TOOLS = ("run_command", "manage_task")
 
 
 def map_payload(raw):
@@ -45,6 +45,12 @@ def map_payload(raw):
         # Creating a new file takes no backup; replacing or editing one does.
         op = "add" if tool == "write_to_file" and args.get("Overwrite") is False else "update"
         return dict(base, kind="write", paths=[args["TargetFile"]], ops=[op])
+    if tool == "manage_task":
+        # Action send_input types Input into a running task (possibly a shell): judged as a command. Its other
+        # actions (list, status, kill) run nothing new.
+        if args.get("Action") != "send_input":
+            return dict(base, kind="other")
+        return dict(base, kind="shell", shell=None, command=args["Input"])
     if tool in SHELL_TOOLS:
         # The docs call it "a Bash command"; on Windows the shell is not documented, so both dialects are tried.
         return dict(base, kind="shell", shell=None, command=args["CommandLine"])

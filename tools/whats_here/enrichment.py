@@ -205,13 +205,17 @@ def external_pick(root, now=None, limit=65536):
     plugins = Path(root) / 'Data/SKSE/Plugins'
     if not plugins.is_dir():
         return None
-    found = []
-    for depth in ('last-pick.json', '*/last-pick.json', '*/*/last-pick.json'):
-        found += [path for path in plugins.glob(depth) if path.is_file()]
-    if not found:
-        return None
-    path = max(found, key=lambda item: item.stat().st_mtime)
-    stat = path.stat()
+    try:
+        found = []
+        for depth in ('last-pick.json', '*/last-pick.json', '*/*/last-pick.json'):
+            found += [path for path in plugins.glob(depth) if path.is_file()]
+        if not found:
+            return None
+        path = max(found, key=lambda item: item.stat().st_mtime)
+        stat = path.stat()
+    except OSError as exc:            # locked, or replaced while being looked at: report it, never fail look
+        return {'source': 'What Am I Looking At (external mod; schema not checked by this toolkit)',
+                'status': 'not read', 'reason': type(exc).__name__}
     out = {'source': 'What Am I Looking At (external mod; schema not checked by this toolkit)',
            'path': path.relative_to(root).as_posix(), 'ageSeconds': round((now or time.time()) - stat.st_mtime, 1)}
     if stat.st_size > limit:

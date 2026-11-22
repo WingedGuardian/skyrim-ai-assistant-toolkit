@@ -17,9 +17,8 @@ using Clock = std::chrono::steady_clock;
 namespace {
 std::atomic<unsigned> generation{1};
 probe::RegistrationGate registrationGate;
-// Set on kPostLoadGame/kNewGame, cleared on kPreLoadGame. Quitting to the main menu sends no message, so
-// observe() also checks the main menu and the player's cell: TES::Pick and the reference walk need a world.
-std::atomic<bool> worldLoaded{false};
+// observe() needs a world: the player in a cell, and neither the main menu nor a loading screen open. No load
+// message is relied on: quitting to the main menu sends none, and a `coc` from the main menu may send none.
 // Recorded from the SKSE messaging callback (game main thread). A handler that ran ON the main thread would
 // wait 4 s for a task only that thread can run: refuse instead of freezing the game.
 std::atomic<std::thread::id> mainThread{};
@@ -335,6 +334,8 @@ struct Capture {
   // match is confirmed against the handle taken at start, whose age bits differ for a recycled slot.
   std::uintptr_t targetAddress = 0;
   RE::ObjectRefHandle target;
+  // Captures this start superseded; restored if the start reply can never be delivered.
+  std::vector<std::string> superseded;
   std::string terminalReason = "stopped";
   bool visualSnapshotComplete = false;
   std::string visualStatus = "not checked";
@@ -583,6 +584,7 @@ J watch(const J &args, Budget &budget) {
         !old.stopped && now < old.expiry) {
       old.stopped = true;
       old.terminalReason = "superseded";
+      c.superseded.push_back(otherId);
     }
   auto snapshot = visuals(actorRef, budget);
   updateVisuals(c, std::move(snapshot), budget);
@@ -716,8 +718,9 @@ J observe(const std::string &op, const J &a, Budget &b) {
   if (!player)
     throw std::runtime_error("player unavailable");
   auto *ui = RE::UI::GetSingleton();
-  if (!worldLoaded || !player->GetParentCell() ||
-      (ui && ui->IsMenuOpen(RE::MainMenu::MENU_NAME)))
+  if (!player->GetParentCell() ||
+      (ui && (ui->IsMenuOpen(RE::MainMenu::MENU_NAME) ||
+              ui->IsMenuOpen(RE::LoadingMenu::MENU_NAME))))
     throw NotLoaded();
   if (op == "watch")
     return watch(a, b);
@@ -1034,13 +1037,20 @@ void handler(void *ctx, const char *raw, void *sink,
                   delivered = true;
                 }
               }
-              // Nobody will ever learn this capture's id: stop it rather than hold an actor slot (and
-              // supersede the caller's earlier capture) until it expires. Never under req->mutex.
+              // Nobody will ever learn this capture's id: stop it rather than hold an actor slot until it
+              // expires, and give back the captures it superseded. Never under req->mutex.
               if (!delivered && !started.empty()) {
                 std::lock_guard lock(captureMutex);
                 if (auto *c = findCapture(started)) {
                   c->stopped = true;
                   c->terminalReason = "abandoned: start reply undeliverable";
+                  for (auto &id : c->superseded)
+                    if (auto *old = findCapture(id);
+                        old && old->terminalReason == "superseded" &&
+                        old->gen == generation && Clock::now() < old->expiry) {
+                      old->stopped = false;
+                      old->terminalReason = "stopped";
+                    }
                 }
               }
             } catch (...) {
@@ -1100,12 +1110,6 @@ void message(SKSE::MessagingInterface::Message *m) {
   if (!m)
     return;
   mainThread = std::this_thread::get_id();
-  if (m->type == SKSE::MessagingInterface::kPreLoadGame)
-    worldLoaded = false;
-  if (m->type == SKSE::MessagingInterface::kNewGame ||
-      (m->type == SKSE::MessagingInterface::kPostLoadGame &&
-       reinterpret_cast<std::uintptr_t>(m->data) != 0))
-    worldLoaded = true;
   if (m->type == SKSE::MessagingInterface::kPreLoadGame ||
       m->type == SKSE::MessagingInterface::kNewGame) {
     std::lock_guard lock(captureMutex);

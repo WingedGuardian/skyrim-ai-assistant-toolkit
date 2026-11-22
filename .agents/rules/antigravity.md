@@ -5,8 +5,8 @@ trigger: always_on
 # Skyrim toolkit: notes for Google Antigravity
 
 - Antigravity cuts every instruction file at 24,000 bytes. `AGENTS.md` is longer: its safety rules, saves and file
-  locks all come before the cut, but the sections from "Core Modding Principle: Vanilla Game as Frame of Reference"
-  to the end may not reach you, or only in part. Read them from `AGENTS.md` with your file tool at the start of a session.
+  locks all come before the cut, but the sections from "Confidence Levels (Mandatory)" to the end may not reach you,
+  or only in part (setup writes your install's paths into the top of the file, which moves the cut). Read them from `AGENTS.md` with your file tool at the start of a session.
 - `AGENTS.md` says "Codex" in places; where a rule names a host, read it as applying to you unless it is about Codex
   configuration files.
 - The toolkit's guard runs as your PreToolUse hook only if `.agents/hooks.json` registers it

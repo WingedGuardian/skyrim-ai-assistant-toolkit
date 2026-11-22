@@ -9,6 +9,8 @@
    "payload": {"toolCall": {"name": "write_to_file", "args": {"TargetFile": "{ROOT}/notes.txt", "Overwrite": false, "CodeContent": "hello", "Description": "notes"}}, "stepIdx": 1, "conversationId": "c", "workspacePaths": ["{ROOT}"]}},
   {"id": "decoy-plugin-shell", "expect": "block", "tool": "run_command",
    "payload": {"toolCall": {"name": "run_command", "args": {"CommandLine": "echo x > \"{ROOT}/Data/Canary.esp\"", "Cwd": "{ROOT}", "WaitMsBeforeAsync": 5000}}, "stepIdx": 1, "conversationId": "c", "workspacePaths": ["{ROOT}"]}},
+  {"id": "decoy-plugin-shell:manage_task", "expect": "block", "tool": "manage_task",
+   "payload": {"toolCall": {"name": "manage_task", "args": {"Action": "send_input", "TaskId": "t1", "Input": "echo x > \"{ROOT}/Data/Canary.esp\""}}, "stepIdx": 1, "conversationId": "c", "workspacePaths": ["{ROOT}"]}},
   {"id": "benign-shell", "expect": "allow",
    "payload": {"toolCall": {"name": "run_command", "args": {"CommandLine": "git status", "Cwd": "{ROOT}", "WaitMsBeforeAsync": 5000}}, "stepIdx": 1, "conversationId": "c", "workspacePaths": ["{ROOT}"]}},
   {"id": "empty-payload", "expect": "block", "payload": ""},

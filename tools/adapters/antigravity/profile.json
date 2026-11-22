@@ -1,4 +1,4 @@
 {"block": {"exit": 0, "stdout_regex": "\\{\"decision\": \"deny\", \"reason\": .*\\}", "stderr_regex": null},
  "allow": {"exit": 0},
  "write_tools": ["write_to_file", "replace_file_content", "multi_replace_file_content"],
- "shell_tools": ["run_command"]}
+ "shell_tools": ["run_command", "manage_task"]}

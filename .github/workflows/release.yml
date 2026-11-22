@@ -24,9 +24,31 @@ concurrency:
 # inside a `run:` script as ${{ }}: they reach the shell through env, so a crafted tag name is data, not code.
 
 jobs:
+  # Nothing builds or attests until the input is a release tag on master: a dispatch naming a branch stops here.
+  tag-check:
+    name: The input is a vX.Y.Z tag whose commit is on master
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check the tag
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          TAG="${INPUT_TAG:-$REF_NAME}"
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::'$TAG' is not a vX.Y.Z release tag"; exit 1; }
+          SHA=$(git rev-parse --verify "refs/tags/$TAG^{commit}") || { echo "::error::no tag $TAG"; exit 1; }
+          git merge-base --is-ancestor "$SHA" refs/remotes/origin/master || { echo "::error::$TAG is not on master"; exit 1; }
+
   # The optional ToolkitProbe DLL, built on Windows from the tag's commit and attested. A tag that does not
   # build it publishes nothing: the release job needs this one.
   probe:
+    needs: tag-check
     uses: ./.github/workflows/toolkit-probe.yml
     permissions:
       contents: read

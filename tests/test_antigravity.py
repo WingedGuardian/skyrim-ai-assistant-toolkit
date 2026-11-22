@@ -9,9 +9,12 @@ import pytest
 from conftest import REPO
 
 CUT = 24000      # antigravity.google/docs/rules: each instruction file is truncated at 24,000 bytes
-CUT_HEADING = b"## Core Modding Principle: Vanilla Game as Frame of Reference"
+CUT_HEADING = b"## Confidence Levels (Mandatory)"
+# setup.sh fills {{GAME_ROOT}}, {{CONFIG_DIR}}, {{LOADORDER_DIR}} and {{MOD_MANAGER_PATHS}} near the top, so a real
+# install's file is longer than this template: keep the named cut this far inside the limit.
+MARGIN = 1024
 MUST_ARRIVE = [b"## Safety Rules", b"### DENIED", b"### ASKS THE USER", b"### Saves:", b"### The file lock",
-               b"### General rules", b"## Confidence Levels"]
+               b"### General rules", b"### Iteration snapshots"]
 
 
 def _load_install():
@@ -25,7 +28,7 @@ def _load_install():
 def test_everything_that_protects_the_install_is_inside_antigravitys_cut():
     agents = (REPO / "AGENTS.md").read_bytes()
     cut_at = agents.find(CUT_HEADING)
-    assert 0 < cut_at < CUT, "the section .agents/rules/antigravity.md names as the cut moved past 24,000 bytes"
+    assert 0 < cut_at < CUT - MARGIN, "the section .agents/rules/antigravity.md names as the cut is too close to 24,000 bytes"
     for heading in MUST_ARRIVE:
         at = agents.find(heading)
         assert 0 < at < cut_at, heading
@@ -42,7 +45,9 @@ def test_install_merges_and_never_overwrites_an_unreadable_file(tmp_path):
     _, merged = m.plan(tmp_path, "C:/Py/python.exe")
     assert merged["mine"] == {"Stop": []}
     hook = merged[m.ENTRY]["PreToolUse"][0]
-    assert hook["matcher"] == "^(run_command|write_to_file|replace_file_content|multi_replace_file_content)$"
+    assert hook["matcher"] == "^(run_command|manage_task|write_to_file|replace_file_content|multi_replace_file_content)$"
+    adapter = hook["hooks"][0]["command"].split(" -B ")[1]
+    assert Path(adapter).is_absolute() and " " not in adapter and adapter.endswith("adapter.py")
     assert hook["hooks"][0]["timeout"] > 25 and " " not in hook["hooks"][0]["command"].split(" -B ")[0]
     hooks.write_text("{not json", encoding="utf-8")
     with pytest.raises(ValueError):

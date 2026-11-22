@@ -8,21 +8,22 @@ yet, so treat the guard as untested until the canaries below pass on your machin
 |---|---|---|
 | Instructions | `AGENTS.md` (always on) and `.agents/rules/antigravity.md` | `/rules`: AGENTS.md, GEMINI.md and `.agents/rules/*.md` are combined |
 | Skills | `.agents/skills/` (the same folders Codex reads) | `/skills` |
-| Guard | `tools/adapters/antigravity/adapter.py` as a PreToolUse hook on `run_command`, `write_to_file`, `replace_file_content`, `multi_replace_file_content` | `/hooks` |
+| Guard | `tools/adapters/antigravity/adapter.py` as a PreToolUse hook on `run_command`, `manage_task` (its `send_input`), `write_to_file`, `replace_file_content`, `multi_replace_file_content` | `/hooks` |
 | MCP | your own `.agents/mcp_config.json` (below) | `/mcp` |
 
 ## Limits that matter
 
 - **24,000 bytes per instruction file.** `AGENTS.md` is longer. Everything that protects your install (the safety
-  rules, saves, file locks) is before the cut; four general working principles and the Codex section are at or after it.
+  rules, saves, file locks) is before the cut, with 1 KB to spare for the paths setup writes in; the working
+  principles and the Codex section are at or after it.
   The rules file tells Antigravity to read the rest itself, and a repository test keeps the safety sections inside
   the first 24,000 bytes.
 - **Hook failure behaviour is undocumented.** Antigravity's docs do not say what happens when a hook crashes,
   prints something unreadable or exceeds its timeout. The adapter answers `{"decision": "deny"}` for every failure
   it can see, and the hook timeout (40 s) is longer than the adapter's own 25 s deadline. Whether Antigravity
   honours a deny, and fails closed on a hung hook, is what the live canaries prove.
-- **Unmapped tools are not guarded.** Only the four tools above are checked. A tool that writes or runs something
-  under another name runs unchecked.
+- **Unmapped tools are not guarded.** Only the five tools above are checked. `generate_image` writes an image to a
+  place the docs do not name, and a subagent given write tools uses its own calls: neither is checked.
 
 ## Set up
 
