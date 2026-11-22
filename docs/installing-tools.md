@@ -2,6 +2,8 @@
 
 None of the modding tools are bundled — install only the ones you need. Per tool: what it is, how to acquire it, and a quick verify.
 
+**ToolkitProbe** is a toolkit-owned optional SKSE extension, distributed as a separate mod archive with source and build provenance. Requires DevBench 1.35 or newer; newer compatible versions are accepted. Install through the mod manager or an authorized `mod-install` dry-run/apply workflow, never through the diagnostic CLI. See [What's here](whats-here.md); native acceptance is pending.
+
 **House Carl 2.1.2** is an optional record/query backend with a shared Claude/Codex gateway, Wrye-managed
 or MO2-profile inputs, and verified staged plugin edits. Setup, pinned archive hash, prerequisites and
 capability limits: [House Carl integration](housecarl.md). Start with `python tools/housecarl.py --help`.

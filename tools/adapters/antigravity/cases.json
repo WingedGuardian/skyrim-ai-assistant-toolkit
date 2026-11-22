@@ -1,0 +1,16 @@
+{"cases": [
+  {"id": "decoy-plugin-write", "expect": "block", "tool": "write_to_file",
+   "payload": {"toolCall": {"name": "write_to_file", "args": {"TargetFile": "{ROOT}/Data/Canary.esp", "Overwrite": true, "CodeContent": "x", "Description": "decoy"}}, "stepIdx": 1, "conversationId": "c", "workspacePaths": ["{ROOT}"]}},
+  {"id": "decoy-plugin-write:replace_file_content", "expect": "block", "tool": "replace_file_content",
+   "payload": {"toolCall": {"name": "replace_file_content", "args": {"TargetFile": "{ROOT}/Data/Canary.esp", "Instruction": "i", "Description": "d", "AllowMultiple": false, "TargetContent": "a", "ReplacementContent": "b", "StartLine": 1, "EndLine": 1}}, "stepIdx": 1, "conversationId": "c", "workspacePaths": ["{ROOT}"]}},
+  {"id": "decoy-plugin-write:multi_replace_file_content", "expect": "block", "tool": "multi_replace_file_content",
+   "payload": {"toolCall": {"name": "multi_replace_file_content", "args": {"TargetFile": "{ROOT}/Data/Canary.esp", "Instruction": "i", "Description": "d", "ReplacementChunks": []}}, "stepIdx": 1, "conversationId": "c", "workspacePaths": ["{ROOT}"]}},
+  {"id": "benign-write", "expect": "allow",
+   "payload": {"toolCall": {"name": "write_to_file", "args": {"TargetFile": "{ROOT}/notes.txt", "Overwrite": false, "CodeContent": "hello", "Description": "notes"}}, "stepIdx": 1, "conversationId": "c", "workspacePaths": ["{ROOT}"]}},
+  {"id": "decoy-plugin-shell", "expect": "block", "tool": "run_command",
+   "payload": {"toolCall": {"name": "run_command", "args": {"CommandLine": "echo x > \"{ROOT}/Data/Canary.esp\"", "Cwd": "{ROOT}", "WaitMsBeforeAsync": 5000}}, "stepIdx": 1, "conversationId": "c", "workspacePaths": ["{ROOT}"]}},
+  {"id": "benign-shell", "expect": "allow",
+   "payload": {"toolCall": {"name": "run_command", "args": {"CommandLine": "git status", "Cwd": "{ROOT}", "WaitMsBeforeAsync": 5000}}, "stepIdx": 1, "conversationId": "c", "workspacePaths": ["{ROOT}"]}},
+  {"id": "empty-payload", "expect": "block", "payload": ""},
+  {"id": "garbage-payload", "expect": "block", "payload": "not json {"}
+]}

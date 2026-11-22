@@ -147,6 +147,8 @@ The gateway is an application boundary, not an OS sandbox. Directly launching a 
 writing files through another tool does not acquire gateway protection. `skydoctor` reports the optional
 installation separately from the agent-hook coverage.
 
+On Windows, gateway venv re-execution and bounded Node validation use the existing `CREATE_NO_WINDOW` subprocess flag. This prevents those helper console windows in either desktop mode. Venv re-execution explicitly forwards the current stdin/stdout/stderr handles so hidden callers retain CLI output and bidirectional MCP streaming without buffering or relaying it. Backend and setup child launches need their own visibility qualification; this flag does not change gateway policy or provide a process sandbox.
+
 ## Updates and removal
 
 Updates are explicit and version-pinned. Setup stages a new backend installation and preserves the

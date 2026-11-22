@@ -446,7 +446,7 @@ assert.equal(result.errors.length, 2);
 assert.throws(() => parse(['{}']));
 assert.throws(() => parse(['broken']));
 """
-    subprocess.run(["node", "-e", code, str(verifier)], check=True, capture_output=True)
+    subprocess.run(["node", "-e", code, str(verifier)], check=True, capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
 
 # --- Issue 11: archive lists the backend receives ------------------------------------------------------------------
@@ -1047,7 +1047,7 @@ def test_verifier_controls_on_synthetic_plugins(tmp_path):
         pytest.skip("Node not installed")
     here = Path(__file__).resolve().parent
     result = subprocess.run(["node", str(here / "housecarl-verify-controls.js"), str(here.parent / "tools"), str(tmp_path)],
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     assert result.returncode == 0, result.stderr + result.stdout
     assert "Passed 12 verifier controls" in result.stdout
 

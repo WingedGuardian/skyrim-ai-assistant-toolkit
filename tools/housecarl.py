@@ -94,7 +94,9 @@ def main(argv=None):
             if not py.exists():
                 raise Refusal("Optional gateway environment missing; run setup. No packages installed implicitly.")
             if py.resolve() != Path(sys.executable).resolve():
-                return subprocess.call([str(py), str(Path(__file__).resolve()), *(argv if argv is not None else sys.argv[1:])])
+                return subprocess.call([str(py), str(Path(__file__).resolve()), *(argv if argv is not None else sys.argv[1:])],
+                                       stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
+                                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             try:
                 from importlib.metadata import version
                 if version("mcp") != MCP_VERSION or version("tomlkit") != TOMLKIT_VERSION:

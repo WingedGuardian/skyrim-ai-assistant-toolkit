@@ -1,0 +1,105 @@
+name: ToolkitProbe
+on:
+  pull_request:
+    paths: ['tools/toolkit-probe/**', 'tools/whats-here.py', 'tools/whats_here/**', 'scripts/*toolkit_probe.py', 'tests/test_whats_here*.py', 'tests/test_toolkit_probe*.py', '.github/workflows/toolkit-probe.yml']
+  # A workflow cannot be dispatched until it is on the default branch; a push to any branch runs it from the
+  # pushed commit, so a branch that changes the probe gets the native build before it is merged.
+  push:
+    branches-ignore: [master]
+    paths: ['tools/toolkit-probe/**', 'tools/whats-here.py', 'tools/whats_here/**', 'scripts/*toolkit_probe.py', 'tests/test_whats_here*.py', 'tests/test_toolkit_probe*.py', '.github/workflows/toolkit-probe.yml']
+  workflow_dispatch:
+  # The release workflow calls this with the tag, so the attached ToolkitProbe.zip is built from that commit.
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Commit or tag to build'
+        type: string
+        required: true
+permissions:
+  contents: read
+
+jobs:
+  cli:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: |
+          python -m pip install --only-binary=:all: --require-hashes -r requirements.lock
+      - name: CLI and package contracts
+        run: python -m pytest tests/test_whats_here.py tests/test_whats_here_watch_batching.py tests/test_toolkit_probe_build.py tests/test_toolkit_probe_package.py -q
+  native:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write       # build attestation, release calls only
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: toolkit
+          # The tag for a release, the PR's own head commit (not GitHub's merge commit, which nobody wrote), or the push.
+          ref: ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: alandtse/CommonLibVR
+          ref: f82241e5daabfaadace7706bea14a202a7916e9c
+          submodules: recursive
+          persist-credentials: false
+          path: commonlib
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: microsoft/vcpkg
+          ref: 5d4a3dc90c0b3773f3bac81bf41297b54328f471
+          persist-credentials: false
+          path: vcpkg
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+      - name: Bootstrap build dependencies
+        shell: pwsh
+        run: |
+          & ./vcpkg/bootstrap-vcpkg.bat -disableMetrics
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Configure from pinned source
+        shell: pwsh
+        run: |
+          cmake -S toolkit/tools/toolkit-probe -B "$env:RUNNER_TEMP/probe-build" -A x64 "-DCOMMONLIB_SOURCE_DIR=$env:GITHUB_WORKSPACE/commonlib" -DCOMMONLIB_PREBUILT=OFF "-DCMAKE_TOOLCHAIN_FILE=$env:GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md -DENABLE_SKYRIM_SE=ON -DENABLE_SKYRIM_AE=ON -DENABLE_SKYRIM_VR=ON -DBUILD_TESTS=OFF
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Build, test and record provenance
+        shell: pwsh
+        run: |
+          python toolkit/scripts/build_toolkit_probe.py --build-dir "$env:RUNNER_TEMP/probe-build" --receipt "$env:RUNNER_TEMP/probe-receipt.json"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Package optional mod
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/probe-dist" | Out-Null
+          $sourceCommit = git -C toolkit rev-parse HEAD
+          python toolkit/scripts/package_toolkit_probe.py --commit "$sourceCommit" --dll "$env:RUNNER_TEMP/probe-build/Release/ToolkitProbe.dll" --receipt "$env:RUNNER_TEMP/probe-receipt.json" --output "$env:RUNNER_TEMP/probe-dist/ToolkitProbe.zip"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Attest the DLL and the package (release builds)
+        if: ${{ inputs.ref != '' }}
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/probe-build/Release/ToolkitProbe.dll
+            ${{ runner.temp }}/probe-dist/ToolkitProbe.zip
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ToolkitProbe
+          path: ${{ runner.temp }}/probe-dist/ToolkitProbe.zip
+          if-no-files-found: error

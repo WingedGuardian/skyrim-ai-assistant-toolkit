@@ -292,7 +292,7 @@ def _node(argv, env, work, what):
     """One bounded xEdit (node) step; a timeout is a refusal with nothing published, never a raw traceback."""
     try:
         return subprocess.run(argv, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                              timeout=120)
+                              timeout=120, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except subprocess.TimeoutExpired as exc:
         raise Refusal("The {} did not finish within 120 s; nothing published; retained {}".format(what, work)) from exc
 

@@ -15,8 +15,10 @@ another SKSE plugin can add its own tool to that server. An agent then asks the 
 the plugin writes. That reuses a supported server rather than building your own pipe, socket or polling log.
 
 **Get the API.** `DevBenchAPI.h` and `DevBenchAPI.cpp` are MIT-licensed (the DevBench plugin itself is GPL-3.0), so any
-plugin may compile them in. The 1.35.0 download does not contain them, so take both files from the upstream repository
-at the tag matching your installed DevBench (`alandtse/devbench`). Upstream also ships a vcpkg port
+plugin may compile them in. Neither the 1.35.0 download nor its source tag contains these public API files.
+Use an audited upstream API revision with compatible host capabilities; ToolkitProbe vendors
+`cb0c0a9898f656e6df9697570026e7ef2705c44f`. Record the source revision and license, and check the host build gates.
+Do not assume matching tag names establish API compatibility. Upstream also ships a vcpkg port
 (`cmake/ports/devbench-api/` in `alandtse/devbench`), and its README says to prefer it over copying the files, because
 copies drift. It is not in the official vcpkg registry, so use it as an overlay port, and check its `portfile.cmake` for
 a published `REF` before relying on it.
@@ -26,9 +28,12 @@ find_package(devbench-api CONFIG REQUIRED)
 target_link_libraries(YourPlugin PRIVATE DevBench::API)
 ```
 
-**Register after `kPostLoad`.** The interface is fetched through an SKSE message to the `devbench` plugin, so ask for it
-only once every plugin is loaded. It returns `nullptr` when DevBench is not installed: treat that as "no tool", never as
-an error.
+**Register at `kDataLoaded`.** DevBench 1.35 initializes its host API and cross-plugin listener during
+its own `kPostLoad`. A consumer at the same stage can run first and incorrectly see an absent provider.
+By `kDataLoaded`, every plugin has completed `kPostLoad`; request the interface once there.
+This ordering is explicit in [upstream startup source](https://github.com/alandtse/devbench/blob/v1.35.0/src/main.cpp).
+The earlier measured main-menu success did not qualify every plugin ordering. A null interface still means
+the optional provider is unavailable; do not dereference it.
 
 ```cpp
 #include <DevBenchAPI.h>
@@ -42,7 +47,7 @@ static void StatusTool(void* /*ctx*/, const char* /*argsJson*/, void* sink, DevB
 
 void OnMessage(SKSE::MessagingInterface::Message* m)
 {
-    if (m->type != SKSE::MessagingInterface::kPostLoad) return;
+    if (m->type != SKSE::MessagingInterface::kDataLoaded) return;
     if (auto* dvb = DevBenchAPI::GetDevBenchInterface001()) {
         dvb->RegisterTool("mymod.status",
             R"({"description":"MyMod's live state","inputSchema":{"type":"object","properties":{}},"readOnly":true})",

@@ -208,16 +208,27 @@ function findByLocalID(file, localID) {
     // what this tool exists to prevent, so match on the low 3 bytes instead --
     // the same thing the existing hand-rolled scripts do. Its overrides can share low bytes across masters (Skyrim.esm and
     // Dawnguard.esm both have a 003363), so the full id decides when it matches, and two candidates with none refuse.
+    // A bare local id (no load-order byte) names the plugin's OWN record. An override of a master record with
+    // the same low bytes (Skyrim.esm 00001234 overridden here, beside this plugin's own xx001234) used to win
+    // the exact-match test, so `chain` traced the master's record instead. Prefer the plugin's own record.
+    const bare = (localID >>> 24) === 0;
     const same = [];
+    const keepOnly = keep => same.forEach(s => { if (s !== keep) { try { xelib.release(s); } catch (e) {} } });
     for (const r of xelib.getRecords(file, '', true)) {     // true: its overrides too, as the header promises
         let fid;
         try { fid = xelib.getFormID(r, false); } catch (e) { continue; }
-        if (fid === localID) {
-            same.forEach(s => { try { xelib.release(s); } catch (e) {} });
+        if (!bare && fid === localID) {
+            keepOnly(null);
             return r;
         }
         if ((fid & 0x00FFFFFF) === (localID & 0x00FFFFFF)) same.push(r);
         else { try { xelib.release(r); } catch (e) {} }
+    }
+    if (bare) {
+        const own = same.filter(r => { try { return !xelib.isOverride(r); } catch (e) { return false; } });
+        if (own.length === 1) { keepOnly(own[0]); return own[0]; }
+        const exact = same.filter(r => { try { return xelib.getFormID(r, false) === localID; } catch (e) { return false; } });
+        if (own.length === 0 && exact.length === 1) { keepOnly(exact[0]); return exact[0]; }
     }
     if (same.length > 1) {
         throw new Error(same.length + ' records in this plugin share the low bytes of ' + localID.toString(16) +

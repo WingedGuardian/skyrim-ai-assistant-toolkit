@@ -74,7 +74,8 @@ def _resolve_bash() -> str:
         tried.append(candidate)
         try:
             probe = subprocess.run([candidate, "-c", "echo toolkit-ok"],
-                                   capture_output=True, text=True, timeout=60)
+                                   capture_output=True, text=True, timeout=60,
+                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except OSError:
             continue
         if probe.returncode == 0 and "toolkit-ok" in probe.stdout:
@@ -182,7 +183,12 @@ def login_name() -> str:
 
 def copy_repo(dest: Path) -> Path:
     """A pristine copy of the toolkit, minus the test suite itself."""
-    shutil.copytree(REPO, dest, ignore=IGNORE)
+    def ignore_build(directory, names):
+        ignored = set(IGNORE(directory, names))
+        if Path(directory).resolve() == (REPO / "tools/toolkit-probe").resolve():
+            ignored.add("build")  # native dependencies are rebuildable, never install inputs
+        return ignored
+    shutil.copytree(REPO, dest, ignore=ignore_build)
     return dest
 
 

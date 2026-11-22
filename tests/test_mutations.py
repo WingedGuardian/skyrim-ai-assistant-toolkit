@@ -8980,7 +8980,37 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
 # Linux CI run 38187755448: twins that mutate a WINDOWS-ONLY branch of the product. Off Windows the mutated line
 # never runs (or the defect it guards cannot occur), so the anchor passes and "not killed" would be a false alarm.
 # Each stays fully enforced on Windows; where the POSIX branch has its own guard, it has its own twin below.
+# 4.2 release review, whats-here fixes: one twin per new check, each killed by the named test.
+_WHT = "tests/test_whats_here.py::"
+_WH = [
+    ("tools/whats_here/enrichment.py", "            if not defines or defines[0].casefold() != plugin.casefold():",
+     "            if False:",
+     _WHT + "test_check_fails_when_offline_chain_traced_another_files_record", "wh42-chain-must-name-the-defining-file"),
+    ("tools/whats_here/enrichment.py", "    if folder in folded:", "    if False:",
+     _WHT + "test_texture_paths_are_normalised_not_prefixed", "wh42-texture-path-not-prefixed"),
+    ("tools/whats_here/enrichment.py", "    if len(parts) > 1 and folded[0] == 'data':", "    if False:",
+     _WHT + "test_texture_paths_are_normalised_not_prefixed", "wh42-texture-path-drops-data"),
+    ("tools/whats_here/cli.py", "            if number >= MAX_CHECKS:", "            if False:",
+     _WHT + "test_check_is_capped", "wh42-check-capped"),
+    ("tools/whats_here/cli.py", "        code = (3 if result.get('incomplete')", "        code = (0 if result.get('incomplete')",
+     _WHT + "test_watch_expiry_deduplicates_events_and_stops_owned_capture", "wh42-incomplete-exits-3"),
+    ("tools/whats_here/enrichment.py", "'/F', '/T', '/PID'", "'/F', '/PID'",
+     "tests/test_helper_visibility.py::test_a_timed_out_helper_has_its_whole_tree_killed", "wh42-timeout-kills-tree"),
+]
+_WH += [
+    ("tools/whats_here/visual_attribution.py", "        if best and best['ratio'] >= STRONG_RATIO and not tied:",
+     "        if best and best['ratio'] >= STRONG_RATIO:",
+     "tests/test_whats_here_visual_attribution.py::test_two_sources_timing_cannot_separate_are_reported_tied_not_inferred",
+     "wh42-tie-not-inferred"),
+    ("tools/vr-headless.py", '        if line.split()[:1] == [b"mouse_enabled"]:',
+     '        if line.strip().startswith(b"mouse_enabled"):',
+     "tests/test_vr_headless.py::test_mouse_look_off_keeps_every_other_line", "wh42-mouse-key-exact"),
+]
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in _WH]
+
+
 _WINDOWS_ONLY_TWINS = {
+    "wh42-timeout-kills-tree": "taskkill is the Windows tree kill; POSIX kills the process group",
     "deadline-kill-by-windows-pid": "taskkill by /proc/<pid>/winpid runs only under MSYS/Cygwin; POSIX takes kill -KILL",
     "deadline-kill-is-not-waited-for": "taskkill by /proc/<pid>/winpid runs only under MSYS/Cygwin; POSIX takes kill -KILL",
     "l2-backup-manifest-lock": "POSIX O_APPEND writes are atomic; the lost-line race is the Windows CRT's "

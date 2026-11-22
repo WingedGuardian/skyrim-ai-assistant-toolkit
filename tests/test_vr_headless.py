@@ -114,6 +114,7 @@ def test_on_swaps_opencomposite_and_enables_the_null_driver_then_off_restores_by
     before = snapshot(tree)
     assert tree["mod"].main(["on"]) == 0
     assert tree["dll"].read_bytes() == VALVE_BYTES
+    assert tree["controls"].read_bytes() == b"turn_speed 216\r\nmouse_enabled 0\r\n"
     s = json.loads(tree["settings"].read_text(encoding="utf-8"))
     assert s["driver_null"]["enable"] is True and s["steamvr"]["forcedDriver"] == "null"
     assert s["steamvr"]["activateMultipleDrivers"] is False and s["driver_oculus"]["enable"] is False
@@ -179,6 +180,9 @@ def test_backups_are_taken_and_recorded_before_the_first_change(tree, monkeypatc
     monkeypatch.setattr(mod, "write_text_atomic", spy)
     assert mod.main(["on"]) == 0
     assert dict(seen["files"])[str(tree["dll"])] == OC_BYTES
+    assert dict(seen["files"])[str(tree["controls"])] == b"turn_speed 216\r\nmouse_enabled 1\r\n"
+    entry = next(e for e in mod.load_state()["files"] if e["path"] == str(tree["controls"]))
+    assert entry["applied_sha256"] == mod.sha(tree["controls"])
 
 
 def test_a_failure_midway_restores_both_files(tree, monkeypatch, capsys):
@@ -321,7 +325,7 @@ def test_bad_usage_is_exit_2(tree):
 
 
 def test_no_driver_binary_or_upstream_source_is_tracked():
-    r = subprocess.run(["git", "-C", str(REPO), "ls-files", "tools/vr-emu-driver"], capture_output=True, text=True)
+    r = subprocess.run(["git", "-C", str(REPO), "ls-files", "tools/vr-emu-driver"], capture_output=True, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     if r.returncode != 0:
         pytest.skip("COULD NOT CHECK: not a git work tree")
     tracked = sorted(r.stdout.split())
@@ -331,7 +335,7 @@ def test_no_driver_binary_or_upstream_source_is_tracked():
 
 def test_the_shell_wrapper_runs_the_tool():
     r = subprocess.run([BASH, str(REPO / "tools" / "vr-headless.sh"), "sideways"], capture_output=True, text=True,
-                       timeout=60)
+                       timeout=60, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     assert r.returncode == 2 and "usage" in r.stderr, r.stdout + r.stderr
 
 
@@ -802,6 +806,8 @@ def test_mouse_look_off_keeps_every_other_line():
     mod = load()
     assert mod.mouse_look_off(b"a 1\r\nmouse_enabled 1\r\nb 2\n") == b"a 1\r\nmouse_enabled 0\r\nb 2\n"
     assert mod.mouse_look_off(b"a 1") == b"a 1\nmouse_enabled 0\n"
+    # A longer key that only starts with the name is another setting: kept as it is, and the real key added.
+    assert mod.mouse_look_off(b"mouse_enabled_x 1\n") == b"mouse_enabled_x 1\nmouse_enabled 0\n"
 
 
 def test_a_failed_process_read_is_retried_then_reported_as_unknown(monkeypatch):
@@ -892,3 +898,119 @@ def test_stop_after_a_missed_game_listing_still_quits_it_before_any_helper(tree,
     assert order and order[0] == "quit", order
     assert all(step[0] == "game gone" for step in order[1:]), "a helper was terminated under the live game"
     assert mod.load_state() is None
+
+
+@pytest.mark.parametrize("body", [b"mouse_enabled 1\n", b"mouse_enabled nope\n", b"turn_speed 216\n", b"mouse_enabled 0\nmouse_enabled 1\n"])
+def test_launch_refuses_unsafe_devkit_mouse_controls_before_any_spawn(tree, world, body):
+    mod = tree["mod"]
+    assert mod.main(["on"]) == 0
+    tree["controls"].write_bytes(body)
+    with pytest.raises(mod.Refused, match="mouse_enabled"):
+        mod.cmd_launch("background")
+    assert world.started == []
+    assert not mod.load_state().get("session")
+
+
+def test_default_on_controls_failure_restores_every_file(tree, monkeypatch):
+    mod = tree["mod"]
+    before = snapshot(tree)
+    real = mod.write_bytes_atomic
+    def fail_after_write(dst, data):
+        real(dst, data)
+        if dst == tree["controls"]:
+            raise OSError("fixture controls failure")
+    monkeypatch.setattr(mod, "write_bytes_atomic", fail_after_write)
+    assert mod.main(["on"]) == 2
+    assert snapshot(tree) == before
+    assert mod.load_state() is None
+
+
+def test_controls_changed_after_on_are_kept_before_exact_restore(tree):
+    mod = tree["mod"]
+    before = tree["controls"].read_bytes()
+    assert mod.main(["on"]) == 0
+    changed = b"mouse_enabled 1\nturn_speed 999\n"
+    tree["controls"].write_bytes(changed)
+    assert mod.main(["off"]) == 0
+    assert tree["controls"].read_bytes() == before
+    assert [p.read_bytes() for p in (tree["tmp"] / "state").glob("*/changed-after-on-*/controls.txt")] == [changed]
+
+
+def test_valve_install_without_devkit_controls_can_launch(tree, world):
+    tree["controls"].unlink()
+    tree["dll"].write_bytes(VALVE_BYTES)
+    launch_session(tree, world)
+    assert world.started == ["vrstartup.exe", "sksevr_loader.exe"]
+    assert not tree["controls"].exists()
+
+
+def test_launch_refuses_missing_recorded_controls_before_any_spawn(tree, world):
+    mod = tree["mod"]
+    assert mod.main(["on"]) == 0
+    tree["controls"].unlink()
+    with pytest.raises(mod.Refused, match="controls.*missing"):
+        mod.cmd_launch("background")
+    assert world.started == [] and not mod.load_state().get("session")
+
+
+@pytest.mark.parametrize("case", ["exited", "live", "unknown", "owned-unknown", "unreadable", "reused", "parent", "ghost-server"])
+def test_launch_missing_census_candidate_requires_exact_exit(tree, world, monkeypatch, case):
+    """Independent snapshots cannot excuse a candidate without native generation proof."""
+    mod = tree["mod"]
+    original_read, original_census = mod.read_processes, mod.read_process_tree
+    ghost = proc(14, "vrserver" if case == "ghost-server" else "vrdashboard",
+                 str(tree["vr"] / "bin" / "win64" / "vrdashboard.exe"))
+    checks = []
+    census_reads = []
+
+    def read():
+        rows = original_read()
+        if world.started and "sksevr_loader.exe" not in world.started:
+            if case == "ghost-server":
+                rows = [p for p in rows if p["ProcessName"] != "vrserver"]
+            rows.append(dict(ghost))
+        return rows
+
+    def census():
+        rows = original_census()
+        census_reads.append(1)
+        if case == "owned-unknown" and len(census_reads) == 1:
+            return [dict(ghost, ParentId=90)] + rows
+        if case == "parent":
+            return [dict(ghost, ParentId=999)] + rows
+        if case == "ghost-server":
+            rows = [p for p in rows if p["ProcessName"] != "vrserver"]
+        return rows
+
+    def alive(pid, start):
+        if pid != 14:
+            return world.process_alive(pid, start)
+        checks.append((pid, start))
+        if case == "unreadable":
+            raise mod.ProcessReadError("fixture native identity unreadable")
+        if case == "reused":
+            # The PID exists, but the old generation is gone. Never adopt its replacement.
+            replacement = dict(ghost, StartTime="2026-10-25T10:00:09Z")
+            from vr_background_desktop import parse_start
+            return pid == replacement["Id"] and parse_start(start) == parse_start(replacement["StartTime"])
+        if case in ("unknown", "owned-unknown"):
+            return None
+        return case in ("live", "parent")
+
+    monkeypatch.setattr(mod, "read_processes", read)
+    monkeypatch.setattr(mod, "read_process_tree", census)
+    monkeypatch.setattr(mod, "process_alive", alive)
+    if case in ("exited", "reused"):
+        assert launch_session(tree, world)["started"]
+        assert checks and all(x == (14, ghost["StartTime"]) for x in checks)
+    else:
+        expected = mod.ProcessReadError if case == "unreadable" else mod.Refused
+        with pytest.raises(expected):
+            launch_session(tree, world)
+        assert "sksevr_loader.exe" not in world.started
+        if case != "ghost-server":
+            assert mod.load_state()["session"]["ownership_refused"]
+        else:
+            assert world.clock.now > 90, "an exited vrserver must not satisfy runtime readiness"
+    assert any(p["Id"] == 14 for p in mod.load_state()["session"]["processes"]) == (case == "owned-unknown")
+    assert world.terminated == []

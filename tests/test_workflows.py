@@ -38,6 +38,10 @@ def _index(steps, pred):
     return next((i for i, s in enumerate(steps) if pred(s)), None)
 
 
+# Local reusable workflows a job may call, by job id. The release builds ToolkitProbe through the probe workflow.
+CALLED = {"qualification": "full-qualification.yml", "probe": "toolkit-probe.yml"}
+
+
 def _workflows():
     return sorted(p.name for p in WF.glob("*.yml"))
 
@@ -49,7 +53,7 @@ def test_every_action_is_pinned_by_commit_sha(name):
     assert uses, f"{name}: no `uses:` at all -- this check would be vacuous"
     for ref, rest in uses:
         if ref.startswith("./"):
-            assert ref == "./.github/workflows/full-qualification.yml" and (WF / "full-qualification.yml").is_file()
+            assert ref in {"./.github/workflows/" + f for f in CALLED.values()} and (WF / ref[len("./.github/workflows/"):]).is_file()
             continue
         assert re.fullmatch(r"[\w.-]+/[\w./-]+@[0-9a-f]{40}", ref), f"{name}: {ref} is not pinned by a full commit sha"
         assert re.search(r"#\s*v\d", rest), f"{name}: {ref} has no `# vX.Y.Z` comment naming the release"
@@ -60,8 +64,8 @@ def test_every_job_has_a_timeout(name):
     _, data = _load(name)
     for jid, job in data["jobs"].items():
         if "uses" in job:
-            assert jid == "qualification" and job["uses"] == "./.github/workflows/full-qualification.yml"
-            _, called = _load("full-qualification.yml")
+            assert jid in CALLED and job["uses"] == "./.github/workflows/" + CALLED[jid]
+            _, called = _load(CALLED[jid])
             assert all(isinstance(j.get("timeout-minutes"), int) and 0 < j["timeout-minutes"] <= 300 for j in called["jobs"].values())
             continue
         assert isinstance(job.get("timeout-minutes"), int) and 0 < job["timeout-minutes"] <= 300, \

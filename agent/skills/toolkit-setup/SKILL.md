@@ -44,6 +44,22 @@ House Carl is a separate optional install, not part of core setup. For an author
 follow `docs/housecarl.md` and skill `toolkit-housecarl`; identify the load-order authority separately
 from deployment, then use its explicit setup command. Missing .NET prerequisites remain manual steps.
 
+## Recommended companions (after setup; offer, never install)
+
+Once setup has finished, tell the user about these once, for THEIR runtime (setup prints which one it found), and
+let them choose. They are mods: the user installs them with their own mod manager; never copy files into `Data/`.
+
+| Companion | Runtimes | What it adds for the agent |
+|---|---|---|
+| DevBench (Nexus 181326) | SE, AE, VR | Live state, console output and Papyrus calls in the running game, so fixes are tested in game, not reported back by the user. ToolkitProbe needs 1.35+; newer is fine. |
+| ToolkitProbe (`ToolkitProbe.zip` on the toolkit release) | SE, AE, VR (live-tested on VR; SE/AE experimental) | `tools/whats-here.py`: what the player looks at, what is near by geometry, textures, and a timed watch of effects. Needs DevBench. |
+| House Carl (`docs/housecarl.md`) | SE, AE, VR | Offline record queries and validated plugin authoring; no game needed. |
+| SkyLink (VR: Nexus 195413; SE/AE: Nexus 175682) | SE, AE, VR | Equipment and inventory reads that What's here uses for gear context when already connected. |
+| What Am I Looking At (Nexus 199906) | SE, AE only | Crosshair pick on flat Skyrim; a complement while ToolkitProbe is experimental there. |
+
+Say plainly that each is optional and what it costs (another SKSE plugin in the load order). Record what the
+user chose in `KNOWLEDGEBASE.local.md` under `## My preferences`, so the next session does not ask again.
+
 ## What an install command looks like
 
 <!-- install-form -->

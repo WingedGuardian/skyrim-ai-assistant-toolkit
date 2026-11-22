@@ -219,7 +219,8 @@ def steamvr_running() -> bool:
     if os.name != "nt":
         return False
     try:
-        r = subprocess.run(["tasklist", "/NH", "/FO", "CSV"], capture_output=True, text=True, errors="replace", timeout=30)
+        r = subprocess.run(["tasklist", "/NH", "/FO", "CSV"], capture_output=True, text=True, errors="replace", timeout=30,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except (OSError, subprocess.TimeoutExpired):
         return True                     # unknown is never absent: `on` holds until it can tell
     if r.returncode != 0 or not r.stdout.strip():
@@ -293,7 +294,8 @@ def read_processes():
     for attempt in range(3):
         try:
             r = subprocess.run(["powershell.exe", "-NoProfile", "-Command", command], capture_output=True, text=True,
-                               check=True, timeout=8)
+                               check=True, timeout=8,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             value = json.loads(r.stdout) if r.stdout.strip() else []
             return value if isinstance(value, list) else [value]
         except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError) as e:
@@ -340,7 +342,8 @@ def terminate_verified(pid, start) -> str:
 def parent_pid(pid):
     r = subprocess.run(["powershell.exe", "-NoProfile", "-Command",
                         "(Get-CimInstance Win32_Process -Filter 'ProcessId = {}').ParentProcessId".format(int(pid))],
-                       capture_output=True, text=True, timeout=8)
+                       capture_output=True, text=True, timeout=8,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     return int(r.stdout.strip()) if r.stdout.strip().isdigit() else None
 
 
@@ -354,7 +357,8 @@ def read_process_tree():
     for _ in range(3):                    # launch load can outlast one read; a refused launch leaves files headless
         try:
             r = subprocess.run(["powershell.exe", "-NoProfile", "-Command", command], capture_output=True,
-                               text=True, check=True, timeout=8)
+                               text=True, check=True, timeout=8,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             value = json.loads(r.stdout)
             return value if isinstance(value, list) else [value]
         except (OSError, subprocess.SubprocessError, ValueError) as e:
@@ -635,7 +639,7 @@ def mouse_look_off(data: bytes) -> bytes:
     lines = data.splitlines(keepends=True)
     found = False
     for i, line in enumerate(lines):
-        if line.strip().startswith(b"mouse_enabled"):
+        if line.split()[:1] == [b"mouse_enabled"]:      # the key itself, not mouse_enabled_x
             lines[i] = b"mouse_enabled 0" + (b"\r\n" if line.endswith(b"\r\n") else b"\n")
             found = True
     if not found:
@@ -762,6 +766,12 @@ def cmd_on(force=False, park=False) -> int:
                 "sha256": backup(p["vrsettings"], bdir / "steamvr.vrsettings")},
                {"path": str(p["live_dll"]), "backup": str(bdir / "openvr_api.dll"),
                 "sha256": backup(p["live_dll"], bdir / "openvr_api.dll")}]
+    controls = devkit_controls()
+    controls_entry = None
+    if controls.is_file():
+        controls_entry = {"path": str(controls), "backup": str(bdir / "controls.txt"),
+                          "sha256": backup(controls, bdir / "controls.txt")}
+        entries.append(controls_entry)
     for name in (OC_PLUGINS if park else ()):
         plugin = p["plugins"] / name
         if plugin.is_file():
@@ -770,6 +780,9 @@ def cmd_on(force=False, park=False) -> int:
     state = {"mode": "backed-up", "since": stamp, "game": str(p["game"]), "swapped_dll": swap, "files": entries}
     save_state(state)                              # recorded BEFORE the first change
     try:
+        if controls_entry:
+            write_bytes_atomic(controls, mouse_look_off(controls.read_bytes()))
+            controls_entry["applied_sha256"] = sha(controls)
         write_text_atomic(p["vrsettings"], headless_settings(p["vrsettings"].read_text(encoding="utf-8")))
         entries[0]["applied_sha256"] = sha(p["vrsettings"])     # what `off` may overwrite without keeping a copy
         print("  steamvr.vrsettings: null driver enabled ({})".format(p["vrsettings"]))
@@ -892,7 +905,7 @@ def cmd_emu(arg) -> int:
                             "sha256": backup(sig, bak / "bin/win64/driver_null.dll.sig"), "applied_sha256": None,
                             "set_aside": True})
         controls = devkit_controls()
-        if controls.is_file():
+        if controls.is_file() and not any(e["path"] == str(controls) for e in st.get("files", [])):
             entries.append({"path": str(controls), "backup": str(bak / "controls.txt"),
                             "sha256": backup(controls, bak / "controls.txt"), "controls": True})
         st["emu"] = entries
@@ -979,6 +992,16 @@ def cmd_launch(desktop) -> dict:
             raise Refused("SteamVR's runtime launcher is missing: {}".format(p["vrstartup"]))
     elif not (p["steam"] / "steam.exe").is_file():
         raise Refused("steam.exe not found in {}".format(p["steam"]))
+    controls = devkit_controls()
+    if not controls.is_file() and any(e["path"] == str(controls)
+                                      for e in list(st.get("files", [])) + emu_entries(st)):
+        raise Refused("recorded Devkit controls file is missing: {}".format(controls))
+    if controls.is_file():
+        mouse = [line.split() for line in controls.read_bytes().splitlines()
+                 if line.split()[:1] == [b"mouse_enabled"]]
+        if not mouse or any(fields != [b"mouse_enabled", b"0"] for fields in mouse):
+            raise Refused("{} must have mouse_enabled 0 before launch; Devkit mouse look is unsafe. A session prepared by "
+                          "toolkit 4.1 or older did not set it: run `off`, then `on` again".format(controls))
     desk = make_desktop(desktop)
     session = {"ownership_version": 1, "creator_pid": os.getpid(), "desktop_mode": desktop, "desktop": desk.name, "processes": [],
                "steam_policy": "keep-running", "preexisting_steam": prior_steam, "port": devbench_port(p["game"]),
@@ -1003,13 +1026,22 @@ def cmd_launch(desktop) -> dict:
             save_state(st)
             raise Refused("a test window escaped onto your desktop; stopping this owned session")
         for x in candidates:
-            if any(x["Id"] == session.get(k, {}).get("pid") and
-                   parse_start(x["StartTime"]) == parse_start(session[k]["start_time"])
-                   for k in ("runtime_launch", "game_launch")) and not any(p.get("Id") == x["Id"] for p in census):
-                # A short-lived launcher may exit between Get-Process and CIM. Confirm
-                # that exact generation disappeared; a still-live unproved process refuses.
-                if not any(same_process(x, p) for p in read_processes()):
+            if not any(p.get("Id") == x["Id"] for p in census):
+                # Independent snapshots can straddle any short-lived runtime child.
+                # Only native proof that this exact generation ended permits ignoring it.
+                try:
+                    alive = process_alive(x["Id"], x["StartTime"])
+                except (ProcessReadError, OSError, ValueError, RuntimeError):
+                    session["ownership_refused"] = True
+                    save_state(st)
+                    raise
+                if alive is False:
+                    now = [p for p in now if not same_process(x, p)]
                     continue
+                session["ownership_refused"] = True
+                save_state(st)
+                raise Refused("a game or SteamVR process is missing from the ownership census but its exact "
+                              "generation has not been proved exited; it will not be stopped")
             if not any(same_process(x, o) for o in session["processes"]):
                 if not proven_process(x, session, census, desk):
                     if steam_handoff_runtime(x, session, census, desk):

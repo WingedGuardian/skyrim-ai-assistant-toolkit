@@ -48,6 +48,7 @@ control the game through DevBench only. `run` owns the whole session: it points 
 SteamVR's null driver (OpenComposite's `openvr_api.dll` swapped for SteamVR's; `--park` also sets
 OpenComposite's SKSE plugins aside), starts SteamVR and the game, waits until DevBench answers for the
 owned game at the main menu, then BLOCKS until the game exits and attempts restoration in `finally`.
+Default setup also backs up existing Devkit controls, sets `mouse_enabled 0` for the session and restores the original file on exit/failure. Launch refuses unsafe or missing recorded controls before spawning.
 Detach it so you can keep working. An ownership or placement refusal keeps headless files and session evidence for inspection;
 observed SteamVR also blocks restoration until the user closes it. `background` needs the user's Steam client already open (it stays
 theirs); Steam is never owned or closed. End a session early with `bash tools/vr-headless.sh stop`

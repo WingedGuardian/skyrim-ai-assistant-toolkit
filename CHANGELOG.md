@@ -1,5 +1,41 @@
 # Changelog
 
+## v4.2.0 — Unreleased (provisional)
+
+- **What's here: ask what you are looking at, what is around you, and what keeps happening to your character.**
+  `tools/whats-here.py` (`look`, `near`, `ref`, `effects`, `watch`) reads the running game through DevBench: the
+  object under your gaze, hand or crosshair; nearby objects by their geometry's bounds, not their origin (so a large
+  mesh whose origin is far away still shows); each shape's textures as the engine assigned them, checked against
+  loose files and BSAs through House Carl; active magic effects; and a timed capture of casts, effects, hits and
+  visual attachments. `--check` traces each form's override chain offline with `skyrim-winner`; `--inventory` adds
+  inventory before and after a watch. Every field says where it came from; anything not checked says so. Read-only.
+  Guide: [docs/whats-here.md](docs/whats-here.md); skill `skyrim-whats-here`.
+- **Visual attribution.** The engine does not record what attached a shader or art object, so after a watch each
+  visual is matched to the magic effects applied up to 1 s before it, ranked by how often each was followed by that
+  visual, and labelled `inferred:timing`, never as a direct link.
+- **ToolkitProbe (optional SKSE plugin, SE/AE/VR from one DLL)** adds the gaze/hand ray, bounds, texture and capture
+  data. It plugs into DevBench 1.35 or newer through DevBench's MIT API. The release attaches a `ToolkitProbe.zip`
+  built on GitHub from the tagged commit, with its source and a build attestation. Live-tested on VR only; SE and AE
+  are experimental. Evidence and limits: [docs/evidence/whats-here-validation.md](docs/evidence/whats-here-validation.md).
+- **Fixed: `skyrim-winner` given a plugin and a short record ID could trace the wrong record** (in 4.1.0). When that
+  plugin also overrides a master record with the same low bytes, it traced the master's record and still printed
+  `RESULT: OK` (measured: USSEP `000D74` came back as a Skyrim.esm CELL). It now picks the plugin's own record, and
+  `whats-here --check` fails a chain whose defining file is not the one the game named.
+- **Setup recommends the in-game companions** for your runtime: DevBench, ToolkitProbe, SkyLink, What Am I Looking
+  At (SE/AE) and House Carl, each with what it adds. They are mods: setup and the agent only tell you, you install
+  them with your mod manager. The DevBench version text is current (wrapper 1.11+, ToolkitProbe 1.35+, newer fine).
+- `whats-here look` attaches the pick saved by What Am I Looking At (SE/AE) when one exists, unparsed and labelled.
+- **Google Antigravity: minimal support** ([docs/antigravity.md](docs/antigravity.md)). An always-on rules file,
+  the shared `.agents/skills/`, and a guard adapter (`tools/adapters/antigravity/`) for its PreToolUse hook that
+  passes the offline conformance checks. Not yet proven in a live Antigravity session; its docs do not say what a
+  failed or timed-out hook does, so the guard counts as unproven until the canaries pass.
+- OpenCode: a live run with a real (free) model on OpenCode 1.19.6 confirmed the shipped plugin refuses a plugin
+  overwrite and a Saves-folder delete that the model itself chose to make
+  ([evidence](docs/evidence/2026-11-21-opencode-live-free-model.md)).
+- Headless VR test sessions: Devkit mouse-look controls are saved, disabled and restored on exit; a runtime helper
+  that exits between two process snapshots no longer stops startup once its exit is proven.
+- Shared preservation core: unchanged from 4.1 (b86c709).
+
 ## v4.1.0 — 2026-11-14
 
 - **Saves: every version is kept, and no rule reads commands for saves any more.** The new save vault

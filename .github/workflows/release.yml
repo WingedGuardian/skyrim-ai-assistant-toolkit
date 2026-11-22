@@ -24,8 +24,20 @@ concurrency:
 # inside a `run:` script as ${{ }}: they reach the shell through env, so a crafted tag name is data, not code.
 
 jobs:
+  # The optional ToolkitProbe DLL, built on Windows from the tag's commit and attested. A tag that does not
+  # build it publishes nothing: the release job needs this one.
+  probe:
+    uses: ./.github/workflows/toolkit-probe.yml
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      ref: ${{ github.event.inputs.tag || github.ref_name }}
+
   release:
     name: Publish GitHub Release
+    needs: probe
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -121,6 +133,28 @@ jobs:
           VERIFY_REQUIRE_LEAK_TOKENS: "1"
         run: bash tools/verify-release.sh --local "$ZIP" --scrubbed --expect-commit "$SHA" --tag "$TAG"
 
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: ToolkitProbe
+          path: ${{ runner.temp }}/probe
+
+      # The package's own receipt must name the tag's commit: never attach a DLL built from anything else.
+      - name: ToolkitProbe.zip was built from the tag's commit
+        env:
+          SHA: ${{ steps.tag.outputs.sha }}
+        run: |
+          set -euo pipefail
+          PROBE="$RUNNER_TEMP/probe/ToolkitProbe.zip"
+          python -B - "$PROBE" "$SHA" <<'PY'
+          import json, sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              receipt = json.loads(z.read('build-receipt.json'))
+              assert 'Data/SKSE/Plugins/ToolkitProbe.dll' in z.namelist(), 'no DLL in the package'
+          assert receipt['sourceCommit'] == sys.argv[2], ('built from', receipt['sourceCommit'], 'not', sys.argv[2])
+          print('ToolkitProbe.zip receipt names', receipt['sourceCommit'])
+          PY
+          echo "PROBE=$PROBE" >> "$GITHUB_ENV"
+
       - name: Extract this version's changelog section
         env:
           TAG: ${{ steps.tag.outputs.tag }}
@@ -146,4 +180,4 @@ jobs:
           gh release create "$TAG" \
             --title "$TAG" \
             --notes-file "$RUNNER_TEMP/RELEASE_NOTES.md" \
-            "$ZIP"
+            "$ZIP" "$PROBE"

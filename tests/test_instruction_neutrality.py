@@ -65,6 +65,7 @@ NEGATIVE = [
 NEUTRAL_FILES = [
     "agent/instructions/core.md",
     "agent/skills/devbench/SKILL.md",
+    "agent/skills/skyrim-whats-here/SKILL.md",
     "agent/skills/mod-release-review/SKILL.md",
     "agent/skills/mod-update-check/SKILL.md",
     "agent/skills/toolkit-setup/SKILL.md",

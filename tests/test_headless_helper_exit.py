@@ -106,7 +106,7 @@ def _start(p):
 @windows
 def test_real_live_process_is_terminated():
     import vr_background_desktop as desktop
-    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     try:
         assert desktop.terminate_verified(p.pid, _start(p)) == "terminated"
         assert p.wait(10) == 0       # TerminateProcess(handle, 0)
@@ -119,7 +119,7 @@ def test_real_live_process_is_terminated():
 def test_real_process_that_exited_while_a_handle_holds_it_is_exited():
     """The object stays (our Popen handle keeps it): TerminateProcess fails with 5 and the handle is signalled."""
     import vr_background_desktop as desktop
-    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(1.5)"])
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(1.5)"], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     start = _start(p)
     p.wait(20)
     assert desktop.terminate_verified(p.pid, start) == "exited"
@@ -131,7 +131,7 @@ def test_real_process_that_is_gone_is_exited():
     branch; the ERROR_INVALID_PARAMETER branch itself is pinned by the fake-kernel test above (MEASURED 2026-11-09:
     here it went through the signalled-handle branch)."""
     import vr_background_desktop as desktop
-    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(1.5)"])
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(1.5)"], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     start, pid = _start(p), p.pid
     p.wait(20)
     p._handle.Close()
