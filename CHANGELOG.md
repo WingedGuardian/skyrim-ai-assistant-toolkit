@@ -1,6 +1,6 @@
 # Changelog
 
-## v4.2.0 — Unreleased (provisional)
+## v4.2.0 — 2026-11-22
 
 - **What's here: ask what you are looking at, what is around you, and what keeps happening to your character.**
   `tools/whats-here.py` (`look`, `near`, `ref`, `effects`, `watch`) reads the running game through DevBench: the
