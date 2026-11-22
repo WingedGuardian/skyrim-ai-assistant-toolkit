@@ -34,8 +34,8 @@
   ([evidence](docs/evidence/2026-11-21-opencode-live-free-model.md)).
 - Headless VR test sessions: Devkit mouse-look controls are saved, disabled and restored on exit; a runtime helper
   that exits between two process snapshots no longer stops startup once its exit is proven.
-- **SkyLink for SE/AE 1.5+ can install, clean and sort plugins through MCP; the guard now refuses those tools** (`install_plugin`, `sort_load_order`, `clean_plugins`) on any server name and in any spelling, on
-  Claude Code, Codex and OpenCode (S-MCP-WRITE), and gives its `execute_console_command` and
+- **SkyLink for SE/AE 1.5+ can install, clean and sort plugins through MCP; the guard now refuses those tools** (`install_plugin`, `sort_load_order`, `clean_plugins`) on any server name (any case on Codex and OpenCode; snake, Pascal, camel or kebab case on Claude Code),
+  on Claude Code, Codex and OpenCode (S-MCP-WRITE), and gives its `execute_console_command` and
   `call_papyrus_function` DevBench's crash-command check. Its reads, its builders (which write only into SkyLink's
   own Build folder) and its save tools (the save vault keeps every version) are not refused. Tool names checked
   against the 1.5.0 server's own tool list (181 tools); not tested in a live SE/AE game.
