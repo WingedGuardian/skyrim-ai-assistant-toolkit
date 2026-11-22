@@ -11196,7 +11196,7 @@ MUTATIONS += [pytest.param(f, find, rep, test, id="vr-review-" + ident) for f, f
      '        except (ProcessReadError, OSError, ValueError, RuntimeError):\n            session["ownership_refused"] = False',
      _VT7 + 'test_managed_run_keeps_files_when_ownership_refusal_is_followed_by_a_missed_read[census]', 'unknown-refusal-retained'),
     (_VR7, '        if st and (st.get("session") or {}).get("ownership_refused"):', '        if False:',
-     _VT7 + 'test_managed_run_keeps_files_when_ownership_refusal_is_followed_by_a_missed_read[ancestry]', 'refusal-no-automatic-restore'),
+     _VT7 + 'test_managed_run_keeps_files_when_ownership_refusal_is_followed_by_a_missed_read[census]', 'refusal-no-automatic-restore'),
     (_VR7, '    listed = [p for p in running if p["ProcessName"] in VR_NAMES]', '    listed = []',
      _VT7 + 'test_off_also_refuses_an_observed_foreign_vr_process', 'foreign-can-block-not-own'),
     (_VR7, '    listed = [p for p in running if p["ProcessName"] in VR_NAMES]', '    listed = list(running)',
