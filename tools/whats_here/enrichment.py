@@ -44,7 +44,9 @@ def run_hidden(argv, timeout, **kwargs):
                 taskkill = os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32', 'taskkill.exe')
                 subprocess.run([taskkill, '/F', '/T', '/PID', str(proc.pid)], capture_output=True, timeout=30,
                                creationflags=flags)
-            else:
+            elif proc.pid > 1:
+                # Never 0 or 1: killpg(1) is kill(-1), every process this user may signal (a test stub's pid 1
+                # took down the CI runner). A real child started with start_new_session leads its own group.
                 import signal
                 os.killpg(proc.pid, signal.SIGKILL)
         except (OSError, subprocess.SubprocessError):

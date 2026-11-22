@@ -8996,6 +8996,12 @@ _WH = [
      _WHT + "test_watch_expiry_deduplicates_events_and_stops_owned_capture", "wh42-incomplete-exits-3"),
     ("tools/whats_here/enrichment.py", "'/F', '/T', '/PID'", "'/F', '/PID'",
      "tests/test_helper_visibility.py::test_a_timed_out_helper_has_its_whole_tree_killed", "wh42-timeout-kills-tree"),
+    ("tools/whats_here/enrichment.py", "            elif proc.pid > 1:", "            elif True:",
+     "tests/test_helper_visibility.py::test_a_timed_out_helper_on_posix_has_its_process_group_killed_but_never_group_0_or_1",
+     "wh42-timeout-never-signals-group-1"),
+    ("tools/whats_here/enrichment.py", "                os.killpg(proc.pid, signal.SIGKILL)\n", "                pass\n",
+     "tests/test_helper_visibility.py::test_a_timed_out_helper_on_posix_has_its_process_group_killed_but_never_group_0_or_1",
+     "wh42-timeout-kills-group-posix"),
 ]
 _WH += [
     ("tools/whats_here/visual_attribution.py", "        if best and best['ratio'] >= STRONG_RATIO and not tied:",

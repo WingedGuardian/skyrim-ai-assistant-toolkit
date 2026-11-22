@@ -1,5 +1,6 @@
 """Exercise production helper kwargs without ever spawning an unhidden contrast."""
 import json
+import os
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -21,7 +22,7 @@ def popen_through(run):
     """enrichment.run_hidden uses Popen (to kill a timed-out child's whole tree); feed it through the same `run`
     stub, with the kwargs it would amount to, so every contract below still applies to it."""
     class FakePopen:
-        pid = 1
+        pid = 987654          # never 0 or 1: see test_a_timed_out_helper_on_posix_*
 
         def __init__(self, args, **kwargs):
             assert kwargs.pop('stdout') is subprocess.PIPE and kwargs.pop('stderr') is subprocess.PIPE
@@ -41,6 +42,7 @@ def popen_through(run):
 def invoke(case, monkeypatch, tmp_path, run):
     monkeypatch.setattr(subprocess, 'run', run)
     monkeypatch.setattr(subprocess, 'Popen', popen_through(run))
+    monkeypatch.setattr(os, 'killpg', lambda pid, sig: None, raising=False)   # a stub child has no real group
     if case in CASES[:4]:
         mod = load()
         mod.IS_WINDOWS = True
@@ -149,3 +151,32 @@ def test_a_timed_out_helper_has_its_whole_tree_killed(monkeypatch):
     args, kwargs = calls[0]
     assert args[0].lower().endswith('taskkill.exe') and args[1:] == ['/F', '/T', '/PID', '4242']
     assert kwargs['creationflags'] & subprocess.CREATE_NO_WINDOW
+
+
+@pytest.mark.parametrize('pid, killed', [(4242, [4242]), (1, []), (0, [])])
+def test_a_timed_out_helper_on_posix_has_its_process_group_killed_but_never_group_0_or_1(monkeypatch, pid, killed):
+    # killpg(1) is kill(-1): every process the user may signal. A stub with pid 1 sent that on CI and killed the
+    # runner (run 45052617918, all four Linux legs). Runs on every platform: os.name and killpg are patched.
+    import signal
+    sent = []
+
+    class Stuck:
+        def __init__(self, args, **kwargs):
+            self.pid = pid
+
+        def communicate(self, timeout=None):
+            raise subprocess.TimeoutExpired('helper', timeout)
+
+        def kill(self):
+            pass
+
+    monkeypatch.setattr(subprocess, 'Popen', Stuck)
+    monkeypatch.setattr(os, 'killpg', lambda p, sig: sent.append((p, sig)), raising=False)
+    monkeypatch.setattr(signal, 'SIGKILL', 9, raising=False)
+    monkeypatch.setattr(os, 'name', 'posix')
+    try:
+        with pytest.raises(subprocess.TimeoutExpired):
+            enrichment.run_hidden(['helper'], 1)
+    finally:
+        monkeypatch.undo()
+    assert sent == [(p, 9) for p in killed]

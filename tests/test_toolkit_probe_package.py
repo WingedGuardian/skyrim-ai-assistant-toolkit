@@ -24,8 +24,8 @@ def fixture(tmp_path):
     git(root, 'config', 'user.email', 'fixture@example.invalid')
     source = root / 'tools/toolkit-probe'
     source.mkdir(parents=True)
-    (source / 'README.md').write_text('Test source only\n')
-    (root / 'LICENSE').write_text('Test license\n')
+    (source / 'README.md').write_bytes(b'Test source only\n')     # LF bytes on every OS
+    (root / 'LICENSE').write_bytes(b'Test license\n')
     git(root, 'add', '--', 'tools/toolkit-probe/README.md', 'LICENSE')
     git(root, 'commit', '-qm', 'fixture')
     sha = git(root, 'rev-parse', 'HEAD')
