@@ -5,6 +5,9 @@ DevBench drives the RUNNING game. Three ways reach it, and every one lands on a 
   - curl        `curl ... http://127.0.0.1:8921/api/tool/<tool> -d '<json args>'` (also `--data*`, `--json`, and
                 PowerShell Invoke-RestMethod / Invoke-WebRequest `-Body`);
   - the CLI     `bash tools/devbench-cli.sh exec "<console command>"` and `... tool <name> '<json args>'`.
+Since 4.2 the MCP route also judges a few tools by NAME on any server (rules.MCP_WRITE_TOOLS: SkyLink SE/AE 1.5+
+writes plugins, compiled scripts and the load order; rules.MCP_CONSOLE_TOOLS: its console). Their curl/CLI routes
+are not read: SkyLink is reached over MCP stdio only.
 judge() decides a tool call once, so the three routes cannot disagree; scan_shell() finds the calls in a parsed shell
 command (protect-bash) and decide() reads the MCP payload (protect-mcp).
 
@@ -192,22 +195,40 @@ def is_devbench(name: str) -> bool:
     return len(parts) >= 3 and parts[0] == "mcp" and is_devbench_server("__".join(parts[1:]))
 
 
+def named_tool(name: str) -> str:
+    """The tool part of an `mcp__<server>__<tool>` call when it is one the rules judge on ANY server (rules.
+    MCP_WRITE_TOOLS, rules.MCP_CONSOLE_TOOLS: SkyLink SE/AE 1.5+ under whatever server name the user chose), else "".
+    Exact lower-case match: `mcp__housecarl__housecarl_compile_script` is House Carl's own route, not this tool."""
+    parts = name.split("__") if isinstance(name, str) else []
+    if len(parts) < 3 or parts[0] != "mcp":
+        return ""
+    tool = parts[-1]
+    return tool if tool in rules.MCP_WRITE_TOOLS or tool in rules.MCP_CONSOLE_TOOLS else ""
+
+
 def judged_server(name: str) -> bool:
-    """True when `name` is an `mcp__<server>__<tool>` call the MCP rules judge (a DevBench server, by Plan 5's
-    is_devbench). Plan 7: the neutral entry labels every other MCP call NOT JUDGED rather than evaluated."""
-    return is_devbench(name)
+    """True when `name` is an `mcp__<server>__<tool>` call the MCP rules judge: a DevBench server (Plan 5's
+    is_devbench), or a named write/console tool on any server (named_tool, 4.2). Plan 7: the neutral entry labels
+    every other MCP call NOT JUDGED rather than evaluated."""
+    return is_devbench(name) or bool(named_tool(name))
 
 
 def decide(name: str, args, audit, roots=None, env=None) -> Verdict:
-    """protect-mcp: the verdict for one `mcp__<server>__<tool>` call. Only DevBench servers are judged here."""
+    """protect-mcp: the verdict for one `mcp__<server>__<tool>` call. Judged: DevBench servers, and the named
+    write/console tools of any server (rules.MCP_WRITE_TOOLS deny; rules.MCP_CONSOLE_TOOLS read like DevBench's
+    console). Every other MCP call is allowed here."""
     if name == "" or name == "unknown":
         audit.rule(HOOK, "S-INERT-NOINPUT", "deny", "no tool call in payload -- the DevBench guard checked nothing",
                    level="REFUSE")
         return Verdict("deny", rules.message("S-INERT-NOINPUT"))
     parts = name.split("__")
-    if not is_devbench(name):
+    tool = named_tool(name)
+    if tool in rules.MCP_WRITE_TOOLS:
+        hit = ("S-MCP-WRITE", {"op": tool})
+    elif is_devbench(name) or tool in rules.MCP_CONSOLE_TOOLS:
+        hit = judge(parts[-1], args, roots, None, env)
+    else:
         return Verdict()
-    hit = judge(parts[-1], args, roots, None, env)
     if hit is not None:
         rid, fields = hit
         reason = rules.message(rid, **fields)

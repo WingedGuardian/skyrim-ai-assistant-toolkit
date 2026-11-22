@@ -47,6 +47,8 @@ This real-symptom capture is separate from the 180-second synthetic acceptance w
 
 SkyLink is optional. The VR build is [Nexus 195413](https://www.nexusmods.com/skyrimspecialedition/mods/195413) and the SE/AE build is Nexus 175682; they are versioned separately. The skill records the version that answered as provenance and accepts newer compatible releases.
 
+SkyLink for SE/AE 1.5.0 is more than a read bridge: it adds tools that create, package and install plugins, compile scripts, clean plugins with SSEEdit and sort the load order with LOOT. Those six (`create_plugin`, `install_plugin`, `package_override_mod`, `compile_script`, `clean_plugins`, `sort_load_order`) are refused by the toolkit's guard on any MCP server name (S-MCP-WRITE), on Claude Code, Codex and OpenCode, and `execute_console_command` gets the same crash-command check as DevBench's console. Its reads, and What's here's use of them, are unchanged. Its save tools (save, load, clean a save) are not refused: the save vault keeps every version, as for DevBench. Read from the 1.5.0 server's metadata; NOT MEASURED live on SE/AE.
+
 ## Interpretation
 
 - A collision hit and a ray/bounds candidate are different results. Incomplete traversal cannot establish a globally nearest result; ranking applies to checked candidates.

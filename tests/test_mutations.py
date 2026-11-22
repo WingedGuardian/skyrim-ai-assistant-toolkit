@@ -4425,10 +4425,10 @@ _T11_CLAUSES = [
     ("rule-S-INERT-NOINPUT-no-tool-name", _MC, '    if name == "" or name == "unknown":', '    if name == "":',
      "tests/test_hooks.py::test_protect_mcp_refuses_when_it_cannot_see_the_tool_name"),
     # the wiring: the matcher, setup.sh and the gates that count hooks
-    ("rule-S-DEVBENCH-CRASH-matcher", ".claude/settings.json", '"matcher": "mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*"', '"matcher": "mcp__other.*"',
+    ("rule-S-DEVBENCH-CRASH-matcher", ".claude/settings.json", '"matcher": "mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*|', '"matcher": "mcp__other.*|',
      "tests/test_repo_invariants.py::test_the_devbench_mcp_hook_is_registered_under_the_devbench_matcher"),
-    ("rule-S-DEVBENCH-CRASH-matcher-narrow", ".claude/settings.json", '"matcher": "mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*"',
-     '"matcher": "mcp__devbench-vr__console"',
+    ("rule-S-DEVBENCH-CRASH-matcher-narrow", ".claude/settings.json", '"matcher": "mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*|',
+     '"matcher": "mcp__devbench-vr__console|',
      "tests/test_repo_invariants.py::test_the_devbench_mcp_hook_is_registered_under_the_devbench_matcher"),
     ("rule-S-DEVBENCH-CRASH-setup-configures-it", "setup.sh",
      ".claude/hooks/protect-files.sh .claude/hooks/protect-mcp.sh \\\n", ".claude/hooks/protect-files.sh \\\n",
@@ -6352,7 +6352,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
 # an ask (the Codex render refuses it) and fails closed on unreadable arguments; Task 17's ask-to-advice downgrade is
 # gone, so its three downgrade mutations became one that puts the downgrade back.
 _T17 = "tests/test_skyguard_codex_adapter.py::"
-_T17_ROUTE = '    if req.kind == "mcp" and mcp_rules.is_devbench(req.mcp_tool):\n        return '
+_T17_ROUTE = '    if req.kind == "mcp" and mcp_rules.judged_server(req.mcp_tool):\n        return '
 _T17_JUDGE = '        return evaluate_mcp(req.mcp_tool, args, audit, roots=_soft_roots(roots_fn) or _paths.Roots("", ""))'
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     # Codex stops routing DevBench MCP calls to the judge: smp reset is allowed again.
@@ -8251,12 +8251,12 @@ MUTATIONS.append(pytest.param(
     "tests/test_markdown_links.py::test_every_relative_markdown_link_resolves", id="p8t6-plan-doc-link-broken"))
 # Row 52: any DevBench server name, in the installed matcher and in health's count of what it covers.
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
-    (".claude/settings.json", '"matcher": "mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*",',
-     '"matcher": "mcp__devbench.*",',
+    (".claude/settings.json", '"matcher": "mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*|',
+     '"matcher": "mcp__devbench.*|',
      "tests/test_repo_invariants.py::test_the_devbench_mcp_hook_is_registered_under_the_devbench_matcher",
      "p8t6-devbench-matcher-prefix-only"),
-    ("tools/skyguard/health.py", 'CLAUDE_COVERED_MCP = re.compile(r"mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*")',
-     'CLAUDE_COVERED_MCP = re.compile(r"mcp__devbench.*")',
+    ("tools/skyguard/health.py", 'CLAUDE_COVERED_MCP = re.compile(r"mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*|',
+     'CLAUDE_COVERED_MCP = re.compile(r"mcp__devbench.*|',
      "tests/test_skyguard_coverage.py::test_every_devbench_spelling_is_covered_and_judged[mcp__DevBench-vr__console]",
      "p8t6-health-counts-prefix-only"),
 ]]
@@ -8333,8 +8333,8 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
      '    return len(parts) >= 3 and parts[0] == "mcp" and is_devbench_server(parts[1])',
      "tests/test_skyguard_mcp.py::test_a_devbench_name_after_a_double_underscore_is_judged[mcp__my__devbench__console]",
      "p8t6-fix1-judge-reads-first-piece-only"),
-    ("tools/skyguard/mcp_rules.py", "    if not is_devbench(name):\n",
-     '    if len(parts) < 3 or parts[0] != "mcp" or not is_devbench_server(parts[1]):\n',
+    ("tools/skyguard/mcp_rules.py", "    elif is_devbench(name) or tool in rules.MCP_CONSOLE_TOOLS:",
+     '    elif is_devbench_server(parts[1]) or tool in rules.MCP_CONSOLE_TOOLS:',
      "tests/test_skyguard_mcp.py::test_a_devbench_name_after_a_double_underscore_is_judged[mcp__x__DevBench__console]",
      "p8t6-fix1-decide-reads-first-piece-only"),
     ("scripts/guard-corpus/replay.py",
@@ -9005,6 +9005,22 @@ _WH += [
     ("tools/vr-headless.py", '        if line.split()[:1] == [b"mouse_enabled"]:',
      '        if line.strip().startswith(b"mouse_enabled"):',
      "tests/test_vr_headless.py::test_mouse_look_off_keeps_every_other_line", "wh42-mouse-key-exact"),
+]
+# 4.2: MCP write/console tools judged by name on any server (SkyLink SE/AE 1.5+). One twin per clause.
+_MW = "tests/test_skyguard_mcp.py::"
+_WH += [
+    ("tools/skyguard/mcp_rules.py", "    if tool in rules.MCP_WRITE_TOOLS:\n", "    if False:\n",
+     _MW + "test_a_named_mcp_write_tool_is_refused_on_any_server[install_plugin-skyrim]", "wh42-mcp-write-refused"),
+    ("tools/skyguard/mcp_rules.py", "    elif is_devbench(name) or tool in rules.MCP_CONSOLE_TOOLS:",
+     "    elif is_devbench(name):",
+     _MW + "test_a_skylink_console_line_gets_the_devbench_crash_check[skyrim]", "wh42-mcp-console-judged"),
+    ("tools/skyguard/mcp_rules.py", "    tool = parts[-1]\n    return tool if", "    tool = parts[-1].lower()\n    return tool if",
+     _MW + "test_reads_and_other_names_are_not_judged_as_writes[mcp__skyrim__Create_Plugin]", "wh42-mcp-name-exact"),
+    ("tools/skyguard/mcp_rules.py", "    return is_devbench(name) or bool(named_tool(name))", "    return is_devbench(name)",
+     "tests/test_skyguard_codex_adapter.py::test_a_named_mcp_write_tool_is_refused_on_codex_and_not_logged_as_unhooked",
+     "wh42-mcp-judged-server"),
+    ("tools/skyguard/health.py", "|mcp__.+__(?:create_plugin", "|mcp__.+__(?:xcreate_plugin",
+     _MW + "test_the_claude_matcher_and_coverage_name_every_judged_tool", "wh42-mcp-claude-coverage"),
 ]
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in _WH]
 
@@ -10715,7 +10731,7 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     (_H1S, '"Checking file protection...",\n            "onFailure": "block"', '"Checking file protection..."',
      _H1T + "test_every_guard_hook_blocks_on_failure_and_nothing_else_does[agent/targets/claude/settings.json]",
      "h1-protect-files-fails-open"),
-    (_H1S, '"Checking DevBench call...",\n            "onFailure": "block"', '"Checking DevBench call..."',
+    (_H1S, '"Checking game-bridge call...",\n            "onFailure": "block"', '"Checking game-bridge call..."',
      _H1T + "test_every_guard_hook_blocks_on_failure_and_nothing_else_does[agent/targets/claude/settings.json]",
      "h1-protect-mcp-fails-open"),
     ("setup.sh", "sort -t. -k1,1n -k2,2n -k3,3n | head -n1)", "sort | head -n1)",

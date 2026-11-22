@@ -476,6 +476,13 @@ def test_a_judged_devbench_call_is_not_logged_as_unhooked(tmp_path):
     assert _unhooked_log(tmp_path) == ""
 
 
+def test_a_named_mcp_write_tool_is_refused_on_codex_and_not_logged_as_unhooked(tmp_path):
+    """4.2: SkyLink SE/AE 1.5's plugin writers, under the server name its example config uses."""
+    v = _run(tmp_path, _pre("mcp__skyrim__install_plugin", {"path": "x.esp"}))
+    assert v.decision == "deny" and "install_plugin" in v.reason
+    assert _unhooked_log(tmp_path) == ""
+
+
 def test_an_ordinary_devbench_call_is_allowed_silently(tmp_path):
     v = _run(tmp_path, _pre("mcp__devbench-vr__inspect", {"kind": "state"}))
     assert (v.decision, v.context, v.status) == ("allow", "", "evaluated")

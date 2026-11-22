@@ -38,13 +38,13 @@
         ]
       },
       {
-        "matcher": "mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*",
+        "matcher": "mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*|mcp__.+__(?:create_plugin|install_plugin|package_override_mod|compile_script|clean_plugins|sort_load_order|execute_console_command)",
         "hooks": [
           {
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-mcp.sh\"",
             "timeout": 60,
-            "statusMessage": "Checking DevBench call...",
+            "statusMessage": "Checking game-bridge call...",
             "onFailure": "block"
           }
         ]

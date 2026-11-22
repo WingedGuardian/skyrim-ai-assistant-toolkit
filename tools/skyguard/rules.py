@@ -31,6 +31,17 @@ REMOVED = frozenset({
 # this install (a full reset of a 700+ plugin order); add a command here only once it has been measured.
 DEVBENCH_DENY = (("smp", "reset"),)
 
+# MCP tools refused on ANY server by their tool name (4.2). SkyLink AI for SE/AE (Nexus 175682) 1.5.0 added these,
+# read from its SkyrimMCP.dll metadata (methods CreatePlugin, InstallPlugin, PackageOverrideMod, CompileScript,
+# CleanPlugins, SortLoadOrder; the MCP SDK names them in snake_case, as the VR port's tools are named). Each writes a
+# plugin, a compiled script or the load order straight into the install, which the shell route refuses or leaves to
+# the user's mod manager. The server name is the user's choice (SkyLink's example config calls it `skyrim`), so it
+# is not read. DATA: an exact, lower-case tool name; a tool spelled any other way is not judged.
+MCP_WRITE_TOOLS = frozenset(("create_plugin", "install_plugin", "package_override_mod", "compile_script",
+                             "clean_plugins", "sort_load_order"))
+# MCP tools on ANY server that run a console line: judged against DEVBENCH_DENY, like DevBench's own console.
+MCP_CONSOLE_TOOLS = frozenset(("execute_console_command",))
+
 RULES = {
     'S-INERT-NOCMD': {
         "decision": 'deny',
@@ -471,6 +482,16 @@ RULES = {
         # op: self_rules EDITS/CREATES/LINKS (T8 fix round 2, N4). "this command" keeps the text apart from
         # W-SELF-GUARD's "Note: this changes {file}" -- a bare "this {op}" would match both (codes.matches).
         'Note: this command {op} {file}, part of the safety guards themselves.'
+    ),
+    },
+    'S-MCP-WRITE': {
+        "decision": 'deny',
+        "hook": 'protect-mcp',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        "Blocked: the MCP tool '{op}' writes a plugin, a compiled script or the load order straight into your\n"
+        'install, outside the safety checks. Make the change with your mod manager or House Carl, or run it yourself.'
     ),
     },
     'S-INERT-NOINPUT': {

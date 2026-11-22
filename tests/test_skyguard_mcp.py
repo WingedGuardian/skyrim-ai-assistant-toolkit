@@ -202,6 +202,52 @@ def test_a_devbench_name_after_a_double_underscore_is_judged(tool):
     assert mcp_rules.is_devbench(tool) and mcp_rules.judged_server(tool)
 
 
+# 4.2: SkyLink AI for SE/AE 1.5.0 (Nexus 175682) writes plugins, compiled scripts and the load order through MCP. Its
+# tools are judged by NAME on any server, since the server name is the user's choice (SkyLink's example: `skyrim`).
+@pytest.mark.parametrize("server", ["skyrim", "skylink_vr", "SkyLinkAI", "some__other"])
+@pytest.mark.parametrize("tool", sorted(rules.MCP_WRITE_TOOLS))
+def test_a_named_mcp_write_tool_is_refused_on_any_server(server, tool):
+    got, fired = mcp(f"mcp__{server}__{tool}", {"path": "Data/x.esp"})
+    assert got[0] == "deny" and fired == {"S-MCP-WRITE"}, (got, fired)
+    assert mcp_rules.judged_server(f"mcp__{server}__{tool}")
+
+
+@pytest.mark.parametrize("tool", ["mcp__skyrim__get_inventory", "mcp__skyrim__get_equipped_items",
+                                  "mcp__skylink_vr__write_plugin_config", "mcp__skyrim__check_plugin_dependencies",
+                                  "mcp__housecarl__housecarl_compile_script", "mcp__skyrim__compile_scripts",
+                                  "mcp__skyrim__Create_Plugin", "mcp__other__console"])
+def test_reads_and_other_names_are_not_judged_as_writes(tool):
+    got, fired = mcp(tool, {"command": "smp reset", "path": "Data/x.esp"})
+    assert got[0] == "allow" and not fired, (tool, got, fired)
+    assert not mcp_rules.judged_server(tool)
+
+
+@pytest.mark.parametrize("server", ["skyrim", "skylink_vr"])
+def test_a_skylink_console_line_gets_the_devbench_crash_check(server):
+    assert mcp(f"mcp__{server}__execute_console_command", {"command": "smp reset"})[1] == {"S-DEVBENCH-CRASH"}
+    got, fired = mcp(f"mcp__{server}__execute_console_command", {"command": "tgm"})
+    assert got[0] == "allow" and not fired
+
+
+def test_the_claude_matcher_and_coverage_name_every_judged_tool():
+    import re
+    from skyguard import health
+    settings = json.loads((REPO / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    rx = next(re.compile(m["matcher"]) for m in settings["hooks"]["PreToolUse"]
+              if any("protect-mcp.sh" in h["command"] for h in m.get("hooks", [])))
+    for tool in sorted(rules.MCP_WRITE_TOOLS | rules.MCP_CONSOLE_TOOLS):
+        name = "mcp__skyrim__" + tool
+        assert rx.fullmatch(name) and health._claude_covered(name), name
+    for name in ("mcp__skyrim__get_inventory", "mcp__housecarl__housecarl_compile_script"):
+        assert not rx.fullmatch(name) and not health._claude_covered(name), name
+
+
+def test_the_opencode_mirror_names_every_judged_tool():
+    text = (REPO / "agent/targets/opencode/plugins/skyguard.js").read_text(encoding="utf-8")
+    for tool in rules.MCP_WRITE_TOOLS | rules.MCP_CONSOLE_TOOLS:
+        assert '"%s"' % tool in text, tool
+
+
 def test_run_py_protect_mcp_end_to_end(tmp_path):
     """The engine entry point itself (what the wrapper runs): a verdict as the runtime's JSON, exit 0."""
     import subprocess

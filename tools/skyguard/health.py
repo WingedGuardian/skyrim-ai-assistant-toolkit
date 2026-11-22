@@ -78,7 +78,7 @@ _AGENT_NAME = re.compile(r"""^AGENT_NAME\s*=\s*(?:"([^"\\\n]*)"|'([^'\\\n]*)')""
 # installed matcher's text, character for character (tests/test_skyguard_coverage.py); Claude matchers take no inline
 # flags, so case is spelled with character classes.
 CLAUDE_COVERED_TOOLS = ("Bash", "PowerShell", "Monitor", "Edit", "Write", "NotebookEdit")
-CLAUDE_COVERED_MCP = re.compile(r"mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*")
+CLAUDE_COVERED_MCP = re.compile(r"mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*|mcp__.+__(?:create_plugin|install_plugin|package_override_mod|compile_script|clean_plugins|sort_load_order|execute_console_command)")
 
 
 def _claude_covered(tool):

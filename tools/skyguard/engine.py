@@ -254,7 +254,7 @@ def _unhooked(req) -> bool:
         return False
     if req.agent != "codex":
         return False   # Plan 7: the neutral role's calls are judged by kind, not by a Codex tool name
-    if req.kind == "mcp" and mcp_rules.is_devbench(req.mcp_tool):
+    if req.kind == "mcp" and mcp_rules.judged_server(req.mcp_tool):
         return False                    # Task 17: judged by name (the DevBench judge above), not an unhooked call
     return req.kind in ("mcp", "other") or (req.kind == "shell" and req.tool_name != "Bash")
 

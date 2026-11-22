@@ -34,6 +34,10 @@
   ([evidence](docs/evidence/2026-11-21-opencode-live-free-model.md)).
 - Headless VR test sessions: Devkit mouse-look controls are saved, disabled and restored on exit; a runtime helper
   that exits between two process snapshots no longer stops startup once its exit is proven.
+- **SkyLink for SE/AE 1.5+ writes plugins, scripts and the load order through MCP; the guard now refuses those tools** (`create_plugin`, `install_plugin`, `package_override_mod`, `compile_script`, `clean_plugins`,
+  `sort_load_order`) on any server name, on Claude Code, Codex and OpenCode (S-MCP-WRITE), and gives its
+  `execute_console_command` DevBench's crash-command check. Reads are unchanged. Tool names read from the 1.5.0
+  server's metadata; not tested live on SE/AE.
 - Shared preservation core pinned to b86c709, unchanged from 4.1.
 - Headless VR test sessions no longer keep the process ID of a helper proved exited as window evidence (Windows can
   reuse that number for another process).
