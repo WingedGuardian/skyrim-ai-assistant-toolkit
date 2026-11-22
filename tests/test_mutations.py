@@ -9006,21 +9006,32 @@ _WH += [
      '        if line.strip().startswith(b"mouse_enabled"):',
      "tests/test_vr_headless.py::test_mouse_look_off_keeps_every_other_line", "wh42-mouse-key-exact"),
 ]
-# 4.2: MCP write/console tools judged by name on any server (SkyLink SE/AE 1.5+). One twin per clause.
+# 4.2: MCP tools judged by name on any server (SkyLink SE/AE 1.5+). One twin per clause.
 _MW = "tests/test_skyguard_mcp.py::"
 _WH += [
     ("tools/skyguard/mcp_rules.py", "    if tool in rules.MCP_WRITE_TOOLS:\n", "    if False:\n",
-     _MW + "test_a_named_mcp_write_tool_is_refused_on_any_server[install_plugin-skyrim]", "wh42-mcp-write-refused"),
+     _MW + "test_a_named_mcp_write_tool_is_refused_on_any_server[install_plugin-skyrim]", "rule-S-MCP-WRITE-refused"),
+    ("tools/skyguard/rules.py", 'MCP_WRITE_TOOLS = frozenset(("install_plugin", "sort_load_order", "clean_plugins"))',
+     'MCP_WRITE_TOOLS = frozenset(("install_plugin", "clean_plugins"))',
+     _MW + "test_the_named_tools_are_exactly_the_skylink_150_writers_and_console_runners", "rule-S-MCP-WRITE-list-pinned"),
     ("tools/skyguard/mcp_rules.py", "    elif is_devbench(name) or tool in rules.MCP_CONSOLE_TOOLS:",
      "    elif is_devbench(name):",
-     _MW + "test_a_skylink_console_line_gets_the_devbench_crash_check[skyrim]", "wh42-mcp-console-judged"),
-    ("tools/skyguard/mcp_rules.py", "    tool = parts[-1]\n    return tool if", "    tool = parts[-1].lower()\n    return tool if",
-     _MW + "test_reads_and_other_names_are_not_judged_as_writes[mcp__skyrim__Create_Plugin]", "wh42-mcp-name-exact"),
+     _MW + "test_a_skylink_console_line_gets_the_devbench_crash_check[mcp__skyrim__execute_console_command]",
+     "wh42-mcp-console-judged"),
+    ("tools/skyguard/mcp_rules.py", '    return re.sub(r"[-_.\\s]", "", tool.lower())', "    return tool",
+     _MW + "test_a_named_mcp_write_tool_is_refused_on_any_server[InstallPlugin-skyrim]", "wh42-mcp-any-spelling"),
+    ("tools/skyguard/mcp_rules.py", '    return _NAMED.get(tool_key(parts[-1]), "")',
+     '    return next((v for k, v in _NAMED.items() if k in tool_key(parts[-1])), "")',
+     _MW + "test_reads_builders_and_other_names_are_not_judged_as_writes[mcp__skyrim__install_plugins]",
+     "wh42-mcp-whole-segment"),
     ("tools/skyguard/mcp_rules.py", "    return is_devbench(name) or bool(named_tool(name))", "    return is_devbench(name)",
      "tests/test_skyguard_codex_adapter.py::test_a_named_mcp_write_tool_is_refused_on_codex_and_not_logged_as_unhooked",
      "wh42-mcp-judged-server"),
-    ("tools/skyguard/health.py", "|mcp__.+__(?:create_plugin", "|mcp__.+__(?:xcreate_plugin",
+    ("tools/skyguard/health.py", "|mcp__.+__[Ii]nstall[-_.]?[Pp]lugin|", "|mcp__.+__[Xx]install[-_.]?[Pp]lugin|",
      _MW + "test_the_claude_matcher_and_coverage_name_every_judged_tool", "wh42-mcp-claude-coverage"),
+    (".opencode/plugins/skyguard.js", '["installplugin", ', '["xinstallplugin", ',
+     "tests/test_opencode_portable.py::test_profile_known_devbench_tools_refuse_failed_transport[timeout]",
+     "wh42-mcp-opencode-mirror"),
 ]
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in _WH]
 

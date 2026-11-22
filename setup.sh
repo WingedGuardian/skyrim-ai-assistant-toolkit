@@ -1461,7 +1461,7 @@ echo "                  happening to your character). ToolkitProbe.zip is attach
 echo "                  needs DevBench. Live-tested on VR; SE/AE experimental. docs/whats-here.md"
 echo "  SkyLink      -- optional game bridge an agent can read equipment and inventory through (VR: Nexus 195413;"
 echo "                  SE/AE: Nexus 175682). What's here uses it for gear context when it is already connected."
-echo "                  SE/AE 1.5+ can also write plugins, scripts and the load order; the guard refuses those tools."
+echo "                  SE/AE 1.5+ can also install, clean and sort plugins; the guard refuses those tools."
 echo "  What Am I Looking At -- SE/AE only (Nexus 199906): crosshair pick for flat Skyrim, a complement on runtimes"
 echo "                  where ToolkitProbe is still experimental."
 echo ""

@@ -38,7 +38,7 @@
         ]
       },
       {
-        "matcher": "mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*|mcp__.+__(?:create_plugin|install_plugin|package_override_mod|compile_script|clean_plugins|sort_load_order|execute_console_command)",
+        "matcher": "mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*|mcp__.+__[Ii]nstall[-_.]?[Pp]lugin|mcp__.+__[Ss]ort[-_.]?[Ll]oad[-_.]?[Oo]rder|mcp__.+__[Cc]lean[-_.]?[Pp]lugins|mcp__.+__[Ee]xecute[-_.]?[Cc]onsole[-_.]?[Cc]ommand|mcp__.+__[Cc]all[-_.]?[Pp]apyrus[-_.]?[Ff]unction",
         "hooks": [
           {
             "type": "command",

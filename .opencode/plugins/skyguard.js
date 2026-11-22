@@ -14,7 +14,8 @@ export const SkyrimGuard = createGuard({
     const parts = typeof tool === "string" ? tool.split("__") : []
     return parts.length >= 3 && parts[0] === "mcp" &&
       (parts.slice(1).join("__").toLowerCase().replace(/[-_.\s]/g, "").includes("devbench") ||
-       ["create_plugin", "install_plugin", "package_override_mod", "compile_script", "clean_plugins", "sort_load_order", "execute_console_command"].includes(parts[parts.length - 1]))
+       ["installplugin", "sortloadorder", "cleanplugins", "executeconsolecommand", "callpapyrusfunction"]
+         .includes(parts[parts.length - 1].toLowerCase().replace(/[-_.\s]/g, "")))
   },
   adapter: fileURLToPath(new URL("../hooks/skyguard_adapter.py", import.meta.url)),
 })

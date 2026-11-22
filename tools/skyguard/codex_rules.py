@@ -69,6 +69,7 @@ CLASSIFICATION: Dict[str, Tuple[str, str]] = {
         "hook_only", "depends on where the working tree resolves (cwd, cd, -C, --work-tree); a `git reset --hard` "
         "prefix would also refuse it in every unprotected repository"),
     "mcp.S-INERT-NOINPUT": ("hook_only", _INERT),
+    "mcp.S-MCP-WRITE": ("hook_only", "an MCP tool call, not a command"),
     "write.DENY_PLUGIN": ("hook_only", "a file write, not a command"),
     "write.NO_PATH_DENY": ("hook_only", _INERT),
 }

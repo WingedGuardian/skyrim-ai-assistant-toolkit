@@ -31,16 +31,19 @@ REMOVED = frozenset({
 # this install (a full reset of a 700+ plugin order); add a command here only once it has been measured.
 DEVBENCH_DENY = (("smp", "reset"),)
 
-# MCP tools refused on ANY server by their tool name (4.2). SkyLink AI for SE/AE (Nexus 175682) 1.5.0 added these,
-# read from its SkyrimMCP.dll metadata (methods CreatePlugin, InstallPlugin, PackageOverrideMod, CompileScript,
-# CleanPlugins, SortLoadOrder; the MCP SDK names them in snake_case, as the VR port's tools are named). Each writes a
-# plugin, a compiled script or the load order straight into the install, which the shell route refuses or leaves to
-# the user's mod manager. The server name is the user's choice (SkyLink's example config calls it `skyrim`), so it
-# is not read. DATA: an exact, lower-case tool name; a tool spelled any other way is not judged.
-MCP_WRITE_TOOLS = frozenset(("create_plugin", "install_plugin", "package_override_mod", "compile_script",
-                             "clean_plugins", "sort_load_order"))
-# MCP tools on ANY server that run a console line: judged against DEVBENCH_DENY, like DevBench's own console.
-MCP_CONSOLE_TOOLS = frozenset(("execute_console_command",))
+# MCP tools refused on ANY server by their tool name (4.2). SkyLink AI for SE/AE (Nexus 175682) 1.5.0 added them, read
+# from its SkyrimMCP.dll metadata (methods InstallPlugin, SortLoadOrder, CleanPlugins and their [Description]s):
+# InstallPlugin copies a plugin into the MO2 mods folder and activates it, SortLoadOrder runs LOOT and applies the
+# order, CleanPlugins runs SSEEdit's Quick Auto Clean, which rewrites plugins in place. Not listed: its builders
+# (CreatePlugin, CompileScript, PackageOverrideMod, PrepareScriptSources) write only into SkyLink's own Build
+# folder, the same class as the xelib/Caprica routes the shell rules allow. The server name is the user's choice
+# (SkyLink's example config calls it `skyrim`), so it is not read. MEASURED 2026-11-22: the 1.5.0 server's own
+# tools/list returns these spellings. It sets no explicit name (the SDK derives it), so names are still
+# compared with case and `-_.` separators ignored (mcp_rules.tool_key), for a later build. DATA.
+MCP_WRITE_TOOLS = frozenset(("install_plugin", "sort_load_order", "clean_plugins"))
+# MCP tools on ANY server that can run a console line: judged against DEVBENCH_DENY, like DevBench's console and
+# papyrus tools (SkyLink's ExecuteConsoleCommand, and CallPapyrusFunction, which can call a console-running native).
+MCP_CONSOLE_TOOLS = frozenset(("execute_console_command", "call_papyrus_function"))
 
 RULES = {
     'S-INERT-NOCMD': {
@@ -490,8 +493,8 @@ RULES = {
         "legacy": False,
         "prefixes": [],
         "template": (
-        "Blocked: the MCP tool '{op}' writes a plugin, a compiled script or the load order straight into your\n"
-        'install, outside the safety checks. Make the change with your mod manager or House Carl, or run it yourself.'
+        "Blocked: the MCP tool '{op}' installs, cleans or reorders plugins in your load order, outside the safety\n"
+        'checks. Do it with your mod manager (or House Carl for an edit), or run it yourself.'
     ),
     },
     'S-INERT-NOINPUT': {

@@ -195,15 +195,23 @@ def is_devbench(name: str) -> bool:
     return len(parts) >= 3 and parts[0] == "mcp" and is_devbench_server("__".join(parts[1:]))
 
 
+def tool_key(tool: str) -> str:
+    """A tool name with case and `-_.` separators dropped: SkyLink 1.5.0 sets no explicit name, so `install_plugin`,
+    `InstallPlugin` and `installPlugin` are all the same tool."""
+    return re.sub(r"[-_.\s]", "", tool.lower())
+
+
+_NAMED = {tool_key(t): t for t in rules.MCP_WRITE_TOOLS | rules.MCP_CONSOLE_TOOLS}
+
+
 def named_tool(name: str) -> str:
-    """The tool part of an `mcp__<server>__<tool>` call when it is one the rules judge on ANY server (rules.
-    MCP_WRITE_TOOLS, rules.MCP_CONSOLE_TOOLS: SkyLink SE/AE 1.5+ under whatever server name the user chose), else "".
-    Exact lower-case match: `mcp__housecarl__housecarl_compile_script` is House Carl's own route, not this tool."""
+    """The canonical name (as listed in rules.MCP_WRITE_TOOLS / MCP_CONSOLE_TOOLS) of an `mcp__<server>__<tool>` call
+    the rules judge on ANY server (SkyLink SE/AE 1.5+ under whatever server name the user chose), else "". The whole
+    last segment must be the tool: `mcp__housecarl__housecarl_compile_script` is not `compile_script`."""
     parts = name.split("__") if isinstance(name, str) else []
     if len(parts) < 3 or parts[0] != "mcp":
         return ""
-    tool = parts[-1]
-    return tool if tool in rules.MCP_WRITE_TOOLS or tool in rules.MCP_CONSOLE_TOOLS else ""
+    return _NAMED.get(tool_key(parts[-1]), "")
 
 
 def judged_server(name: str) -> bool:

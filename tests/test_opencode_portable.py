@@ -111,7 +111,8 @@ def test_profile_known_devbench_tools_refuse_failed_transport(tmp_path, failure)
         adapter.unlink()
     elif failure in body:
         adapter.write_text(body[failure])
-    known = ["write", "mcp__devbench-vr__console", "mcp__my__Dev-Bench__game"]
+    known = ["write", "mcp__devbench-vr__console", "mcp__my__Dev-Bench__game", "mcp__skyrim__InstallPlugin",
+             "mcp__skyrim__call_papyrus_function"]
     unknown = ["mcp__future__tool", "future-tool"]
     steps = [step for tool in known + unknown for step in (before(tool, {}, tool), after(tool, {}, tool))]
     _, results = run_plugin(tmp_path, steps, env={
@@ -126,6 +127,14 @@ def test_profile_known_devbench_tools_refuse_failed_transport(tmp_path, failure)
             assert "error" not in pre
             assert "WARN AND ALLOW" in post["output"]["output"]
             assert "coverage receipt unavailable" in post["output"]["output"]
+
+
+def test_a_skylink_install_is_refused_through_the_shipped_plugin(tmp_path):
+    """4.2: the mirror routes the call to the adapter, and the adapter's verdict refuses it (not only a name list)."""
+    _, results = run_plugin(tmp_path, [before("mcp__skyrim__install_plugin", {"name": "x.esp"}),
+                                       before("mcp__skyrim__get_inventory", {})])
+    assert "install_plugin" in results[0].get("error", ""), results[0]
+    assert "error" not in results[1], results[1]
 
 
 def test_system_context_reinjects_preferences_after_each_transform(tmp_path):

@@ -634,9 +634,10 @@ def test_watch_stops_at_deadline_then_keeps_terminal_stop_events(endpoint):
                          'events': [{'sequence': after + 1, 'sourceFormId': 'FINAL' if body.get('stop') else 'LIVE'}],
                          'nextSequence': after + 1, 'latestSequence': after + 1, 'hasMore': not body.get('stop')}}
     replies['probe.watch'] = watch
-    # 0.3 s, not 0.01: under load the start reply alone can outlast a 10 ms watch, which then stops before its
-    # first read and sends no cursor (valid: the plugin reads from 0), so this test would see no `after`.
-    data = json.loads(run('watch', '--seconds', '.3').stdout)
+    # 1.5 s, not 0.01: under load the start reply alone can outlast a short watch, which then stops before its
+    # first read and sends no cursor (valid: the plugin reads from 0), so this test would see no `after`. 0.3 s still
+    # failed on a GitHub Windows runner (CI 45045244154).
+    data = json.loads(run('watch', '--seconds', '1.5').stdout)
     stops = [body for key, body in requests if key == 'probe.watch' and body.get('stop')]
     assert len(stops) == 1
     assert 'after' in stops[0]
