@@ -96,6 +96,13 @@ def test_outfit_studio_reads_and_safe_writes_are_allowed(judge, name, args):
     assert judge(name, args) == "allow"
 
 
+def test_absolute_paths_inside_text_are_found_on_every_os_spelling():
+    for path in ("/home/u/Skyrim/Data/meshes/x.nif", "D:/Games/Skyrim/Data/meshes/x.nif", "/d/Games/Data/x.nif"):
+        text = '<Step type="Export: File" path="' + path + '"/>'
+        assert path in list(mcp_rules._absolute_candidates(text)), path
+    assert list(mcp_rules._absolute_candidates('<Step path="SliderSets/a/b.osp"/>')) == []   # relative: not absolute
+
+
 def test_a_relative_path_out_of_bodyslides_folder_is_refused_even_without_roots():
     audit = Audit(ROOT)
     v = mcp_rules.decide("mcp__outfit-studio__export_nif", {"file": "../../meshes/x.nif"}, audit, roots=None)

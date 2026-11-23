@@ -234,8 +234,10 @@ def is_outfit_studio(name: str) -> bool:
 
 
 # An absolute path anywhere in a string (an inline automation script, a JSON-encoded step list, `path=...`): a drive
-# path, a UNC or `//` path, or an MSYS `/c/` path, optionally as a file: URI, up to a quote, an angle bracket or a line.
-_ABS_IN_TEXT = re.compile(r"(?:file:/*)?(?:[A-Za-z]:/|//|/[A-Za-z]/)[^\"'<>\r\n|*?]*")
+# path, a UNC or `//` path, or a POSIX or MSYS path (`/home/...`, `/c/...`) whose `/` is not inside a relative path,
+# optionally as a file: URI, up to a quote, an angle bracket or a line.
+_ABS_IN_TEXT = re.compile(r"(?:file:/*)?(?:[A-Za-z]:/|//|(?<![\w.~/-])/(?=[\w.~-]))"
+                          r"[^\"'<>\r\n|*?]*")
 # Where a RELATIVE path resolves: Outfit Studio takes it against BodySlide's own folder (its wiki), which a stock
 # install keeps inside Data. A `..` that stays inside that folder is fine; one that climbs out reaches Data or beyond.
 _BS_HOME = "/_install_/data/calientetools/bodyslide"

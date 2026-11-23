@@ -9112,6 +9112,8 @@ _BS2 = [
     ('tools/skyguard/anchored.py', '        flags = [re.split(r"[=:]", a.lower(), maxsplit=1)[0] for a in argv]',
      '        flags = [a.lower() for a in argv]',
      'tests/test_bodyslide_guard.py::test_a_batch_build_into_data_is_refused', 'bs-attached-flag-values'),
+    ('tools/skyguard/mcp_rules.py', '|(?<![' + chr(92) + 'w.~/-])/(?=[' + chr(92) + 'w.~-]))"', ')"',
+     'tests/test_bodyslide_guard.py::test_absolute_paths_inside_text_are_found_on_every_os_spelling', 'mesh-posix-paths-inside-text'),
 ]
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in _BS2]
 
