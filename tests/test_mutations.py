@@ -9078,6 +9078,34 @@ _SU = [
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in _SU]
 
 
+# BodySlide / Outfit Studio writes (toolkit 4.3): one twin per clause of S-BODYSLIDE-BUILD and S-MCP-MESH-WRITE.
+_BS = [
+    ('tools/skyguard/shell_rules.py', '        return deny("S-BODYSLIDE-BUILD", body)\n', '        pass\n',
+     'tests/test_bodyslide_guard.py::test_a_batch_build_into_data_is_refused', 'rule-S-BODYSLIDE-BUILD-refused'),
+    ('tools/skyguard/anchored.py', '            return "the game\'s Data folder (no --targetdir)"\n', '            continue\n',
+     'tests/test_bodyslide_guard.py::test_a_batch_build_without_a_target_folder_is_refused', 'bs-no-targetdir-refused'),
+    ('tools/skyguard/anchored.py', '        if resolved is not None and mesh_output_protected(resolved, roots):', '        if False:',
+     'tests/test_bodyslide_guard.py::test_a_batch_build_into_data_is_refused', 'bs-target-into-data-refused'),
+    ('tools/skyguard/anchored.py', '    return in_install_area(abs_path, roots) and not bodyslide_own(abs_path)', '    return in_install_area(abs_path, roots)',
+     'tests/test_bodyslide_guard.py::test_safe_bodyslide_commands_are_allowed', 'bs-own-folder-allowed'),
+    ('tools/skyguard/anchored.py', '        if not any(f in _BS_BUILD for f in flags):\n            continue\n', '',
+     'tests/test_bodyslide_guard.py::test_safe_bodyslide_commands_are_allowed', 'bs-only-batch-builds'),
+    ('tools/skyguard/mcp_rules.py', '        hit = ("S-MCP-MESH-WRITE", {"file": where}) if where else None', '        hit = None',
+     'tests/test_bodyslide_guard.py::test_an_outfit_studio_write_into_loaded_folders_is_refused', 'rule-S-MCP-MESH-WRITE-refused'),
+    ('tools/skyguard/mcp_rules.py', '        elif "/" in t and ".." in t.split("/"):', '        elif False:',
+     'tests/test_bodyslide_guard.py::test_an_outfit_studio_write_into_loaded_folders_is_refused', 'mesh-dotdot-refused'),
+    ('tools/skyguard/mcp_rules.py', '    if roots is None or not any(w in tool_key(tool) for w in _MESH_WRITE_WORDS):', '    if roots is None:',
+     'tests/test_bodyslide_guard.py::test_outfit_studio_reads_and_safe_writes_are_allowed', 'mesh-reads-not-judged'),
+    ('tools/skyguard/mcp_rules.py', '    return is_devbench(name) or bool(named_tool(name)) or is_outfit_studio(name)', '    return is_devbench(name) or bool(named_tool(name))',
+     'tests/test_bodyslide_guard.py::test_the_outfit_studio_server_is_judged_on_every_host', 'mesh-server-judged'),
+    ('tools/skyguard/health.py', '|mcp__.*[Oo][Uu][Tt][Ff][Ii][Tt][-_. ]?[Ss][Tt][Uu][Dd][Ii][Oo].*', '',
+     'tests/test_bodyslide_guard.py::test_the_outfit_studio_server_is_judged_on_every_host', 'mesh-claude-matcher'),
+    ('agent/targets/opencode/plugins/skyguard.js', '["outfitstudio", "bodyslide"].some(', '[].some(',
+     'tests/test_bodyslide_guard.py::test_the_outfit_studio_server_is_judged_on_every_host', 'mesh-opencode-mirror'),
+]
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in _BS]
+
+
 _WINDOWS_ONLY_TWINS = {
     "wh42-timeout-kills-tree": "taskkill is the Windows tree kill; POSIX kills the process group",
     "deadline-kill-by-windows-pid": "taskkill by /proc/<pid>/winpid runs only under MSYS/Cygwin; POSIX takes kill -KILL",

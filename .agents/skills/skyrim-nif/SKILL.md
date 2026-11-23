@@ -111,6 +111,26 @@ with open('path/to/output.nif', 'wb') as f:
     data.write(f)
 ```
 
+## BodySlide and Outfit Studio (body and outfit meshes)
+
+A BodySlide batch build writes into its settings' output path, or the game's Data folder when none is set, so it
+lands over the user's mods with no record. **Always build into a scratch folder**, then have the user install that
+folder as a mod with their mod manager:
+
+```bash
+"<BodySlide folder>/BodySlide x64.exe" --groupbuild "<Group>" --preset "<Preset>" --targetdir "<scratch folder>" --quiet
+```
+
+`--groupbuild` (comma-separated, exact case), `--build <outfits>` and `--filter <text>` start a batch build and exit;
+`--trimorphs` adds tri morphs; `--quiet` shows no dialogs (failures go only to its log). The guard refuses a batch
+build with no `--targetdir`, or one that resolves into Data, the settings folder or MO2's folders
+(S-BODYSLIDE-BUILD); BodySlide's own folder (`CalienteTools/BodySlide`) is allowed.
+
+Outfit Studio can run an MCP server (`OutfitStudio --mcp`, `http://127.0.0.1:47823/mcp`) with no folder limits of its
+own. On a server named Outfit Studio or BodySlide the guard refuses a save, export, build, write or run-steps call
+given a path into those folders, or a relative path with `..` (S-MCP-MESH-WRITE): save and export into a scratch
+folder or BodySlide's own folder instead. Its tool names are not checked against a real server yet.
+
 ## Why PyFFI over binary patching / NifSkope re-saves
 
 - Preserves exact NIF format (BSStreamVersion, block types, shader flags, texture slots).

@@ -214,11 +214,47 @@ def named_tool(name: str) -> str:
     return _NAMED.get(tool_key(parts[-1]), "")
 
 
+# S-MCP-MESH-WRITE (deny, 4.3): Outfit Studio's MCP server (BodySlide and Outfit Studio's wiki, "MCP Server for AI
+# agents") has no folder limits ("an agent can do what you can do") and 100+ tools whose names the wiki does not list.
+# Not measured: no installed copy to ask `tools/list`. So the rule is by PATH, not by name: on a server whose name says
+# Outfit Studio or BodySlide, a tool whose name says it saves, exports, builds, writes or runs steps is refused when
+# any string in its arguments is an absolute path into the protected area (anchored.mesh_output_protected), or a
+# relative path with a `..` part (relative paths resolve against BodySlide's folder, which is inside Data). Reads,
+# renders and loads are not judged.
+_MESH_WRITE_WORDS = ("save", "export", "build", "write", "runsteps", "automation")
+
+
+def is_outfit_studio(name: str) -> bool:
+    parts = name.split("__") if isinstance(name, str) else []
+    if len(parts) < 3 or parts[0] != "mcp":
+        return False
+    server = tool_key("__".join(parts[1:-1]))
+    return "outfitstudio" in server or "bodyslide" in server
+
+
+def mesh_write_target(tool: str, args, roots) -> str:
+    """The path argument an Outfit Studio write call would write into the protected area ("" for none)."""
+    from . import anchored
+    if roots is None or not any(w in tool_key(tool) for w in _MESH_WRITE_WORDS):
+        return ""
+    for s in _strings(args):
+        if len(s) > 4096 or "\n" in s:
+            continue
+        t = s.replace("\\", "/")
+        if re.match(r"^(?:[A-Za-z]:/|/)", t):
+            resolved = paths.norm_abs(t)
+            if resolved and anchored.mesh_output_protected(resolved, roots):
+                return s
+        elif "/" in t and ".." in t.split("/"):
+            return s
+    return ""
+
+
 def judged_server(name: str) -> bool:
     """True when `name` is an `mcp__<server>__<tool>` call the MCP rules judge: a DevBench server (Plan 5's
     is_devbench), or a named write/console tool on any server (named_tool, 4.2). Plan 7: the neutral entry labels
     every other MCP call NOT JUDGED rather than evaluated."""
-    return is_devbench(name) or bool(named_tool(name))
+    return is_devbench(name) or bool(named_tool(name)) or is_outfit_studio(name)
 
 
 def decide(name: str, args, audit, roots=None, env=None) -> Verdict:
@@ -235,6 +271,9 @@ def decide(name: str, args, audit, roots=None, env=None) -> Verdict:
         hit = ("S-MCP-WRITE", {"op": tool})
     elif is_devbench(name) or tool in rules.MCP_CONSOLE_TOOLS:
         hit = judge(parts[-1], args, roots, None, env)
+    elif is_outfit_studio(name):
+        where = mesh_write_target(parts[-1], args, roots)
+        hit = ("S-MCP-MESH-WRITE", {"file": where}) if where else None
     else:
         return Verdict()
     if hit is not None:

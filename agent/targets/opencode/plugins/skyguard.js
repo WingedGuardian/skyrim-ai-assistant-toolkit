@@ -14,6 +14,8 @@ export const SkyrimGuard = createGuard({
     const parts = typeof tool === "string" ? tool.split("__") : []
     return parts.length >= 3 && parts[0] === "mcp" &&
       (parts.slice(1).join("__").toLowerCase().replace(/[-_.\s]/g, "").includes("devbench") ||
+       // Outfit Studio / BodySlide (mcp_rules.is_outfit_studio): the server part only
+       ["outfitstudio", "bodyslide"].some(w => parts.slice(1, -1).join("__").toLowerCase().replace(/[-_.\s]/g, "").includes(w)) ||
        ["installplugin", "sortloadorder", "cleanplugins", "executeconsolecommand", "callpapyrusfunction"]
          .includes(parts[parts.length - 1].toLowerCase().replace(/[-_.\s]/g, "")))
   },

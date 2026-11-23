@@ -6,6 +6,7 @@ one session, 2026-10-03). Here each asks about an Exec from shellparse: its prog
     registry(command, parsed)                         -> True   S-REGISTRY (deny)
     psc_out(command, parsed)                          -> file   S-PSC-OUT (deny)
     champollion(command, parsed, roots, cwd, env)     -> file   S-CHAMPOLLION (deny)
+    bodyslide_build(command, parsed, roots, cwd, env) -> where  S-BODYSLIDE-BUILD (deny)
     automod(parsed)                                   -> [(rule id, file)]   S-AUTOMOD-ESP / -NIF / -ARCHIVE (advise)
     external_out(parsed, roots, cwd, env)             -> op     S-EXTERNAL-OUT (advise)
 
@@ -298,6 +299,56 @@ def champollion(command: str, parsed, roots, cwd: str, env: Mapping[str, str]) -
             rel = _data_scripts(a, roots)
             if rel is not None and (not rel or rel[-1].endswith(".pex")):
                 return _base(w) if rel else "Scripts"
+    return ""
+
+
+# -------------------------------------------------------------------------------------------------- BodySlide
+# S-BODYSLIDE-BUILD (deny, 4.3). BodySlide's batch build (`--groupbuild` / `--build` / `--filter`) writes into its
+# settings' output path, else the game's Data folder (its wiki, Command-line arguments), so without `--targetdir` an
+# agent's build drops untracked meshes over the user's mods. Refused: no `--targetdir`, or one that RESOLVES into the
+# install's Data folder, the settings folder or MO2's folders, except BodySlide's own folder (CalienteTools/BodySlide,
+# where its projects normally live). Not judged: a target the parser cannot resolve (a variable), an unparsed command,
+# Outfit Studio's `--automation` (its paths are inside the XML script).
+BODYSLIDE_PROGRAMS = frozenset(("bodyslide", "bodyslide x64", "bodyslidex64", "bodyslide64"))
+_BS_BUILD = frozenset(("--groupbuild", "-gbuild", "/groupbuild", "/gbuild", "--build", "-b", "/build", "/b",
+                       "--filter", "-f", "/filter", "/f"))
+_BS_TARGET = frozenset(("--targetdir", "-t", "/targetdir", "/t"))
+
+
+def bodyslide_own(abs_path: str) -> bool:
+    """BodySlide's own folder (CalienteTools/BodySlide, in Data or in an MO2 mod): its projects and slider sets."""
+    parts = [c for c in (abs_path or "").replace("\\", "/").lower().split("/") if c]
+    return any(parts[i] == "calientetools" and parts[i + 1] == "bodyslide" for i in range(len(parts) - 1))
+
+
+def mesh_output_protected(abs_path: str, roots) -> bool:
+    """A folder where the game or the mod manager loads files: Data, the settings folder, MO2 (writes.in_install_area),
+    except BodySlide's own folder."""
+    from .writes import in_install_area
+    return in_install_area(abs_path, roots) and not bodyslide_own(abs_path)
+
+
+def bodyslide_build(command: str, parsed, roots, cwd: str, env: Mapping[str, str]) -> str:
+    """Where a BodySlide batch build would write, when that is protected ("" for none)."""
+    if "bodyslide" not in command.lower() or not parsed.ok:
+        return ""
+    for e in parsed.execs:
+        if e.program not in BODYSLIDE_PROGRAMS:
+            continue
+        e = substituted(e)
+        argv = list(e.argv)
+        flags = [a.lower().split("=", 1)[0] for a in argv]
+        if not any(f in _BS_BUILD for f in flags):
+            continue
+        target = None
+        for i, f in enumerate(flags):
+            if f in _BS_TARGET:
+                target = argv[i].split("=", 1)[1] if "=" in argv[i] else (argv[i + 1] if i + 1 < len(argv) else "")
+        if not target:
+            return "the game's Data folder (no --targetdir)"
+        resolved = targets.resolve_operand(e, target, cwd, env)
+        if resolved is not None and mesh_output_protected(resolved, roots):
+            return target
     return ""
 
 

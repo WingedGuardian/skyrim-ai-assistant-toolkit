@@ -175,6 +175,17 @@ RULES = {
         'Copy the .pex to a temp folder and run it there.'
     ),
     },
+    'S-BODYSLIDE-BUILD': {
+        "decision": 'deny',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Blocked: this BodySlide batch build would write its meshes into {file}, over your mods\' files with no\n'
+        'record. Build into a scratch folder (BodySlide --targetdir "<folder>" --quiet), then install that folder as\n'
+        'a mod with your mod manager.'
+    ),
+    },
     'S-RELATIVE-UNKNOWN': {
         "decision": 'advise',
         "hook": 'protect-bash',
@@ -495,6 +506,17 @@ RULES = {
         "template": (
         "Blocked: the MCP tool '{op}' installs, cleans or reorders plugins in your load order, outside the safety\n"
         'checks. Do it with your mod manager (or House Carl for an edit), or run it yourself.'
+    ),
+    },
+    'S-MCP-MESH-WRITE': {
+        "decision": 'deny',
+        "hook": 'protect-mcp',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        "Blocked: this Outfit Studio call would write into {file}, where the game or your mod manager loads files,\n"
+        'with no record of what it replaced. Save or export into a scratch folder (or BodySlide\'s own folder), then\n'
+        'install the result as a mod with your mod manager.'
     ),
     },
     'S-INERT-NOINPUT': {

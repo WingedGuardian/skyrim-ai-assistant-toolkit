@@ -11,6 +11,11 @@
 - Shared preservation core pinned to 165a1d4 (public core PR #13 on #12): the update commands, the agent launcher
   and per-toolkit private notes names (`CLAUDE.local.md` is now protected in every upgrade). Re-pinned to the merged
   public commit before release.
+- **BodySlide and Outfit Studio writes are guarded.** A BodySlide batch build with no `--targetdir`, or one into Data,
+  the settings folder or MO2's folders, is refused (S-BODYSLIDE-BUILD); build into a scratch folder and install it
+  as a mod. On an Outfit Studio MCP server, a save/export/build/write/run-steps call given a path there (or a relative
+  path with `..`) is refused (S-MCP-MESH-WRITE) on Claude Code, Codex and OpenCode; BodySlide's own folder and reads
+  are allowed. Its tool names are not yet checked against a real server. Skill `skyrim-nif` has the build command.
 - Fixed: the Nexus pack builder downloaded every zip on a release, and refused v4.2.0's pack because of
   `ToolkitProbe.zip`; it now downloads only the bundle.
 

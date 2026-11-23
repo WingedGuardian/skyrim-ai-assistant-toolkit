@@ -359,6 +359,9 @@ def _ordered(command, parsed, dels, wr, own, roots, audit, cwd, shell, env) -> V
     champ = anchored.champollion(command, parsed, roots, cwd, env)
     if champ:
         return deny("S-CHAMPOLLION", champ)
+    body = anchored.bodyslide_build(command, parsed, roots, cwd, env)
+    if body:
+        return deny("S-BODYSLIDE-BUILD", body)
     # Task 11: the DevBench console reached by curl or devbench-cli.sh (mcp_rules.py judges the same calls as the MCP hook).
     dev = mcp_rules.scan_shell(command, parsed, roots, env)
     if dev and dev[0] == "S-DEVBENCH-CRASH":
