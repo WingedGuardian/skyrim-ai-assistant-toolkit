@@ -7,7 +7,7 @@ import sys
 import time
 
 sys.dont_write_bytecode = True
-from modding_harness import contracts, generic, installation, telemetry
+from modding_harness import contracts, generic, installation, release, telemetry
 from skyguard import portable, save_store
 
 # The files of a 3.x personal save policy (one reviewed install's; kept by user ruling 2026-10-20). An upgrade keeps
@@ -28,6 +28,7 @@ def main(argv=None):
     sub.add_parser("capabilities")
     sub.add_parser("preferences")
     installation.add_arguments(sub)
+    release.add_arguments(sub)
     sub.add_parser("save-list")
     restore = sub.add_parser("save-restore")
     restore.add_argument("transaction")
@@ -55,6 +56,13 @@ def main(argv=None):
             result = installation.handle(args, root, local_files=(*LEGACY_POLICY_FILES,
                 "skyrim-paths.env", ".claude/skyrim-paths.env"), candidate_preparer=upgrade_render.prepare,
                 candidate_validator=upgrade_render.validate, review_builder=None)
+        elif args.command in release.COMMANDS:
+            from skyguard import update_check
+            result = release.handle(args, root, update_check.PROFILE)
+            if args.command == "update-fetch":
+                # This install's paths for upgrade-stage --render-config: the applied hooks must work at once.
+                result["render_config"] = update_check.write_render_config(
+                    args.installed_root or root, Path(result["candidate"]).parent)
         elif args.command == "save-list":
             from modding_harness import workspace
             target = save_store.store(root)
@@ -82,7 +90,10 @@ def main(argv=None):
             if args.preview:
                 result.update(preview=True, execution_authorized=False, runtime_writes=False)
     except (OSError, ValueError, UnicodeError, RecursionError) as exc:
-        if args.command in installation.COMMANDS:
+        if args.command in release.COMMANDS:
+            # A refused or failed update fetch says why, and fails; nothing installed has changed.
+            result, exit_status = {"ok": False, "error": str(exc), "installed_changed": False}, 2
+        elif args.command in installation.COMMANDS:
             result, exit_status = installation.failure(args.command, exc, "Skyrim adapter failed")
         else:
             # A restore that failed partway must say which files it published and where the journal is, and fail.

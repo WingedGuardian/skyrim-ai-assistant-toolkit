@@ -164,6 +164,15 @@ def _disk_note(project) -> str:
     return note + "\n" if note else ""
 
 
+def _update_note(project) -> str:
+    """"A newer toolkit release is out" (skyguard/update_check.py), once per version. Never raises."""
+    try:
+        from skyguard import update_check
+        return update_check.session_note(project)
+    except Exception:
+        return ""
+
+
 def _vault_note(project) -> str:
     """The save vault's watcher, in one line (two when the INI vault differs), and the watcher started DETACHED when
     it is not running: an upgraded install gets its vault at the next session start, with no setup run. Only for the
@@ -268,7 +277,7 @@ def _codex(a, raw: str) -> int:
     if a.role == "session-start":
         _session_line(a, req.session_id, source=req.source, transcript=req.transcript_path)
         out, status, code = session.run_status(a.project, req.source, a.bash, audit, root=a.root_win or a.root)
-        out = _vault_note(a.project) + out
+        out = _update_note(a.project) + _vault_note(a.project) + out
         _session_snapshot(a.project, req.source, audit)
         out = session.with_charter(_disk_note(a.project) + out, a.project, req.session_id)
         _telemetry(a, Verdict("allow", "", "", status, code))
@@ -433,7 +442,7 @@ def main(argv=None) -> int:
     else:
         out, status, code = session.run_status(a.project, "" if p["empty"] else p["source"], a.bash, audit,
                                               root=a.root_win or a.root)
-        out = _vault_note(a.project) + out
+        out = _update_note(a.project) + _vault_note(a.project) + out
         _session_snapshot(a.project, "" if p["empty"] else p["source"], audit)
         out = session.with_charter(_disk_note(a.project) + out, a.project, p["session_id"])
         _telemetry(a, Verdict(status=status, code=code))

@@ -611,7 +611,15 @@ A: Only for the optional headless render-verification loop. The core NIF authori
 A: The safety hooks run on Python 3 and refuse everything when they cannot start it (that is deliberate: a guard that cannot run must not allow). Install Python 3 (for you to run: `winget install --id Python.Python.3.12 --exact --version 3.12.10 --no-upgrade`: inside the tested 3.10-3.13 range and the Python the optional tools were verified on; winget checks the installer's hash), then run `bash setup.sh` again so it records the interpreter's path in the hooks. `jq` is no longer needed by the hooks; it is optional and only prettifies `tools/devbench-cli.sh` and `tools/nexus.sh` output.
 
 **Q: How do I update the toolkit?**
-A: (1) Unpack the new zip into a separate folder. The zip holds one versioned folder, `skyrim-ai-assistant-toolkit-<version>/`: that inner folder is `<new folder>` below, the one with `setup.sh` and `tools/` directly inside it. (2) From your Skyrim folder, run `bash "<new folder>/tools/pre-update-snapshot.sh" .` to keep a copy of what the update replaces. (3) Copy the new folder's contents over your Skyrim folder; shipped files are replaced. (4) Run `bash setup.sh --agent auto` (or `claude`, `codex`, `all`); on a 3.x install it runs `tools/migrate-3x.py`, which carries your own edits to CLAUDE.md, the hook settings and KNOWLEDGEBASE.md forward and deletes nothing. (5) Complete the hook review (Codex: `/hooks`) and check `bash tools/hook-canary.sh` after real tool calls. If you wrote your own pre-tool hook handlers or a personal save policy, use the reviewed upgrade in [docs/upgrading-native-hooks.md](docs/upgrading-native-hooks.md) instead of step 3.
+A: Ask your agent: say "update the toolkit". Updates come from the toolkit's GitHub releases (Nexus is where you
+found it and downloaded it the first time). Each session start says once when a newer release is out; the agent
+then downloads it, refuses it unless it matches the SHA-256 GitHub publishes for it, shows you what changes (your
+own edited files first), and installs nothing until you say yes. Every applied update can be undone with
+`python tools/agent-harness.py upgrade-rollback <id> --installed-root . --quiescent`. The check asks GitHub at most
+once a day, in the background; turn it off with `{"v": 1, "check": false}` in
+`.modding-agent-harness/updates.json`. Skill: `toolkit-update`.
+
+By hand instead: (1) Unpack the new zip into a separate folder. The zip holds one versioned folder, `skyrim-ai-assistant-toolkit-<version>/`: that inner folder is `<new folder>` below, the one with `setup.sh` and `tools/` directly inside it. (2) From your Skyrim folder, run `bash "<new folder>/tools/pre-update-snapshot.sh" .` to keep a copy of what the update replaces. (3) Copy the new folder's contents over your Skyrim folder; shipped files are replaced. (4) Run `bash setup.sh --agent auto` (or `claude`, `codex`, `all`); on a 3.x install it runs `tools/migrate-3x.py`, which carries your own edits to CLAUDE.md, the hook settings and KNOWLEDGEBASE.md forward and deletes nothing. (5) Complete the hook review (Codex: `/hooks`) and check `bash tools/hook-canary.sh` after real tool calls. If you wrote your own pre-tool hook handlers or a personal save policy, use the reviewed upgrade in [docs/upgrading-native-hooks.md](docs/upgrading-native-hooks.md) instead of step 3.
 
 **Extracting directly over an installation replaces shipped files, including customized instructions and hook settings.** Step 2's snapshot and setup's migration keep a copy of each; the reviewed upgrader instead preserves collisions for explicit choices. Your own notes belong in **`KNOWLEDGEBASE.local.md`**, which the toolkit never ships and the release build refuses to contain; the agent reads both knowledge files and writes only to the local one. Its `## My preferences` section holds your standing instructions. Existing session hooks and the OpenCode system transform reinject that section through the same bounded parser. Local notes, path configuration and permanent recovery stores remain separate from shipped defaults.
 
@@ -655,7 +663,7 @@ generated file. `--check` also enforces the **instruction budget**: the installe
 (header + `agent/instructions/core.md` + an addendum, plus room for `setup.sh`'s path expansion) must
 stay at or under 32,768 bytes, because Codex silently truncates past that. Check it with
 `python scripts/gen_agent_trees.py --budget`; when over, move bulk into a skill or `docs/`. The core
-and the `devbench`, `mod-release-review`, `mod-update-check`, `skyrim-whats-here`, `toolkit-setup`, `triage-and-conflicts` and `xelib` skills must also stay **agent-neutral**
+and the `devbench`, `mod-release-review`, `mod-update-check`, `skyrim-whats-here`, `toolkit-setup`, `toolkit-update`, `triage-and-conflicts` and `xelib` skills must also stay **agent-neutral**
 (no Claude-only tool names, variables, slash commands or config paths; Claude specifics go in
 `agent/instructions/claude.md`), enforced by `tests/test_instruction_neutrality.py`.
 

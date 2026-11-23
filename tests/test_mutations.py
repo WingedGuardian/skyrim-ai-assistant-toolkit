@@ -9042,6 +9042,40 @@ _WH += [
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in _WH]
 
 
+# Self-update from GitHub (toolkit 4.3): one twin per refusal and per session-start clause.
+_SU = [
+    ('tools/modding_harness/release.py', '        if sha != asset["sha256"]:', '        if False:',
+     'tests/test_update_check.py::test_a_refused_fetch_says_why_and_fails', 'su-digest-compared'),
+    ('tools/modding_harness/release.py', '    if not asset["sha256"]:', '    if False:',
+     'tests/test_update_check.py::test_no_published_digest_refuses', 'su-no-digest-refused'),
+    ('tools/modding_harness/release.py', '    if info.get("commit") != commit:', '    if False:',
+     'tests/test_update_check.py::test_build_info_naming_another_commit_refuses', 'su-build-info-commit'),
+    ('tools/modding_harness/release.py', '    if len(roots) != 1:', '    if False:',
+     'tests/test_update_check.py::test_a_zip_with_two_folders_refuses', 'su-one-root-folder'),
+    ('tools/modding_harness/release.py', '    if not asset["url"].startswith(', '    if False and not asset["url"].startswith(',
+     'tests/test_update_check.py::test_a_download_from_outside_the_repository_refuses', 'su-asset-url-is-the-repository'),
+    ('tools/modding_harness/release.py', '    if data.get("draft") or data.get("prerelease"):', '    if False:',
+     'tests/test_update_check.py::test_a_draft_or_prerelease_is_never_offered', 'su-no-draft-or-prerelease'),
+    ('tools/modding_harness/release.py', '0 <= now - state["checked_at"] < INTERVAL:', 'False:',
+     'tests/test_update_check.py::test_github_is_asked_at_most_once_a_day', 'su-once-a-day'),
+    ('tools/modding_harness/release.py', ' or state.get("notified_for") == found:', ':',
+     'tests/test_update_check.py::test_the_note_is_shown_once_per_version_from_the_cache', 'su-note-once-per-version'),
+    ('tools/skyguard/update_check.py', '    if env.get("PYTEST_CURRENT_TEST") or env.get("HARNESS_FIXTURE_ROOT"):', '    if False:',
+     'tests/test_update_check.py::test_the_session_note_never_runs_or_spawns_under_a_test', 'su-never-under-a-test'),
+    ('tools/skyguard/update_check.py', '    if not (own and tool.is_file()) or _off(env):', '    if _off(env):',
+     'tests/test_update_check.py::test_the_session_note_is_only_for_the_installed_toolkits_own_folder', 'su-own-folder-only'),
+    ('tools/skyguard/update_check.py', 'return (env.get("SKYGUARD_UPDATE_CHECK", "").strip().lower() == "off"', 'return (False',
+     'tests/test_update_check.py::test_turned_off_the_session_neither_notes_nor_checks', 'su-switch-off'),
+    ('tools/skyguard/update_check.py', '            "mod_manager": manager, "game_root": game_root}', '            "mod_manager": {"kind": "stock"}, "game_root": game_root}',
+     'tests/test_update_check.py::test_an_mo2_render_config_names_the_profile_the_settings_live_in', 'su-render-mo2'),
+    ('tools/agent-harness.py', '"installed_changed": False}, 2', '"installed_changed": False}, 0',
+     'tests/test_update_check.py::test_a_refused_fetch_says_why_and_fails', 'su-refused-fetch-fails'),
+    ('tools/modding_harness/installation.py', '".modding-agent-harness/updates.json",\n', '',
+     'tests/test_update_check.py::test_the_update_setting_survives_every_upgrade', 'su-setting-is-local'),
+]
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in _SU]
+
+
 _WINDOWS_ONLY_TWINS = {
     "wh42-timeout-kills-tree": "taskkill is the Windows tree kill; POSIX kills the process group",
     "deadline-kill-by-windows-pid": "taskkill by /proc/<pid>/winpid runs only under MSYS/Cygwin; POSIX takes kill -KILL",

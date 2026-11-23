@@ -1613,6 +1613,9 @@ DELIVERY_EXEMPT = [
      "the hook wrappers' search order for an interpreter already installed, not an install"),
     ("scripts/build-nexus-pack.sh", "gh-release", r'gh release download "\$TAG"', _OWN),
     ("tools/verify-release.sh", "gh-release", r"gh release download", _OWN),
+    ("tools/modding_harness/release.py", "follows-latest", r"[Dd]ownload, verify and unpack the latest release aside",
+     "the toolkit's own update from its own GitHub release, only after the user's yes: refused unless the zip matches "
+     "GitHub's published SHA-256 and its BUILD-INFO names the tag's commit; applied by the reviewed upgrader"),
     ("tools/skyguard/shellparse.py", "pipe-to-shell", r"An installer piped to sh \(`curl \.\.\. \| sh`\)",
      "skyguard's own rule documentation, describing what that rule does not treat as decoded text"),
 ]
