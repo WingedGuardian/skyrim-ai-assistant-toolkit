@@ -75,7 +75,7 @@ printf 'pack home: %s\n' "$DEST"
 if [ ! -f "$DEST/$ZIP_NAME" ]; then
     printf 'downloading %s from release %s...\n' "$ZIP_NAME" "$TAG"
     gh release download "$TAG" --repo WingedGuardian/skyrim-ai-assistant-toolkit \
-        --pattern '*.zip' --dir "$DEST" --clobber \
+        --pattern "$ZIP_NAME" --dir "$DEST" --clobber \
         || die "gh release download failed for $TAG (is the release published?)"
 fi
 [ -f "$DEST/$ZIP_NAME" ] || die "expected asset $ZIP_NAME not present after download -- \
