@@ -37,6 +37,8 @@ __pycache__/
 # "extract the new zip over your install", so any file the toolkit ships is replaced.
 # A file that is both shipped by us and appended to by you loses your work on update.
 KNOWLEDGEBASE.local.md
+# A user's private per-project rules for Claude Code (never shipped; every upgrade keeps it).
+CLAUDE.local.md
 
 # The pose-emulating null driver is FETCHED on the user's machine (pinned, hash-verified) and never shipped:
 # delivery decision and licence: tools/vr-emu-driver/README.md. work/ is a pre-4.0 build cache, still ignored.

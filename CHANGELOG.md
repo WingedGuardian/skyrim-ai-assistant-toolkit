@@ -8,8 +8,9 @@
   BUILD-INFO names the release's commit, shows you every file you changed before anything is replaced, and applies
   it through the reviewed upgrader, with a rollback record (`upgrade-rollback`). Then it re-runs setup and the hook
   canary. Skill `toolkit-update`; off with `{"v": 1, "check": false}` in `.modding-agent-harness/updates.json`.
-- Shared core re-pinned to the update-capable core, which also brings the agent launcher and per-toolkit private
-  notes names (`CLAUDE.local.md` is now protected in every upgrade).
+- Shared preservation core pinned to 165a1d4 (public core PR #13 on #12): the update commands, the agent launcher
+  and per-toolkit private notes names (`CLAUDE.local.md` is now protected in every upgrade). Re-pinned to the merged
+  public commit before release.
 - Fixed: the Nexus pack builder downloaded every zip on a release, and refused v4.2.0's pack because of
   `ToolkitProbe.zip`; it now downloads only the bundle.
 

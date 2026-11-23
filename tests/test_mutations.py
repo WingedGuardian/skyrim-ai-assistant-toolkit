@@ -12059,11 +12059,11 @@ MUTATIONS += [pytest.param("tools/skyguard/run.py", anchor, replacement, "tests/
      'test_an_ini_vault_down_alone_is_shown_and_left_to_the_running_watcher', 'ini-down-restarts'),
     ('    if ini_alive != alive:', '    if False:',
      'test_a_vault_with_a_problem_is_reported_and_not_restarted', 'ini-line-dropped'),
-    ('        out = _vault_note(a.project) + out\n        _session_snapshot(a.project, req.source',
-     '        _session_snapshot(a.project, req.source',
+    ('        out = _update_note(a.project) + _vault_note(a.project) + out\n        _session_snapshot(a.project, req.source',
+     '        out = _update_note(a.project) + out\n        _session_snapshot(a.project, req.source',
      'test_both_session_starts_show_the_vault_line[codex-session-start-payload1]', 'codex-not-wired'),
-    ('        out = _vault_note(a.project) + out\n        _session_snapshot(a.project, "" if p["empty"]',
-     '        _session_snapshot(a.project, "" if p["empty"]',
+    ('        out = _update_note(a.project) + _vault_note(a.project) + out\n        _session_snapshot(a.project, "" if p["empty"]',
+     '        out = _update_note(a.project) + out\n        _session_snapshot(a.project, "" if p["empty"]',
      'test_both_session_starts_show_the_vault_line[claude-session-kb-guard-payload0]', 'claude-not-wired'),
 ]]
 
