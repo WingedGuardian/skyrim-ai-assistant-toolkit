@@ -181,9 +181,8 @@ RULES = {
         "legacy": False,
         "prefixes": [],
         "template": (
-        'Blocked: this BodySlide batch build would write its meshes into {file}, over your mods\' files with no\n'
-        'record. Build into a scratch folder (BodySlide --targetdir "<folder>" --quiet), then install that folder as\n'
-        'a mod with your mod manager.'
+        'Blocked: this BodySlide batch build would write its meshes into {file}, over your mods\' files.' + '\n'
+        'Build into a scratch folder (--targetdir "<folder>" --quiet), then install that folder as a mod.'
     ),
     },
     'S-RELATIVE-UNKNOWN': {
@@ -514,9 +513,8 @@ RULES = {
         "legacy": False,
         "prefixes": [],
         "template": (
-        "Blocked: this Outfit Studio call would write into {file}, where the game or your mod manager loads files,\n"
-        'with no record of what it replaced. Save or export into a scratch folder (or BodySlide\'s own folder), then\n'
-        'install the result as a mod with your mod manager.'
+        "Blocked: this Outfit Studio call would write into {file}, where the game or your mod manager loads files.\n"
+        'Save or export into a scratch folder (or BodySlide\'s own folder), then install the result as a mod.'
     ),
     },
     'S-INERT-NOINPUT': {
