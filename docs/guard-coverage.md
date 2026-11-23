@@ -66,7 +66,7 @@ Matchers are compared with a full match against the tool name (measured below: `
 |---|---|
 | `Bash\|PowerShell\|Monitor` | protect-bash, snapshot-before-tool |
 | `Edit\|Write\|NotebookEdit` | protect-files, backup-before-edit |
-| `mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*\|mcp__.+__[Ii]nstall[-_.]?[Pp]lugin\|mcp__.+__[Ss]ort[-_.]?[Ll]oad[-_.]?[Oo]rder\|mcp__.+__[Cc]lean[-_.]?[Pp]lugins\|mcp__.+__[Ee]xecute[-_.]?[Cc]onsole[-_.]?[Cc]ommand\|mcp__.+__[Cc]all[-_.]?[Pp]apyrus[-_.]?[Ff]unction\|mcp__.*[Oo][Uu][Tt][Ff][Ii][Tt][-_. ]?[Ss][Tt][Uu][Dd][Ii][Oo].*\|mcp__.*[Bb][Oo][Dd][Yy][-_. ]?[Ss][Ll][Ii][Dd][Ee].*` | protect-mcp |
+| `mcp__.*[Dd][Ee][Vv][-_. ]?[Bb][Ee][Nn][Cc][Hh].*\|mcp__.+__[Ii]nstall[-_.]?[Pp]lugin\|mcp__.+__[Ss]ort[-_.]?[Ll]oad[-_.]?[Oo]rder\|mcp__.+__[Cc]lean[-_.]?[Pp]lugins\|mcp__.+__[Ee]xecute[-_.]?[Cc]onsole[-_.]?[Cc]ommand\|mcp__.+__[Cc]all[-_.]?[Pp]apyrus[-_.]?[Ff]unction\|mcp__.*[Oo][Uu][Tt][Ff][Ii][Tt][-_. ]*[Ss][Tt][Uu][Dd][Ii][Oo].*\|mcp__.*[Bb][Oo][Dd][Yy][-_. ]*[Ss][Ll][Ii][Dd][Ee].*` | protect-mcp |
 
 ## Routes
 

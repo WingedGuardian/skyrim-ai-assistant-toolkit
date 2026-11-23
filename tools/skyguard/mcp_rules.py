@@ -40,6 +40,7 @@ import json
 import os
 import posixpath
 import re
+import urllib.parse
 from typing import Optional, Tuple
 from urllib.parse import parse_qs, unquote, urlsplit, urlunsplit
 
@@ -232,21 +233,49 @@ def is_outfit_studio(name: str) -> bool:
     return "outfitstudio" in server or "bodyslide" in server
 
 
+# An absolute path anywhere in a string (an inline automation script, a JSON-encoded step list, `path=...`): a drive
+# path, a UNC or `//` path, or an MSYS `/c/` path, optionally as a file: URI, up to a quote, an angle bracket or a line.
+_ABS_IN_TEXT = re.compile(r"(?:file:/*)?(?:[A-Za-z]:/|//|/[A-Za-z]/)[^\"'<>\r\n|*?]*")
+# Where a RELATIVE path resolves: Outfit Studio takes it against BodySlide's own folder (its wiki), which a stock
+# install keeps inside Data. A `..` that stays inside that folder is fine; one that climbs out reaches Data or beyond.
+_BS_HOME = "/_install_/data/calientetools/bodyslide"
+
+
+def _absolute_candidates(text: str):
+    t = text.replace("\\", "/")
+    whole = t.strip().strip("\"'")
+    for c in ([whole] if re.match(r"(?:file:/*)?(?:[A-Za-z]:/|/)", whole) else []) + _ABS_IN_TEXT.findall(t):
+        c = urllib.parse.unquote(re.sub(r"^file:/*", "", c)) if c.lower().startswith("file:") else c
+        if re.match(r"^[A-Za-z]:/", c) is None and not c.startswith("/"):
+            c = "/" + c.lstrip("/")
+        yield c.rstrip(" .")
+
+
+def _relative_escapes(text: str) -> bool:
+    """A relative path (the whole string) whose `..` climbs out of BodySlide's own folder."""
+    t = text.replace("\\", "/").strip().strip("\"'")
+    if not t or re.match(r"(?:file:|[A-Za-z]:/|/)", t) or ".." not in t.split("/"):
+        return False
+    resolved = posixpath.normpath(posixpath.join(_BS_HOME, t))
+    return not (resolved == _BS_HOME or resolved.startswith(_BS_HOME + "/"))
+
+
 def mesh_write_target(tool: str, args, roots) -> str:
-    """The path argument an Outfit Studio write call would write into the protected area ("" for none)."""
+    """The path argument an Outfit Studio write call would write into the protected area ("" for none). A relative
+    `..` that leaves BodySlide's folder is refused even without roots; absolute paths need them to be classified."""
     from . import anchored
-    if roots is None or not any(w in tool_key(tool) for w in _MESH_WRITE_WORDS):
+    if not any(w in tool_key(tool) for w in _MESH_WRITE_WORDS):
         return ""
-    for s in _strings(args):
-        if len(s) > 4096 or "\n" in s:
+    for text in _strings(args):
+        text = text[:65536]                           # a scan budget, not a skip
+        if _relative_escapes(text):
+            return text
+        if roots is None:
             continue
-        t = s.replace("\\", "/")
-        if re.match(r"^(?:[A-Za-z]:/|/)", t):
-            resolved = paths.norm_abs(t)
+        for c in _absolute_candidates(text):
+            resolved = paths.norm_abs(c)
             if resolved and anchored.mesh_output_protected(resolved, roots):
-                return s
-        elif "/" in t and ".." in t.split("/"):
-            return s
+                return text if len(text) <= 300 else c
     return ""
 
 

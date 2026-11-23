@@ -307,8 +307,10 @@ def champollion(command: str, parsed, roots, cwd: str, env: Mapping[str, str]) -
 # settings' output path, else the game's Data folder (its wiki, Command-line arguments), so without `--targetdir` an
 # agent's build drops untracked meshes over the user's mods. Refused: no `--targetdir`, or one that RESOLVES into the
 # install's Data folder, the settings folder or MO2's folders, except BodySlide's own folder (CalienteTools/BodySlide,
-# where its projects normally live). Not judged: a target the parser cannot resolve (a variable), an unparsed command,
-# Outfit Studio's `--automation` (its paths are inside the XML script).
+# where its projects normally live). KNOWN LIMITS, not judged: a target the parser cannot resolve (a variable), an
+# unparsed command, a program held in a variable (`$B --groupbuild`), BodySlide started through MO2's own launcher
+# (`ModOrganizer.exe run ... -a "--groupbuild ..."`, which writes into MO2's overwrite), short flags with the value
+# attached (`-bOutfit`), and Outfit Studio's `--automation` (its paths are inside the XML script).
 BODYSLIDE_PROGRAMS = frozenset(("bodyslide", "bodyslide x64", "bodyslidex64", "bodyslide64"))
 _BS_BUILD = frozenset(("--groupbuild", "-gbuild", "/groupbuild", "/gbuild", "--build", "-b", "/build", "/b",
                        "--filter", "-f", "/filter", "/f"))
@@ -337,13 +339,14 @@ def bodyslide_build(command: str, parsed, roots, cwd: str, env: Mapping[str, str
             continue
         e = substituted(e)
         argv = list(e.argv)
-        flags = [a.lower().split("=", 1)[0] for a in argv]
+        flags = [re.split(r"[=:]", a.lower(), maxsplit=1)[0] for a in argv]
         if not any(f in _BS_BUILD for f in flags):
             continue
         target = None
         for i, f in enumerate(flags):
             if f in _BS_TARGET:
-                target = argv[i].split("=", 1)[1] if "=" in argv[i] else (argv[i + 1] if i + 1 < len(argv) else "")
+                attached = re.split(r"[=:]", argv[i], maxsplit=1)
+                target = attached[1] if len(attached) == 2 else (argv[i + 1] if i + 1 < len(argv) else "")
         if not target:
             return "the game's Data folder (no --targetdir)"
         resolved = targets.resolve_operand(e, target, cwd, env)

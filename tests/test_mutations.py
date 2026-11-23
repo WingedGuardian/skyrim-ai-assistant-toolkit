@@ -9092,18 +9092,28 @@ _BS = [
      'tests/test_bodyslide_guard.py::test_safe_bodyslide_commands_are_allowed', 'bs-only-batch-builds'),
     ('tools/skyguard/mcp_rules.py', '        hit = ("S-MCP-MESH-WRITE", {"file": where}) if where else None', '        hit = None',
      'tests/test_bodyslide_guard.py::test_an_outfit_studio_write_into_loaded_folders_is_refused', 'rule-S-MCP-MESH-WRITE-refused'),
-    ('tools/skyguard/mcp_rules.py', '        elif "/" in t and ".." in t.split("/"):', '        elif False:',
+    ('tools/skyguard/mcp_rules.py', '        if _relative_escapes(text):\n            return text\n', '',
      'tests/test_bodyslide_guard.py::test_an_outfit_studio_write_into_loaded_folders_is_refused', 'mesh-dotdot-refused'),
-    ('tools/skyguard/mcp_rules.py', '    if roots is None or not any(w in tool_key(tool) for w in _MESH_WRITE_WORDS):', '    if roots is None:',
+    ('tools/skyguard/mcp_rules.py', '    if not any(w in tool_key(tool) for w in _MESH_WRITE_WORDS):\n        return ""\n', '',
      'tests/test_bodyslide_guard.py::test_outfit_studio_reads_and_safe_writes_are_allowed', 'mesh-reads-not-judged'),
     ('tools/skyguard/mcp_rules.py', '    return is_devbench(name) or bool(named_tool(name)) or is_outfit_studio(name)', '    return is_devbench(name) or bool(named_tool(name))',
      'tests/test_bodyslide_guard.py::test_the_outfit_studio_server_is_judged_on_every_host', 'mesh-server-judged'),
-    ('tools/skyguard/health.py', '|mcp__.*[Oo][Uu][Tt][Ff][Ii][Tt][-_. ]?[Ss][Tt][Uu][Dd][Ii][Oo].*', '',
+    ('tools/skyguard/health.py', '|mcp__.*[Oo][Uu][Tt][Ff][Ii][Tt][-_. ]*[Ss][Tt][Uu][Dd][Ii][Oo].*', '',
      'tests/test_bodyslide_guard.py::test_the_outfit_studio_server_is_judged_on_every_host', 'mesh-claude-matcher'),
     ('agent/targets/opencode/plugins/skyguard.js', '["outfitstudio", "bodyslide"].some(', '[].some(',
      'tests/test_bodyslide_guard.py::test_the_outfit_studio_server_is_judged_on_every_host', 'mesh-opencode-mirror'),
 ]
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in _BS]
+_BS2 = [
+    ('tools/skyguard/mcp_rules.py', '        for c in _absolute_candidates(text):', '        for c in [text]:',
+     'tests/test_bodyslide_guard.py::test_an_outfit_studio_write_into_loaded_folders_is_refused', 'mesh-paths-inside-text'),
+    ('tools/skyguard/mcp_rules.py', "        c = urllib.parse.unquote(re.sub(r\"^file:/*\", \"\", c)) if c.lower().startswith(\"file:\") else c", '        pass',
+     'tests/test_bodyslide_guard.py::test_an_outfit_studio_write_into_loaded_folders_is_refused', 'mesh-file-uri'),
+    ('tools/skyguard/anchored.py', '        flags = [re.split(r"[=:]", a.lower(), maxsplit=1)[0] for a in argv]',
+     '        flags = [a.lower() for a in argv]',
+     'tests/test_bodyslide_guard.py::test_a_batch_build_into_data_is_refused', 'bs-attached-flag-values'),
+]
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in _BS2]
 
 
 _WINDOWS_ONLY_TWINS = {
