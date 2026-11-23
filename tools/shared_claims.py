@@ -28,6 +28,7 @@ A holder keeps its claim alive with `touch` (or a repeated `claim`); `check` onl
     python tools/shared_claims.py [--ledger FILE] check SLOT --owner NAME
     python tools/shared_claims.py [--ledger FILE] release SLOT --owner NAME
     python tools/shared_claims.py [--ledger FILE] release-stale SLOT --by NAME
+    python tools/shared_claims.py [--ledger FILE] queue | dequeue --owner NAME   (launch queue; see take_turn)
 
 Which ledger: --ledger, else $SHARED_CLAIMS_LEDGER, else the `ledger = PATH` line of the machine-local
 <toolkit>/.claude/shared-claims.conf (a relative PATH is taken from the toolkit folder), else
@@ -481,6 +482,136 @@ def release_stale(slot, by, path=None, now=None, alive=process_alive, games=runn
     return dict(record, slot=slot, released=True)
 
 
+# --------------------------------------------------------------------------- launch queue (2026-11-23)
+#
+# A FIFO of launch tickets in the same ledger, under the same lock: `ledger["launch_queue"] = [ticket, ...]`.
+# A ticket is bound to the waiting process (pid + start time); a ticket whose process is gone is dropped by the next
+# writer, so a dead session can never block the queue. `take_turn` claims both slots for the head ticket's owner, bound
+# to that process, only when both slots are free (or already its own) and no game/VR process is running; the claim
+# therefore ends by itself (quiet rule) if the process dies mid-run. Consent is recorded on the ticket (approved_at,
+# desktop), never inferred: the queue decides WHEN, the user decides WHETHER.
+
+QUEUE = "launch_queue"
+
+
+def _queue(ledger: Ledger, alive=process_alive) -> list:
+    """The queue with dead or malformed tickets dropped. A ticket whose life cannot be read is kept (never 'dead')."""
+    raw = ledger.value.get(QUEUE) or []
+    if type(raw) is not list:
+        raise ValueError("the ledger's {} is not a list".format(QUEUE))
+    kept = []
+    for ticket in raw:
+        if not isinstance(ticket, dict) or not ticket.get("owner") or ticket.get("pid") is None:
+            continue
+        try:
+            if not alive(int(ticket["pid"]), str(ticket.get("pid_start") or "")):
+                continue
+        except (Unknown, ValueError, TypeError):
+            pass
+        kept.append(ticket)
+    return kept
+
+
+def _save_queue(ledger: Ledger, tickets: list) -> None:
+    if tickets:
+        ledger.value[QUEUE] = tickets
+    else:
+        ledger.value.pop(QUEUE, None)
+
+
+def enqueue(owner, reason, pid, desktop, approved_at=None, session=None, path=None, now=None,
+            alive=process_alive) -> dict:
+    """Add a ticket for OWNER bound to process PID (re-entrant: an owner's existing live ticket is returned)."""
+    owner = _owner_name(owner)
+    ledger_file = ledger_path(path)
+    now = now or now_utc()
+    start = process_start(pid)
+    if start is None:
+        raise Refused("the waiting process {} is not running".format(pid))
+    with _Lock(lock_path(ledger_file)):
+        ledger = Ledger(ledger_file)
+        tickets = _queue(ledger, alive)
+        for position, ticket in enumerate(tickets):
+            if ticket["owner"] == owner:
+                _save_queue(ledger, tickets)
+                ledger.save(now)
+                return dict(ticket, position=position + 1, of=len(tickets))
+        ticket = {"ticket": "%s-%d" % (now.strftime("%Y%m%dT%H%M%S"), pid), "owner": owner, "session": session,
+                  "reason": reason, "pid": pid, "pid_start": start, "desktop": desktop,
+                  "approved_at": approved_at, "enqueued_at": stamp(now)}
+        tickets.append(ticket)
+        _save_queue(ledger, tickets)
+        ledger.save(now)
+        _log(ledger_file, {"at": stamp(now), "event": "enqueue", **ticket})
+    return dict(ticket, position=len(tickets), of=len(tickets))
+
+
+def dequeue(owner, path=None, now=None, alive=process_alive) -> dict:
+    """Remove OWNER's ticket (a no-op when it has none)."""
+    ledger_file = ledger_path(path)
+    now = now or now_utc()
+    with _Lock(lock_path(ledger_file)):
+        ledger = Ledger(ledger_file)
+        tickets = _queue(ledger, alive)
+        left = [t for t in tickets if t["owner"] != owner]
+        _save_queue(ledger, left)
+        ledger.save(now)
+        if len(left) != len(tickets):
+            _log(ledger_file, {"at": stamp(now), "event": "dequeue", "owner": owner})
+    return {"owner": owner, "removed": len(tickets) - len(left)}
+
+
+def queue_status(path=None, alive=process_alive) -> list:
+    ledger = Ledger(ledger_path(path))
+    return [dict(t, position=i + 1) for i, t in enumerate(_queue(ledger, alive))]
+
+
+def take_turn(owner, path=None, now=None, alive=process_alive, games=None) -> dict:
+    """If OWNER's ticket is at the head and the install is free, claim both slots for it and drop the ticket.
+    Returns {"turn": True, ...} or {"turn": False, "position": N, "waiting_for": why}."""
+    ledger_file = ledger_path(path)
+    now = now or now_utc()
+    games = games or running_games        # looked up at call time (tests and callers may swap it)
+    try:                                  # the slow process list is read before the lock, which others wait on
+        running = games()
+    except Unknown as error:
+        return {"turn": False, "waiting_for": "the process list cannot be read: {}".format(error)}
+    with _Lock(lock_path(ledger_file)):
+        ledger = Ledger(ledger_file)
+        tickets = _queue(ledger, alive)
+        mine = [i for i, t in enumerate(tickets) if t["owner"] == owner]
+        if not mine:
+            _save_queue(ledger, tickets)
+            ledger.save(now)
+            raise Refused("{} has no live ticket in the launch queue".format(owner))
+        position = mine[0]
+        why = None
+        if position:
+            why = "ticket {} ({}) is ahead".format(tickets[0]["ticket"], tickets[0]["owner"])
+        else:
+            held = [s for s in SLOTS if ledger.value.get(s) not in (None, owner)]
+            if held:
+                why = "slot held: " + "; ".join("%s = %r" % (s, ledger.value.get(s)) for s in held)
+            elif running:
+                why = "game or VR running: " + ", ".join(running)
+        if why:
+            _save_queue(ledger, tickets)
+            ledger.save(now)
+            return {"turn": False, "position": position + 1, "of": len(tickets), "waiting_for": why}
+        ticket = tickets.pop(0)
+        for slot in SLOTS:
+            ledger.value[slot] = owner
+            ledger.table(DETAILS)[key(slot)] = {
+                "owner": owner, "kind": "process", "pid": ticket["pid"], "pid_start": ticket["pid_start"],
+                "session": ticket.get("session"), "reason": "queued launch: " + str(ticket.get("reason")),
+                "claimed_at": stamp(now), "last_activity": stamp(now)}
+            ledger.table(RELEASES).pop(key(slot), None)
+        _save_queue(ledger, tickets)
+        ledger.save(now)
+        _log(ledger_file, {"at": stamp(now), "event": "turn", **ticket})
+    return dict(ticket, turn=True)
+
+
 # --------------------------------------------------------------------------- CLI
 
 def main(argv=None) -> int:
@@ -505,10 +636,20 @@ def main(argv=None) -> int:
     p = sub.add_parser("release-stale")
     p.add_argument("slot", choices=SLOTS)
     p.add_argument("--by", required=True)
+    sub.add_parser("queue", help="list the launch queue (dead tickets are not shown)")
+    p = sub.add_parser("dequeue")
+    p.add_argument("--owner", required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == "status":
             result = status(args.ledger)
+            tickets = queue_status(args.ledger)
+            if tickets:
+                result = result + [{"launch_queue": tickets}]
+        elif args.command == "queue":
+            result = queue_status(args.ledger)
+        elif args.command == "dequeue":
+            result = dequeue(args.owner, args.ledger)
         elif args.command == "claim":
             result = claim(args.slot, args.owner, args.reason, pid=args.pid, session=args.session, path=args.ledger)
         elif args.command == "touch":

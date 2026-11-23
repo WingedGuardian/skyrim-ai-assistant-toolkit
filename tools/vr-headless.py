@@ -21,7 +21,9 @@ activate themselves; agree that with the user. A wrapper that starts `run` from 
 fully detached (stdin/stdout/stderr closed or redirected to a file), or the caller hangs until the game exits.
 
 Shared claims (tools/shared_claims.py): `run` and `launch` refuse while a shared slot in the claims ledger is held by
-anyone but `--owner NAME` (no `--owner`: any held slot refuses). A configured ledger that is missing or unreadable
+anyone but `--owner NAME` (no `--owner`: any held slot refuses). `run ... --owner NAME --queue` waits in the shared launch
+queue (tools/shared_claims.py) for its turn instead of refusing; `--hold` stops at the turn (exit 10) so the agent
+can reconfirm the launch with the user first. DevBench callers: tools/devbench_own.py refuses another session's game. A configured ledger that is missing or unreadable
 refuses too; with none configured the launch goes ahead and says it is not coordinated. `run` then holds the
 live-test slot for its own process (as NAME, default `vr-headless`) until restoration has finished, unless NAME
 already holds it. It records activity at launch and again when the game exits, so the quiet period that lets another
@@ -1024,6 +1026,48 @@ def touch_claim(owner) -> None:
         print("note: claim activity not recorded: {}".format(e), file=sys.stderr)
 
 
+def wait_for_turn(owner, desktop, reason, approved_at, timeout_min, poll=10.0, sleep=time.sleep, clock=time.monotonic):
+    """Queue this process (shared_claims launch queue) and wait until it is first and the install is free; the turn
+    claims both slots for `owner`, bound to this process. Returns the turn record; raises Refused on timeout (the
+    ticket is removed). The queue decides WHEN a launch runs, never WHETHER: consent stays per launch."""
+    import shared_claims
+    ticket = shared_claims.enqueue(owner, reason, os.getpid(), desktop, approved_at=approved_at)
+    print(json.dumps({"queued": ticket}), flush=True)
+    deadline = clock() + timeout_min * 60.0
+    last = None
+    try:
+        while True:
+            state = shared_claims.take_turn(owner)
+            if state.get("turn"):
+                print(json.dumps({"turn": state}), flush=True)
+                return state
+            if state.get("waiting_for") != last:
+                last = state.get("waiting_for")
+                print(json.dumps({"waiting": state}), flush=True)
+            if clock() >= deadline:
+                raise Refused("queue wait timed out after {} min ({}); ticket removed".format(timeout_min, last))
+            sleep(poll)
+    except BaseException:
+        shared_claims.dequeue(owner)
+        raise
+
+
+def release_queued_claims(owner) -> None:
+    """After a queued run: release the slots the turn claimed for `owner` (only those; never anyone else's)."""
+    if not owner:
+        return
+    import shared_claims
+    try:
+        ledger = shared_claims.Ledger(shared_claims.ledger_path())
+        for slot in shared_claims.SLOTS:
+            details = ledger.details(slot) or {}
+            if ledger.value.get(slot) == owner and str(details.get("reason", "")).startswith("queued launch"):
+                shared_claims.release(slot, owner)
+    except (shared_claims.Refused, OSError, ValueError) as e:
+        print("WARNING: queued claims not released ({}); release them with tools/shared_claims.py".format(e),
+              file=sys.stderr)
+
+
 def cmd_launch(desktop) -> dict:
     """Start SteamVR and the game for a prepared (`on`) session and record what this run owns."""
     from vr_background_desktop import parse_start
@@ -1393,7 +1437,7 @@ def cmd_status() -> int:
 
 
 USAGE = ("usage: vr-headless {status | run --desktop background|current [--park] [--emu] [--force] [--owner NAME] | "
-         "on [--force] [--park] | launch --desktop background|current [--owner NAME] | stop | off | emu on|off}")
+         "[--queue [--hold] [--approved-at T] [--reason R] [--queue-timeout MIN]] | on [--force] [--park] | launch --desktop background|current [--owner NAME] | stop | off | emu on|off}")
 
 
 def main(argv) -> int:
@@ -1416,6 +1460,22 @@ def main(argv) -> int:
                 raise Refused("--owner needs a name")
             CLAIM_OWNER = args[i + 1]
             args = args[:i] + args[i + 2:]
+        queue = None
+        if args[0] == "run" and ("--queue" in args or "--hold" in args):
+            queue = {"hold": "--hold" in args, "approved_at": None, "reason": "headless run", "timeout": 240}
+            if "--queue" not in args:
+                raise Refused("--hold needs --queue")
+            args = [a for a in args if a not in ("--queue", "--hold")]
+            for flag, key, cast in (("--approved-at", "approved_at", str), ("--reason", "reason", str),
+                                    ("--queue-timeout", "timeout", int)):
+                if flag in args:
+                    i = args.index(flag)
+                    if i + 1 >= len(args) or args[i + 1].startswith("--"):
+                        raise Refused("{} needs a value".format(flag))
+                    queue[key] = cast(args[i + 1])
+                    args = args[:i] + args[i + 2:]
+            if not CLAIM_OWNER:
+                raise Refused("--queue needs --owner NAME")
         if args[0] in ("run", "launch") and "--desktop" in args:
             i = args.index("--desktop")
             desktop = args[i + 1] if i + 1 < len(args) else None
@@ -1425,7 +1485,16 @@ def main(argv) -> int:
                 if args[0] == "launch":
                     print(json.dumps(cmd_launch(desktop), indent=2))
                     return 0
-                return cmd_run(desktop, park="--park" in flags, emu="--emu" in flags, force="--force" in flags)
+                if queue:
+                    wait_for_turn(CLAIM_OWNER, desktop, queue["reason"], queue["approved_at"], queue["timeout"])
+                    if queue["hold"]:
+                        print(json.dumps({"held": True, "next": "reconfirm with the user, then run --owner {} "
+                                          "(same owner)".format(CLAIM_OWNER)}))
+                        return 10
+                try:
+                    return cmd_run(desktop, park="--park" in flags, emu="--emu" in flags, force="--force" in flags)
+                finally:                  # also covers the reconfirmed run after `--queue --hold`
+                    release_queued_claims(CLAIM_OWNER)
     except Refused as e:
         print("ERROR: {}".format(e), file=sys.stderr)
         return 2
