@@ -9066,6 +9066,8 @@ _SU = [
      'tests/test_update_check.py::test_the_session_note_is_only_for_the_installed_toolkits_own_folder', 'su-own-folder-only'),
     ('tools/skyguard/update_check.py', 'return (env.get("SKYGUARD_UPDATE_CHECK", "").strip().lower() == "off"', 'return (False',
      'tests/test_update_check.py::test_turned_off_the_session_neither_notes_nor_checks', 'su-switch-off'),
+    ('tools/skyguard/update_check.py', '            or env.get("SKYGUARD_HOUSEKEEP_SWEEP", "").strip().lower() == "off"', '            or False',
+     'tests/test_update_check.py::test_turned_off_the_session_neither_notes_nor_checks[env2]', 'su-helpers-switch-off'),
     ('tools/skyguard/update_check.py', '            "mod_manager": manager, "game_root": game_root}', '            "mod_manager": {"kind": "stock"}, "game_root": game_root}',
      'tests/test_update_check.py::test_an_mo2_render_config_names_the_profile_the_settings_live_in', 'su-render-mo2'),
     ('tools/agent-harness.py', '"installed_changed": False}, 2', '"installed_changed": False}, 0',

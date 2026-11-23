@@ -114,7 +114,9 @@ def test_a_checkout_with_neither_has_no_installed_version(tmp_path):
 # --- the session note ------------------------------------------------------------------------------------------------
 
 def test_the_session_note_never_runs_or_spawns_under_a_test(tmp_path, monkeypatch):
-    """Even the toolkit's own folder: a test must never start a background GitHub check."""
+    """Even the toolkit's own folder: a test must never start a background GitHub check. The conftest's
+    SKYGUARD_HOUSEKEEP_SWEEP=off is cleared so this clause alone decides (one twin per clause)."""
+    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)
     spawned = []
     monkeypatch.setattr("subprocess.Popen", lambda *a, **k: spawned.append(a))
     assert update_check.session_note(REPO) == ""
@@ -124,6 +126,7 @@ def test_the_session_note_never_runs_or_spawns_under_a_test(tmp_path, monkeypatc
 def test_the_session_note_is_only_for_the_installed_toolkits_own_folder(tmp_path, monkeypatch):
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     monkeypatch.delenv("HARNESS_FIXTURE_ROOT", raising=False)
+    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)
     spawned = []
     monkeypatch.setattr("subprocess.Popen", lambda *a, **k: spawned.append(a))
     assert update_check.session_note(install(tmp_path)) == ""      # a folder that is not this toolkit
@@ -135,6 +138,7 @@ def test_the_session_note_shows_the_cached_release_and_starts_a_detached_hidden_
     monkeypatch.delenv("HARNESS_FIXTURE_ROOT", raising=False)
     monkeypatch.delenv("SKYGUARD_UPDATE_CHECK", raising=False)
     monkeypatch.delenv("MODDING_HARNESS_UPDATE_CHECK", raising=False)
+    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)   # conftest sets it for every test
     monkeypatch.setattr(release, "note", lambda root, profile: "The Skyrim toolkit 4.3.0 is out (you have 4.2.0)")
     spawned = []
     monkeypatch.setattr("subprocess.Popen", lambda args, **k: spawned.append((args, k)))
@@ -148,10 +152,12 @@ def test_the_session_note_shows_the_cached_release_and_starts_a_detached_hidden_
     assert kwargs["stdout"] is kwargs["stderr"] is kwargs["stdin"]
 
 
-@pytest.mark.parametrize("env", [{"SKYGUARD_UPDATE_CHECK": "off"}, {"MODDING_HARNESS_UPDATE_CHECK": "off"}])
+@pytest.mark.parametrize("env", [{"SKYGUARD_UPDATE_CHECK": "off"}, {"MODDING_HARNESS_UPDATE_CHECK": "off"},
+                                 {"SKYGUARD_HOUSEKEEP_SWEEP": "off"}])
 def test_turned_off_the_session_neither_notes_nor_checks(monkeypatch, env):
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     monkeypatch.delenv("HARNESS_FIXTURE_ROOT", raising=False)
+    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)
     for k, v in env.items():
         monkeypatch.setenv(k, v)
     spawned = []

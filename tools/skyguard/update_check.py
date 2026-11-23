@@ -79,7 +79,10 @@ def write_render_config(root, folder):
 
 
 def _off(env):
+    # SKYGUARD_HOUSEKEEP_SWEEP=off: the switch test helpers that clean the environment set for every background
+    # helper (they lose pytest's markers); without it a hook run on a test install could reach GitHub.
     return (env.get("SKYGUARD_UPDATE_CHECK", "").strip().lower() == "off"
+            or env.get("SKYGUARD_HOUSEKEEP_SWEEP", "").strip().lower() == "off"
             or env.get("MODDING_HARNESS_UPDATE_CHECK", "").strip().lower() in ("off", "0", "false", "no"))
 
 
