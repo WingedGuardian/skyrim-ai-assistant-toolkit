@@ -34,7 +34,6 @@ from . import upgrade
 API = "https://api.github.com"
 STATE = ".modding-agent-harness/update-check.json"
 SETTINGS = ".modding-agent-harness/updates.json"
-UPDATES = ".modding-agent-harness/updates"
 INTERVAL = 24 * 3600
 MAX_META = 2 * 1024 * 1024
 MAX_ZIP = 512 * 1024 * 1024
@@ -97,6 +96,28 @@ def enabled(root, environ=None):
     except (OSError, ValueError):
         return True                             # an unreadable setting is not an opt-out; say so in `update-check`
     return not (isinstance(data, dict) and data.get("check") is False)
+
+
+def updates_home(root, environ=None):
+    """Where one install's update downloads, unpacked candidates and review bundles go: OUTSIDE the install, because
+    the reviewed upgrader refuses a bundle or a source inside the root it upgrades. Per user, beside the save vault:
+    %LOCALAPPDATA%/modding-agent-harness/updates/<install id> (Linux: $XDG_DATA_HOME or ~/.local/share), the id a
+    hash of the install's resolved path so two installs never share a folder. MODDING_HARNESS_UPDATES_DIR overrides
+    the base (tests)."""
+    environ = os.environ if environ is None else environ
+    base = environ.get("MODDING_HARNESS_UPDATES_DIR")
+    if not base:
+        if os.name == "nt":
+            base = Path(environ.get("LOCALAPPDATA") or Path.home() / "AppData/Local") / "modding-agent-harness/updates"
+        else:
+            base = Path(environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "modding-agent-harness/updates"
+    key = str(Path(root).resolve())
+    key = key.casefold() if os.name == "nt" else key
+    home = Path(base) / hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+    installed, folder = Path(root).resolve(), home.resolve()
+    if folder == installed or installed in folder.parents:
+        raise ValueError("the update folder must be outside the install")
+    return home
 
 
 def http_get(url, limit=MAX_META, accept="application/vnd.github+json", stream_to=None):
@@ -261,7 +282,7 @@ def fetch(root, profile, http=http_get, environ=None):
     if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("could not resolve the commit release {} points at".format(found["tag"]))
 
-    work = root / UPDATES / found["version"]
+    work = updates_home(root, environ) / found["version"]
     work.mkdir(parents=True, exist_ok=True)
     zip_path = work / asset["name"]
     part = work / (asset["name"] + ".part")

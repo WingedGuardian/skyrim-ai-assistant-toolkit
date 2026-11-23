@@ -29,7 +29,8 @@ whether to update now. `status: unreachable` means GitHub could not be reached: 
 python tools/agent-harness.py update-fetch
 ```
 
-It downloads the release zip into `.modding-agent-harness/updates/<version>/` and **refuses** it unless the SHA-256
+It downloads the release zip into a per-user folder outside the toolkit folder (the JSON names it) and **refuses**
+it unless the SHA-256
 matches the digest GitHub publishes, every zip entry is safe under one folder, and the zip's `BUILD-INFO` names the
 release's version and the commit its tag points at. A refusal (`ok: false`) is final: report the `error` and stop; never
 work around it (no manual download, no copying over the install).

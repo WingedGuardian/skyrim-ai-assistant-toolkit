@@ -22,10 +22,12 @@ COMMIT = "c" * 40
 
 
 @pytest.fixture(autouse=True)
-def _no_network(monkeypatch):
+def _no_network(monkeypatch, tmp_path_factory):
     def refuse(*a, **k):
         raise AssertionError("an update test reached the real network")
     monkeypatch.setattr(urllib.request, "urlopen", refuse)
+    # update-fetch writes outside the install, per user: never the real %LOCALAPPDATA% from a test
+    monkeypatch.setenv("MODDING_HARNESS_UPDATES_DIR", str(tmp_path_factory.mktemp("updates")))
 
 
 def zip_of(version, commit=COMMIT, files=None):
