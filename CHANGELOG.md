@@ -1,6 +1,6 @@
 # Changelog
 
-## v4.3.0 — Unreleased (provisional)
+## v4.3.0 — 2026-11-24
 
 - **Updates come from GitHub, done by your agent.** On Claude Code and Codex each session start says once when a
   newer release is out (the check asks GitHub at most once a day, in the background, and is silent offline); on
@@ -9,9 +9,8 @@
   BUILD-INFO names the release's commit, shows you every file you changed before anything is replaced, and applies
   it through the reviewed upgrader, with a rollback record (`upgrade-rollback`). Then it re-runs setup and the hook
   canary. Skill `toolkit-update`; off with `{"v": 1, "check": false}` in `.modding-agent-harness/updates.json`.
-- Shared preservation core pinned to cd6a431 (public core PR #13 on #12): the update commands, the agent launcher
-  and per-toolkit private notes names (`CLAUDE.local.md` is now protected in every upgrade). Re-pinned to the merged
-  public commit before release.
+- Shared preservation core pinned to 9038e6c (public core master, PRs #12 and #13): the update commands, the agent
+  launcher and per-toolkit private notes names (`CLAUDE.local.md` is now protected in every upgrade).
 - **BodySlide and Outfit Studio writes are guarded.** A BodySlide batch build with no `--targetdir`, or one into Data,
   the settings folder or MO2's folders, is refused (S-BODYSLIDE-BUILD); build into a scratch folder and install it
   as a mod. On an Outfit Studio MCP server, a call that would write there, or to a relative path whose `..` leaves
