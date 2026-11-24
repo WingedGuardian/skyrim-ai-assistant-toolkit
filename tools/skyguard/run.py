@@ -154,11 +154,8 @@ def _disk_note(project) -> str:
         except Exception:
             pass
         try:
-            import subprocess
-            flags = 0x00000008 | 0x00000200 | 0x08000000 if os.name == "nt" else 0   # detached, new group, no window
-            subprocess.Popen([sys.executable, "-B", str(tool), "session", str(state)], cwd=str(project),
-                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             close_fds=True, creationflags=flags, start_new_session=os.name != "nt")
+            from skyguard import hidden                  # no console window, ever (hidden.py says why)
+            hidden.spawn_background([sys.executable, "-B", str(tool), "session", str(state)], project)
         except Exception:
             pass
     return note + "\n" if note else ""

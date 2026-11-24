@@ -90,6 +90,8 @@ CORE_REQUIRED = (
     "tools/papyrus-triage.py",
     "tools/save_vault.py",            # v4.1.0: the save vault, the only way back for a changed save
     "tools/skyguard/vault_watch.py",
+    "tools/skyguard/update_check.py",  # v4.3.0: the update check and its release profile
+    "tools/skyguard/hidden.py",        # v4.3.0: how every session-start helper starts (no console window)
     "tools/loot_advisor.py",          # v4.1.0: LOOT's read-only advice, through libloot
     "tools/libloot/libloot_loader.py",
     "tools/libloot/build.py",

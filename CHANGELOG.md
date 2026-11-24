@@ -17,6 +17,9 @@
   BodySlide's folder, is refused (S-MCP-MESH-WRITE) on Claude Code, Codex and OpenCode. Every tool is judged except
   one named as a read (load, open, get, render ...); paths given as inputs (a Load step, a `source` or `inputPath`
   value) and BodySlide's own folder are allowed. Its tool names are not yet checked against a real server. Skill `skyrim-nif` has the build command.
+- Fixed: the housekeep sweep and the save vault watcher that a session start launches could open a visible
+  console window when the hook's Python is the `py` launcher or a venv (Windows ignores "no window" for a detached
+  process's own children). Every session-start helper now starts hidden, the same way.
 - Fixed: the Nexus pack builder downloaded every zip on a release, and refused v4.2.0's pack because of
   `ToolkitProbe.zip`; it now downloads only the bundle.
 

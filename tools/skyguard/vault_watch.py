@@ -52,11 +52,10 @@ def running(root, now=None) -> bool:
 
 
 def start(project) -> None:
-    """Launch the watcher detached (a second watcher exits by itself: watch.lock)."""
-    flags = 0x00000008 | 0x00000200 | 0x08000000 if os.name == "nt" else 0       # detached, new group, no window
-    subprocess.Popen([sys.executable, "-B", str(TOOL), "--project", str(project), "watch"], cwd=str(project),
-                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                     close_fds=True, creationflags=flags, start_new_session=os.name != "nt")
+    """Launch the watcher in the background with no console window (hidden.py; a second watcher exits by itself:
+    watch.lock)."""
+    from skyguard import hidden
+    hidden.spawn_background([sys.executable, "-B", str(TOOL), "--project", str(project), "watch"], project)
 
 
 def ensure(project, env=None, now=None) -> str:

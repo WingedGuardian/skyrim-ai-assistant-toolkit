@@ -104,7 +104,7 @@ def off(env):
 
 
 def session_note(project) -> str:
-    """The cached "a newer release is out" line (once per version), and a fresh check launched DETACHED (it asks
+    """The cached "a newer release is out" line (once per version), and a fresh check launched in the background (it asks
     GitHub at most once a day by itself). Only for the installed toolkit's own entry, never under the test harness
     (the same markers as the housekeep sweep and the vault watcher, plus SKYGUARD_UPDATE_CHECK=off): a test must never
     reach GitHub. Never raises: an update check must not cost the session its banner."""
@@ -122,15 +122,8 @@ def session_note(project) -> str:
         return ""                               # a git checkout: nothing to compare, so never ask GitHub
     line = release.note(project, PROFILE)
     try:
-        import subprocess
-        # A new process group with a HIDDEN console (CREATE_NO_WINDOW), never DETACHED_PROCESS: Windows ignores
-        # CREATE_NO_WINDOW beside DETACHED_PROCESS, and a detached process's console children (a venv's python.exe
-        # redirector starts one) would each open a visible console window. Popen never waits, so neither does the
-        # session start.
-        flags = 0x00000200 | 0x08000000 if os.name == "nt" else 0
-        subprocess.Popen([sys.executable, "-B", str(tool), "update-check"], cwd=str(project),
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         close_fds=True, creationflags=flags, start_new_session=os.name != "nt")
+        from skyguard import hidden                      # no console window, ever (hidden.py); never waits
+        hidden.spawn_background([sys.executable, "-B", str(tool), "update-check"], project)
     except Exception:
         pass
     return line + "\n" if line else ""

@@ -180,3 +180,71 @@ def test_a_timed_out_helper_on_posix_has_its_process_group_killed_but_never_grou
     finally:
         monkeypatch.undo()
     assert sent == [(p, 9) for p in killed]
+
+
+# Skyrim 4.3: the session-start background helpers (housekeep sweep, save vault watcher, update check) start through
+# skyguard.hidden, which never asks for DETACHED_PROCESS (Windows ignores CREATE_NO_WINDOW beside it, so a `py` launcher
+# or venv redirector's real python.exe child opened a visible console).
+SESSION_HELPERS = ("tools/skyguard/run.py", "tools/skyguard/vault_watch.py", "tools/skyguard/update_check.py")
+
+
+def test_background_helpers_get_a_hidden_console_and_are_never_detached():
+    if os.name != "nt":
+        pytest.skip("creation flags are a Windows mechanism")
+    from skyguard import hidden
+    assert hidden.FLAGS & 0x08000000                      # CREATE_NO_WINDOW
+    assert hidden.FLAGS & 0x00000200                      # CREATE_NEW_PROCESS_GROUP
+    assert not hidden.FLAGS & 0x00000008                  # never DETACHED_PROCESS
+
+
+def test_spawn_background_passes_the_hidden_flags_and_no_handles(monkeypatch):
+    from skyguard import hidden
+    seen = []
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, **kw: seen.append((argv, kw)))
+    hidden.spawn_background(["x", "y"], REPO)
+    (argv, kw), = seen
+    assert argv == ["x", "y"] and kw["creationflags"] == hidden.FLAGS and kw["close_fds"] is True
+    assert kw["stdin"] is kw["stdout"] is kw["stderr"] is subprocess.DEVNULL
+
+
+def test_every_session_start_helper_starts_through_hidden():
+    import ast
+    for rel in SESSION_HELPERS:
+        tree = ast.parse((REPO / rel).read_text(encoding="utf-8"))
+        calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
+        assert not [n.lineno for n in calls if n.func.attr == "Popen"], rel + " starts a process itself"
+        assert [n for n in calls if n.func.attr == "spawn_background"], rel + " no longer starts its helper hidden"
+
+
+def test_no_shipped_tool_asks_for_detached_process():
+    """A code token, not a mention: comments and docstrings that explain the rule are fine."""
+    import io
+    import tokenize
+    bad = []
+    for path in sorted((REPO / "tools").rglob("*.py")):
+        if {".venv", "site-packages", "__pycache__"} & set(path.parts):
+            continue
+        try:
+            tokens = list(tokenize.generate_tokens(io.StringIO(path.read_text(encoding="utf-8")).readline))
+        except (UnicodeDecodeError, tokenize.TokenError, SyntaxError):
+            continue
+        for tok in tokens:
+            if (tok.type == tokenize.NAME and tok.string == "DETACHED_PROCESS") or                     (tok.type == tokenize.NUMBER and tok.string.lower() == "0x00000008"):
+                bad.append("{}:{}".format(path.relative_to(REPO).as_posix(), tok.start[0]))
+    assert bad == []
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows console contract')
+def test_a_background_helpers_own_console_child_has_no_window_either():
+    """The failure DETACHED_PROCESS caused: the helper's CHILD (the real python.exe a `py` launcher or venv redirector
+    starts, with no flags of its own) got a new, visible console. Under skyguard.hidden's flags it inherits the
+    hidden one. Positive case only: never launch the unhidden contrast (it would open a window)."""
+    from skyguard import hidden
+    grandchild = 'import ctypes; print(ctypes.windll.kernel32.GetConsoleWindow())'
+    helper = ('import subprocess, sys; r = subprocess.run([sys.executable, "-c", {!r}], capture_output=True, text=True); '
+              'print(r.stdout.strip())').format(grandchild)
+    probe = 'import ctypes, subprocess, sys; print(ctypes.windll.kernel32.GetConsoleWindow()); ' + helper
+    child = subprocess.run([sys.executable, '-c', probe], capture_output=True, text=True, timeout=60,
+                           creationflags=hidden.FLAGS)
+    assert child.returncode == 0, child.stderr
+    assert child.stdout.split() == ['0', '0']             # neither the helper nor its own child has a console window
