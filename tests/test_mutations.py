@@ -9080,7 +9080,7 @@ _SU = [
      'tests/test_update_check.py::test_the_settings_folder_name_is_the_one_setup_chose', 'su-folder-as-setup-chose'),
     ('tools/skyguard/update_check.py', '        flags = 0x00000200 | 0x08000000 if os.name == "nt" else 0',
      '        flags = 0x00000008 | 0x00000200 | 0x08000000 if os.name == "nt" else 0',
-     'tests/test_update_check.py::test_the_session_note_shows_the_cached_release_and_starts_a_detached_hidden_check',
+     'tests/test_update_check.py::test_the_background_check_has_a_hidden_console_and_is_never_detached',
      'su-never-detached-process'),
     ('tools/agent-harness.py', '"installed_changed": False}, 2', '"installed_changed": False}, 0',
      'tests/test_update_check.py::test_a_refused_fetch_says_why_and_fails', 'su-refused-fetch-fails'),

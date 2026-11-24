@@ -147,12 +147,25 @@ def test_the_session_note_shows_the_cached_release_and_starts_a_detached_hidden_
     assert line == "The Skyrim toolkit 4.3.0 is out (you have 4.2.0)\n"
     (args, kwargs), = spawned
     assert args[-1] == "update-check" and Path(args[-2]).name == "agent-harness.py"
-    if os.name == "nt":
-        assert kwargs["creationflags"] & 0x08000000           # CREATE_NO_WINDOW: never a console window
-        # never DETACHED_PROCESS: Windows ignores CREATE_NO_WINDOW beside it, and the child's own console children
-        # (a venv redirector's python.exe) would each open a visible window (release review 4.3)
-        assert not kwargs["creationflags"] & 0x00000008
     assert kwargs["stdout"] is kwargs["stderr"] is kwargs["stdin"]
+
+
+def test_the_background_check_has_a_hidden_console_and_is_never_detached(monkeypatch):
+    """Windows only (creation flags exist only there; the twin is excused where this skips)."""
+    if os.name != "nt":
+        pytest.skip("creation flags are a Windows mechanism")
+    for k in ("PYTEST_CURRENT_TEST", "HARNESS_FIXTURE_ROOT", "SKYGUARD_UPDATE_CHECK", "MODDING_HARNESS_UPDATE_CHECK",
+              "SKYGUARD_HOUSEKEEP_SWEEP"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(release, "note", lambda root, profile: "")
+    spawned = []
+    monkeypatch.setattr("subprocess.Popen", lambda args, **k: spawned.append(k))
+    update_check.session_note(REPO)
+    kwargs, = spawned
+    assert kwargs["creationflags"] & 0x08000000           # CREATE_NO_WINDOW: never a console window
+    # never DETACHED_PROCESS: Windows ignores CREATE_NO_WINDOW beside it, and the child's own console children
+    # (a venv redirector's python.exe) would each open a visible window (release review 4.3)
+    assert not kwargs["creationflags"] & 0x00000008
 
 
 @pytest.mark.parametrize("env", [{"SKYGUARD_UPDATE_CHECK": "off"}, {"MODDING_HARNESS_UPDATE_CHECK": "off"},
