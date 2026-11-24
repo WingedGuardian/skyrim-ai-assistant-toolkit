@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -148,7 +149,9 @@ def test_the_session_note_shows_the_cached_release_and_starts_a_detached_hidden_
     assert args[-1] == "update-check" and Path(args[-2]).name == "agent-harness.py"
     if os.name == "nt":
         assert kwargs["creationflags"] & 0x08000000           # CREATE_NO_WINDOW: never a console window
-        assert kwargs["creationflags"] & 0x00000008           # DETACHED_PROCESS: the session start never waits
+        # never DETACHED_PROCESS: Windows ignores CREATE_NO_WINDOW beside it, and the child's own console children
+        # (a venv redirector's python.exe) would each open a visible window (release review 4.3)
+        assert not kwargs["creationflags"] & 0x00000008
     assert kwargs["stdout"] is kwargs["stderr"] is kwargs["stdin"]
 
 
@@ -164,6 +167,70 @@ def test_turned_off_the_session_neither_notes_nor_checks(monkeypatch, env):
     monkeypatch.setattr("subprocess.Popen", lambda *a, **k: spawned.append(a))
     assert update_check.session_note(REPO) == ""
     assert spawned == []
+
+
+def test_a_git_checkout_never_asks_github(monkeypatch):
+    """No installed version (a git checkout without BUILD-INFO or a release line): nothing to compare, no check."""
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.delenv("HARNESS_FIXTURE_ROOT", raising=False)
+    monkeypatch.delenv("SKYGUARD_UPDATE_CHECK", raising=False)
+    monkeypatch.delenv("MODDING_HARNESS_UPDATE_CHECK", raising=False)
+    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)
+    monkeypatch.setattr(update_check, "installed_version", lambda root: None)
+    spawned = []
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: spawned.append(a))
+    assert update_check.session_note(REPO) == ""
+    assert spawned == []
+
+
+@pytest.mark.parametrize("env", [{"SKYGUARD_UPDATE_CHECK": "off"}, {"SKYGUARD_HOUSEKEEP_SWEEP": "off"}])
+def test_the_skyrim_switches_also_turn_off_update_check_itself(env, tmp_path):
+    root = install(tmp_path)
+    clean = {k: v for k, v in os.environ.items() if k not in ("SKYGUARD_UPDATE_CHECK", "SKYGUARD_HOUSEKEEP_SWEEP")}
+    r = subprocess.run([sys.executable, "-B", str(REPO / "tools/agent-harness.py"), "update-check", "--now",
+                        "--installed-root", str(root)], capture_output=True, text=True, timeout=60,
+                       env={**clean, **env, "MODDING_HARNESS_UPDATES_DIR": str(tmp_path / "updates"),
+                            # a child outside the no-network fixture: a dead proxy, so even a broken
+                            # switch can never reach GitHub from a test
+                            "HTTPS_PROXY": "http://127.0.0.1:9", "HTTP_PROXY": "http://127.0.0.1:9",
+                            "NO_PROXY": ""})
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert out["status"] == "off" and out["update_available"] is False
+
+
+def test_wsl_bash_is_never_chosen(monkeypatch, tmp_path):
+    fake = tmp_path / "Windows" / "System32" / "bash.exe"
+    fake.parent.mkdir(parents=True)
+    fake.write_bytes(b"")
+    monkeypatch.setattr(update_check, "GIT_BASH", str(tmp_path / "no Git here" / "bash.exe"))
+    monkeypatch.setattr(update_check.shutil, "which", lambda name: str(fake))
+    with pytest.raises(ValueError, match="Git Bash"):
+        update_check._bash()
+    git = tmp_path / "Git" / "bin" / "bash.exe"
+    git.parent.mkdir(parents=True)
+    git.write_bytes(b"")
+    monkeypatch.setattr(update_check.shutil, "which", lambda name: str(git))
+    assert update_check._bash() == git.as_posix()
+
+
+def test_the_settings_folder_name_is_the_one_setup_chose(monkeypatch, tmp_path):
+    """Both exes (or neither) in the game folder: setup.sh probed Documents; its SKYRIM_DOCUMENTS_DIR names the
+    folder it chose (an MO2 profile moves only SKYRIM_CONFIG_DIR)."""
+    from skyguard import paths
+
+    class Cfg:
+        malformed = False
+
+        def first(self, key):
+            return {"SKYRIM_CONFIG_DIR": (tmp_path / "MO2/profiles/Main").as_posix(),
+                    "SKYRIM_LOADORDER_DIR": (tmp_path / "MO2/profiles/Main").as_posix(),
+                    "SKYRIM_DOCUMENTS_DIR": (tmp_path / "Docs/My Games/Skyrim Special Edition").as_posix(),
+                    "SKYRIM_GAME_ROOT": tmp_path.as_posix()}.get(key, "")
+    (tmp_path / "SkyrimVR.exe").write_bytes(b"")
+    (tmp_path / "SkyrimSE.exe").write_bytes(b"")
+    monkeypatch.setattr(paths, "read_install", lambda root, env: Cfg())
+    monkeypatch.setattr(update_check, "_bash", lambda: "C:/Program Files/Git/bin/bash.exe")
+    assert update_check.render_config(tmp_path)["skyrim_folder"] == "Skyrim Special Edition"
 
 
 def test_the_note_is_shown_once_per_version_from_the_cache(tmp_path):
@@ -222,6 +289,8 @@ def harness(root, *argv, http=None, monkeypatch=None):
     spec = __import__("importlib.util").util.spec_from_file_location("agent_harness", REPO / "tools/agent-harness.py")
     module = __import__("importlib.util").util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    for switch in ("SKYGUARD_HOUSEKEEP_SWEEP", "SKYGUARD_UPDATE_CHECK"):   # conftest's helper switch
+        monkeypatch.delenv(switch, raising=False)
     if http is not None:
         monkeypatch.setattr(release, "http_get", http)
         monkeypatch.setattr(release.fetch, "__defaults__", (http, None))

@@ -612,7 +612,8 @@ A: The safety hooks run on Python 3 and refuse everything when they cannot start
 
 **Q: How do I update the toolkit?**
 A: Ask your agent: say "update the toolkit". Updates come from the toolkit's GitHub releases (Nexus is where you
-found it and downloaded it the first time). Each session start says once when a newer release is out; the agent
+found it and downloaded it the first time). On Claude Code and Codex each session start says once when a newer
+release is out (on other agents, ask "check for toolkit updates"); the agent
 then downloads it, refuses it unless it matches the SHA-256 GitHub publishes for it, shows you what changes (your
 own edited files first), and installs nothing until you say yes. Every applied update can be undone with
 `python tools/agent-harness.py upgrade-rollback <id> --installed-root . --quiescent`. The check asks GitHub at most

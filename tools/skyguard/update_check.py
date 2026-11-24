@@ -40,10 +40,19 @@ def installed_version(root):
 PROFILE = release.ReleaseProfile(REPO, ASSET, "The Skyrim toolkit", installed_version)
 
 
+GIT_BASH = "C:/Program Files/Git/bin/bash.exe"
+
+
 def _bash():
-    for candidate in ("C:/Program Files/Git/bin/bash.exe", shutil.which("bash")):
-        if candidate and Path(candidate).is_file():
-            return Path(candidate).as_posix()
+    """Git Bash, never WSL's launcher: `bash` on PATH can be System32/bash.exe or the WindowsApps alias, and a hook
+    command rendered with it would run in WSL (setup.sh keeps an already filled value, so the wrong one would stick)."""
+    for candidate in (GIT_BASH, shutil.which("bash")):
+        if not candidate or not Path(candidate).is_file():
+            continue
+        lowered = Path(candidate).as_posix().lower()
+        if "/windows/system32/" in lowered or "/windowsapps/" in lowered:
+            continue
+        return Path(candidate).as_posix()
     raise ValueError("Git Bash was not found; the hooks need it (run setup.sh)")
 
 
@@ -61,9 +70,15 @@ def render_config(root):
     if not config_dir or not loadorder:
         raise ValueError("skyrim-paths.env has no settings or load-order folder; re-run setup.sh before updating")
     game_root = cfg.first("SKYRIM_GAME_ROOT") or root.resolve().as_posix()
+    # setup.sh's SKYRIM_FOLDER: it writes SKYRIM_DOCUMENTS_DIR as Documents/My Games/<that folder> (an MO2 profile
+    # moves only SKYRIM_CONFIG_DIR), so its last part IS the folder setup.sh chose; the exe check is the fallback.
+    documents = cfg.first("SKYRIM_DOCUMENTS_DIR")
     vr = (Path(game_root) / "SkyrimVR.exe").is_file() and not (Path(game_root) / "SkyrimSE.exe").is_file()
     se = (Path(game_root) / "SkyrimSE.exe").is_file() and not (Path(game_root) / "SkyrimVR.exe").is_file()
-    folder = "Skyrim VR" if vr else "Skyrim Special Edition" if se else Path(loadorder).name   # as setup.sh decides
+    if documents and Path(documents).name in ("Skyrim VR", "Skyrim Special Edition"):
+        folder = Path(documents).name
+    else:
+        folder = "Skyrim VR" if vr else "Skyrim Special Edition" if se else "Skyrim VR"   # setup.sh's last fallback
     mods, overwrite = cfg.first("SKYRIM_MO2_MODS"), cfg.first("SKYRIM_MO2_OVERWRITE")
     manager = ({"kind": "mo2", "instance": Path(mods).parent.as_posix(), "profile": Path(config_dir).name,
                 "mods": mods, "overwrite": overwrite, "profile_dir": config_dir} if mods else {"kind": "stock"})
@@ -78,9 +93,11 @@ def write_render_config(root, folder):
     return str(path)
 
 
-def _off(env):
-    # SKYGUARD_HOUSEKEEP_SWEEP=off: the switch test helpers that clean the environment set for every background
-    # helper (they lose pytest's markers); without it a hook run on a test install could reach GitHub.
+def off(env):
+    """The Skyrim switches that turn update checks off, for the session note AND `update-check` itself:
+    SKYGUARD_UPDATE_CHECK=off, MODDING_HARNESS_UPDATE_CHECK=off, and SKYGUARD_HOUSEKEEP_SWEEP=off -- the switch that
+    turns off every background helper a session start launches (the housekeep sweep, and since 4.3 this check); test
+    helpers that clean the environment set it, and without it a hook run on a test install could reach GitHub."""
     return (env.get("SKYGUARD_UPDATE_CHECK", "").strip().lower() == "off"
             or env.get("SKYGUARD_HOUSEKEEP_SWEEP", "").strip().lower() == "off"
             or env.get("MODDING_HARNESS_UPDATE_CHECK", "").strip().lower() in ("off", "0", "false", "no"))
@@ -97,14 +114,20 @@ def session_note(project) -> str:
         own = (Path(project).resolve() / "tools" / "agent-harness.py") == tool
     except OSError:
         own = False
-    if not (own and tool.is_file()) or _off(env):
+    if not (own and tool.is_file()) or off(env):
         return ""
     if env.get("PYTEST_CURRENT_TEST") or env.get("HARNESS_FIXTURE_ROOT"):
         return ""
+    if installed_version(project) is None:
+        return ""                               # a git checkout: nothing to compare, so never ask GitHub
     line = release.note(project, PROFILE)
     try:
         import subprocess
-        flags = 0x00000008 | 0x00000200 | 0x08000000 if os.name == "nt" else 0   # detached, new group, no window
+        # A new process group with a HIDDEN console (CREATE_NO_WINDOW), never DETACHED_PROCESS: Windows ignores
+        # CREATE_NO_WINDOW beside DETACHED_PROCESS, and a detached process's console children (a venv's python.exe
+        # redirector starts one) would each open a visible console window. Popen never waits, so neither does the
+        # session start.
+        flags = 0x00000200 | 0x08000000 if os.name == "nt" else 0
         subprocess.Popen([sys.executable, "-B", str(tool), "update-check"], cwd=str(project),
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                          close_fds=True, creationflags=flags, start_new_session=os.name != "nt")

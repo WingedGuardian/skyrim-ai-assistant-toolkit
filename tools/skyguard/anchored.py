@@ -310,7 +310,8 @@ def champollion(command: str, parsed, roots, cwd: str, env: Mapping[str, str]) -
 # where its projects normally live). KNOWN LIMITS, not judged: a target the parser cannot resolve (a variable), an
 # unparsed command, a program held in a variable (`$B --groupbuild`), BodySlide started through MO2's own launcher
 # (`ModOrganizer.exe run ... -a "--groupbuild ..."`, which writes into MO2's overwrite), short flags with the value
-# attached (`-bOutfit`), and Outfit Studio's `--automation` (its paths are inside the XML script).
+# attached (`-bOutfit`), BodySlide run through wine or proton (`wine "BodySlide x64.exe" ...`), and Outfit Studio's
+# `--automation` (its paths are inside the XML script).
 BODYSLIDE_PROGRAMS = frozenset(("bodyslide", "bodyslide x64", "bodyslidex64", "bodyslide64"))
 _BS_BUILD = frozenset(("--groupbuild", "-gbuild", "/groupbuild", "/gbuild", "--build", "-b", "/build", "/b",
                        "--filter", "-f", "/filter", "/f"))

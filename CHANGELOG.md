@@ -2,20 +2,22 @@
 
 ## v4.3.0 — Unreleased (provisional)
 
-- **Updates come from GitHub, done by your agent.** Each session start says once when a newer release is out
-  (the check asks GitHub at most once a day, in the background, and is silent offline). Say "update the toolkit":
+- **Updates come from GitHub, done by your agent.** On Claude Code and Codex each session start says once when a
+  newer release is out (the check asks GitHub at most once a day, in the background, and is silent offline); on
+  other agents ask "check for toolkit updates". Say "update the toolkit":
   the agent downloads the release, refuses it unless its SHA-256 matches the digest GitHub publishes and its
   BUILD-INFO names the release's commit, shows you every file you changed before anything is replaced, and applies
   it through the reviewed upgrader, with a rollback record (`upgrade-rollback`). Then it re-runs setup and the hook
   canary. Skill `toolkit-update`; off with `{"v": 1, "check": false}` in `.modding-agent-harness/updates.json`.
-- Shared preservation core pinned to 165a1d4 (public core PR #13 on #12): the update commands, the agent launcher
+- Shared preservation core pinned to cd6a431 (public core PR #13 on #12): the update commands, the agent launcher
   and per-toolkit private notes names (`CLAUDE.local.md` is now protected in every upgrade). Re-pinned to the merged
   public commit before release.
 - **BodySlide and Outfit Studio writes are guarded.** A BodySlide batch build with no `--targetdir`, or one into Data,
   the settings folder or MO2's folders, is refused (S-BODYSLIDE-BUILD); build into a scratch folder and install it
-  as a mod. On an Outfit Studio MCP server, a save/export/build/write/run-steps call given a path there (or a relative
-  path with `..`) is refused (S-MCP-MESH-WRITE) on Claude Code, Codex and OpenCode; BodySlide's own folder and reads
-  are allowed. Its tool names are not yet checked against a real server. Skill `skyrim-nif` has the build command.
+  as a mod. On an Outfit Studio MCP server, a call that would write there, or to a relative path whose `..` leaves
+  BodySlide's folder, is refused (S-MCP-MESH-WRITE) on Claude Code, Codex and OpenCode. Every tool is judged except
+  one named as a read (load, open, get, render ...); paths given as inputs (a Load step, a `source` or `inputPath`
+  value) and BodySlide's own folder are allowed. Its tool names are not yet checked against a real server. Skill `skyrim-nif` has the build command.
 - Fixed: the Nexus pack builder downloaded every zip on a release, and refused v4.2.0's pack because of
   `ToolkitProbe.zip`; it now downloads only the bundle.
 

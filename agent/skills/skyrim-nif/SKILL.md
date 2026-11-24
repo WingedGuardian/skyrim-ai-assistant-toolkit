@@ -126,9 +126,9 @@ build with no `--targetdir`, or one that resolves into Data, the settings folder
 (S-BODYSLIDE-BUILD); BodySlide's own folder (`CalienteTools/BodySlide`) is allowed.
 
 Outfit Studio can run an MCP server (`OutfitStudio --mcp`, `http://127.0.0.1:47823/mcp`) with no folder limits of its
-own. On a server named Outfit Studio or BodySlide the guard refuses a save, export, build, write or run-steps call
-given a path into those folders, or a relative path with `..` (S-MCP-MESH-WRITE): save and export into a scratch
-folder or BodySlide's own folder instead. Its tool names are not checked against a real server yet.
+own. On a server named Outfit Studio or BodySlide the guard refuses any call that is not a read and is given a path
+into those folders, or a relative path whose `..` leaves BodySlide's folder (S-MCP-MESH-WRITE). Loading from Data or
+a mod is fine; save and export into a scratch folder or BodySlide's own folder instead. Its tool names are not checked against a real server yet.
 
 ## Why PyFFI over binary patching / NifSkope re-saves
 

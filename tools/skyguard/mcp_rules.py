@@ -218,11 +218,23 @@ def named_tool(name: str) -> str:
 # S-MCP-MESH-WRITE (deny, 4.3): Outfit Studio's MCP server (BodySlide and Outfit Studio's wiki, "MCP Server for AI
 # agents") has no folder limits ("an agent can do what you can do") and 100+ tools whose names the wiki does not list.
 # Not measured: no installed copy to ask `tools/list`. So the rule is by PATH, not by name: on a server whose name says
-# Outfit Studio or BodySlide, a tool whose name says it saves, exports, builds, writes or runs steps is refused when
-# any string in its arguments is an absolute path into the protected area (anchored.mesh_output_protected), or a
-# relative path with a `..` part (relative paths resolve against BodySlide's folder, which is inside Data). Reads,
-# renders and loads are not judged.
-_MESH_WRITE_WORDS = ("save", "export", "build", "write", "runsteps", "automation")
+# Outfit Studio or BodySlide, every tool is judged except one whose name starts with a read verb (load, open, get,
+# render ...) and says nothing of saving, exporting, building, writing or steps. A judged call is refused when a path
+# in its arguments is an absolute path into the protected area (anchored.mesh_output_protected), or a relative path
+# whose `..` climbs out of BodySlide's folder (relative paths resolve against it, and it is inside Data). Paths given
+# as INPUTS are not judged: a value under an input-like key (`source`, `inputPath`, `reference` ...), a step whose type
+# says load/read/import/open/reference, and an automation `<Step type="Load: ...">` element.
+_MESH_WRITE_WORDS = ("save", "export", "build", "write", "step", "automation", "convert", "copy", "output")
+_MESH_READ_VERBS = frozenset(("load", "open", "read", "get", "list", "info", "render", "preview", "inspect",
+                              "describe", "status", "help", "search", "find", "view", "show", "query", "select"))
+
+
+def mesh_tool_judged(tool: str) -> bool:
+    """False only for a tool whose name starts with a read verb and holds no write word."""
+    if any(w in tool_key(tool) for w in _MESH_WRITE_WORDS):
+        return True
+    words = [w.lower() for w in re.findall(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+", tool)]
+    return not (words and words[0] in _MESH_READ_VERBS)
 
 
 def is_outfit_studio(name: str) -> bool:
@@ -233,24 +245,41 @@ def is_outfit_studio(name: str) -> bool:
     return "outfitstudio" in server or "bodyslide" in server
 
 
-# An absolute path anywhere in a string (an inline automation script, a JSON-encoded step list, `path=...`): a drive
-# path, a UNC or `//` path, or a POSIX or MSYS path (`/home/...`, `/c/...`) whose `/` is not inside a relative path,
-# optionally as a file: URI, up to a quote, an angle bracket or a line.
-_ABS_IN_TEXT = re.compile(r"(?:file:/*)?(?:[A-Za-z]:/|//|(?<![\w.~/-])/(?=[\w.~-]))"
-                          r"[^\"'<>\r\n|*?]*")
+# Where an absolute path STARTS inside a string (an inline automation script, a JSON-encoded step list, `path=...`):
+# a drive path, a UNC or `//` path, or a POSIX or MSYS path (`/home/...`, `/c/...`), optionally as a file: URI, only
+# at the start of the string or after a space, quote, `=`, `:`, `,`, `;`, `<`, `>` or an opening bracket -- so the
+# `/` inside a relative path or another path never starts one.
+_PATH_START = re.compile(r"(?<![^\s\"'=:,;<>\[{(])(?:file:/*)?(?:[A-Za-z]:/|//|/(?=[\w.~-]))")
+_PATH_END = re.compile(r"[\"'<>\r\n|*?]")
 # Where a RELATIVE path resolves: Outfit Studio takes it against BodySlide's own folder (its wiki), which a stock
 # install keeps inside Data. A `..` that stays inside that folder is fine; one that climbs out reaches Data or beyond.
 _BS_HOME = "/_install_/data/calientetools/bodyslide"
+_INPUT_KEY = re.compile(r"^(?:input|inputs|source|sources|src|from|reference|ref|load|open|read)"
+                        r"(?:path|paths|file|files|dir|folder|nif|name)?$")
+_READ_STEP = re.compile(r"^\s*(?:load|read|import|open|reference)\b", re.IGNORECASE)
+_READ_ELEMENT = re.compile(r"<[^<>]*\btype\s*=\s*[\"']\s*(?:load|read|import|open|reference)\b[^<>]*>",
+                           re.IGNORECASE)
+_STEP_TYPE_KEYS = ("type", "action", "op", "kind", "step", "command")
 
 
 def _absolute_candidates(text: str):
+    """Each absolute path in `text`, one per start (a path list on one line gives each its own candidate). A segment
+    runs to the next start or a quote/angle bracket/line end; paths may hold spaces, so the segment cut at each of
+    its first 64 spaces is a candidate too (`.../Data then quit` is judged as `.../Data`)."""
     t = text.replace("\\", "/")
-    whole = t.strip().strip("\"'")
-    for c in ([whole] if re.match(r"(?:file:/*)?(?:[A-Za-z]:/|/)", whole) else []) + _ABS_IN_TEXT.findall(t):
-        c = urllib.parse.unquote(re.sub(r"^file:/*", "", c)) if c.lower().startswith("file:") else c
-        if re.match(r"^[A-Za-z]:/", c) is None and not c.startswith("/"):
-            c = "/" + c.lstrip("/")
-        yield c.rstrip(" .")
+    starts = [m.start() for m in _PATH_START.finditer(t)]
+    for i, s in enumerate(starts):
+        stop = starts[i + 1] if i + 1 < len(starts) else len(t)
+        end = _PATH_END.search(t, s, stop)
+        seg = t[s:end.start() if end else stop]
+        cuts = [m.start() for m in re.finditer(r"\s", seg)][:64]
+        for piece in [seg] + [seg[:c] for c in cuts]:
+            c = urllib.parse.unquote(re.sub(r"^file:/*", "", piece)) if piece.lower().startswith("file:") else piece
+            if re.match(r"^[A-Za-z]:/", c) is None and not c.startswith("/"):
+                c = "/" + c.lstrip("/")
+            c = c.rstrip(" .,;:")
+            if len(c) > 1:
+                yield c
 
 
 def _relative_escapes(text: str) -> bool:
@@ -262,16 +291,53 @@ def _relative_escapes(text: str) -> bool:
     return not (resolved == _BS_HOME or resolved.startswith(_BS_HOME + "/"))
 
 
+def _relative_in_text(text: str) -> bool:
+    """The whole string, or any token of it (split on spaces, quotes, `=`, `,`, `;`, `|`, angle brackets), is a
+    relative path that climbs out of BodySlide's folder: `<Step path="../../meshes/x.nif"/>` inside a script."""
+    if _relative_escapes(text):
+        return True
+    return any(_relative_escapes(tok) for tok in re.split(r"[\s\"'<>=,;|]+", text.replace("\\", "/")) if ".." in tok)
+
+
+def _mesh_texts(obj, depth: int = 0):
+    """The strings an Outfit Studio call could write to: every string in its arguments except INPUTS (a value under
+    an input-like key, a step dict whose type says load/read/import/open/reference, a `<Step type="Load...">`
+    element). A string holding JSON is walked the same way."""
+    if depth > 32:
+        return
+    if isinstance(obj, str):
+        s = obj.strip()
+        if s[:1] in "[{":
+            try:
+                yield from _mesh_texts(json.loads(s), depth + 1)
+                return
+            except ValueError:
+                pass
+        yield _READ_ELEMENT.sub(" ", obj)
+    elif isinstance(obj, dict):
+        for k in _STEP_TYPE_KEYS:
+            v = obj.get(k)
+            if isinstance(v, str) and _READ_STEP.match(v):
+                return
+        for k, v in obj.items():
+            if isinstance(k, str) and _INPUT_KEY.match(tool_key(k)):
+                continue
+            yield from _mesh_texts(v, depth + 1)
+    elif isinstance(obj, (list, tuple)):
+        for v in obj:
+            yield from _mesh_texts(v, depth + 1)
+
+
 def mesh_write_target(tool: str, args, roots) -> str:
-    """The path argument an Outfit Studio write call would write into the protected area ("" for none). A relative
-    `..` that leaves BodySlide's folder is refused even without roots; absolute paths need them to be classified."""
+    """The path argument an Outfit Studio call would write into the protected area ("" for none). A relative `..`
+    that leaves BodySlide's folder is refused even without roots; absolute paths need them to be classified. The whole
+    of every string is scanned (no length cut)."""
     from . import anchored
-    if not any(w in tool_key(tool) for w in _MESH_WRITE_WORDS):
+    if not mesh_tool_judged(tool):
         return ""
-    for text in _strings(args):
-        text = text[:65536]                           # a scan budget, not a skip
-        if _relative_escapes(text):
-            return text
+    for text in _mesh_texts(args):
+        if _relative_in_text(text):
+            return text if len(text) <= 300 else text[:300]
         if roots is None:
             continue
         for c in _absolute_candidates(text):

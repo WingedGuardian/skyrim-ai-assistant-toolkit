@@ -2,6 +2,7 @@
 """Skyrim's offline generic Action v1 entry; host adapters own blocking transport."""
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 import time
@@ -58,7 +59,11 @@ def main(argv=None):
                 candidate_validator=upgrade_render.validate, review_builder=None)
         elif args.command in release.COMMANDS:
             from skyguard import update_check
-            result = release.handle(args, root, update_check.PROFILE)
+            if args.command == "update-check" and update_check.off(os.environ):
+                result = {"installed": update_check.installed_version(args.installed_root or root), "status": "off",
+                          "update_available": False, "latest": None, "checked_at": None, "error": None}
+            else:
+                result = release.handle(args, root, update_check.PROFILE)
             if args.command == "update-fetch":
                 # This install's paths for upgrade-stage --render-config: the applied hooks must work at once.
                 result["render_config"] = update_check.write_render_config(

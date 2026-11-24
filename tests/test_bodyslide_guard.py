@@ -79,6 +79,18 @@ def judge():
     ("mcp__outfit-studio__save_project", {"outputPath": " " + DATA + "/meshes/x.nif"}),       # a leading space
     ("mcp__outfit-studio__save_project", {"outputPath": "file:///" + DATA + "/meshes/x.nif"}),
     ("mcp__outfit__studio__export", {"file": DATA + "/meshes/x.nif"}),                        # separators in the name
+    # review 4.3 I1: a path list on one line, a protected path behind a scratch one
+    ("mcp__outfit-studio__run_automation", {"script": "load C:/Temp/a.nif export " + DATA + "/meshes/x.nif"}),
+    ("mcp__outfit-studio__run_automation", {"script": "C:/Temp/a.nif;" + DATA + "/meshes/b.nif"}),
+    ("mcp__outfit-studio__run_automation", {"script": "/tmp/a.nif " + DATA + "/meshes/b.nif"}),
+    ("mcp__outfit-studio__build", {"cmd": "targetdir " + DATA + " then quit"}),             # a path then words
+    # review 4.3 I2: a relative `..` out of BodySlide's folder inside a script
+    ("mcp__outfit-studio__run_automation", {"script": '<Step type="Export: File" path="../../meshes/x.nif"/>'}),
+    # review 4.3 I4: a tool name without a known write word is judged too (names are unmeasured)
+    ("mcp__outfit-studio__run_step", {"path": DATA + "/meshes/x.nif"}),
+    ("mcp__outfit-studio__convert", {"to": DATA + "/meshes/x.nif"}),
+    ("mcp__outfit-studio__set_output_path", {"path": DATA + "/meshes"}),
+    ("mcp__outfit-studio__load_and_export", {"out": DATA + "/meshes/x.nif"}),      # a read verb with a write word
 ])
 def test_an_outfit_studio_write_into_loaded_folders_is_refused(judge, name, args):
     assert judge(name, args) == "deny"
@@ -91,6 +103,15 @@ def test_an_outfit_studio_write_into_loaded_folders_is_refused(judge, name, args
     ("mcp__OutfitStudio__render_view", {"out": DATA + "/x.png"}),                   # not a write tool by name
     ("mcp__other__save_project", {"outputPath": DATA + "/meshes/x.nif"}),          # not Outfit Studio
     ("mcp__outfit-studio__save_project", {"outputPath": "SliderSets/../ShapeData/x.nif"}),   # stays in BodySlide's
+    ("mcp__outfit-studio__get_shape_info", {"path": DATA + "/meshes/x.nif"}),       # read verb, no write word
+    # review 4.3 I3: an INPUT from Data or a mod with the output in scratch is ordinary work
+    ("mcp__outfit-studio__run_steps", {"steps": [{"type": "Load: Reference", "path": DATA + "/meshes/x.nif"},
+                                                 {"type": "Export: File", "path": "C:/Temp/x.nif"}]}),
+    ("mcp__outfit-studio__export_nif", {"inputPath": DATA + "/meshes/x.nif", "outputPath": "C:/Temp/x.nif"}),
+    ("mcp__outfit-studio__run_automation",
+     {"script": '<Step type="Load: Outfit" path="' + DATA + '/meshes/x.nif"/><Step type="Export: File" path="C:/Temp/x.nif"/>'}),
+    ("mcp__outfit-studio__run_steps",                                               # the same as JSON in a string
+     {"steps": '[{"type": "Load: Reference", "path": "' + DATA + '/meshes/x.nif"}, {"type": "Export", "path": "C:/Temp/x.nif"}]'}),
 ])
 def test_outfit_studio_reads_and_safe_writes_are_allowed(judge, name, args):
     assert judge(name, args) == "allow"
@@ -101,6 +122,13 @@ def test_absolute_paths_inside_text_are_found_on_every_os_spelling():
         text = '<Step type="Export: File" path="' + path + '"/>'
         assert path in list(mcp_rules._absolute_candidates(text)), path
     assert list(mcp_rules._absolute_candidates('<Step path="SliderSets/a/b.osp"/>')) == []   # relative: not absolute
+    assert "C:/Program Files (x86)/Steam/x.nif" in list(mcp_rules._absolute_candidates("C:/Program Files (x86)/Steam/x.nif"))
+
+
+def test_the_whole_of_a_long_string_is_scanned():
+    roots = paths.roots(ROOT, ROOT, {})
+    script = "x" * 70000 + " export " + DATA + "/meshes/x.nif"
+    assert mcp_rules.mesh_write_target("run_automation", {"script": script}, roots)
 
 
 def test_a_relative_path_out_of_bodyslides_folder_is_refused_even_without_roots():

@@ -1,6 +1,6 @@
 ---
 name: toolkit-update
-description: Update THIS toolkit to its newest GitHub release, when the session start says a new version is out or the user asks to update the toolkit. Checks, downloads and verifies the release, shows the user what changes (their own edited files first), applies only on their yes with a rollback record, then re-runs setup and the hook canary. Not for updating game mods (that is mod-update-check).
+description: Update THIS toolkit to its newest GitHub release, when the session start says a new version is out or the user asks to update the toolkit or to check for toolkit updates. Checks, downloads and verifies the release, shows the user what changes (their own edited files first), applies only on their yes with a rollback record, then re-runs setup and the hook canary. Not for updating game mods (that is mod-update-check).
 ---
 
 # Updating the toolkit from GitHub

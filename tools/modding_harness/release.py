@@ -23,6 +23,7 @@ import shutil
 import stat
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 import zipfile
@@ -84,18 +85,44 @@ def build_info(root):
     return result
 
 
-def enabled(root, environ=None):
+_OFF_WORDS = ("off", "0", "false", "no")
+
+
+def settings(root, environ=None):
+    """(enabled, problem). Off by MODDING_HARNESS_UPDATE_CHECK=off or `"check": false` (also "false", "off", 0) in
+    the settings file. The file is read in whatever encoding Windows wrote it (UTF-8 with or without a BOM, UTF-16
+    from PowerShell 5's `>`). A settings file that exists but cannot be read is taken as OFF -- someone wrote it to
+    say something, and asking GitHub against their wish is the worse mistake -- and `problem` says why."""
     environ = os.environ if environ is None else environ
-    if environ.get("MODDING_HARNESS_UPDATE_CHECK", "").strip().lower() in ("off", "0", "false", "no"):
-        return False
+    if environ.get("MODDING_HARNESS_UPDATE_CHECK", "").strip().lower() in _OFF_WORDS:
+        return False, ""
     try:
         with (Path(root) / SETTINGS).open("rb") as stream:
-            data = json.loads(stream.read(65537).decode("utf-8"))
+            raw = stream.read(65537)
     except FileNotFoundError:
-        return True
-    except (OSError, ValueError):
-        return True                             # an unreadable setting is not an opt-out; say so in `update-check`
-    return not (isinstance(data, dict) and data.get("check") is False)
+        return True, ""
+    except OSError as exc:
+        return False, "{} could not be read ({}); update checks are off until it is fixed".format(SETTINGS, type(exc).__name__)
+    try:
+        if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+            text = raw.decode("utf-16")
+        else:
+            text = raw.decode("utf-8-sig")
+        data = json.loads(text)
+    except ValueError:
+        return False, "{} is not valid JSON; update checks are off until it is fixed".format(SETTINGS)
+    if not isinstance(data, dict):
+        return False, "{} is not a JSON object; update checks are off until it is fixed".format(SETTINGS)
+    value = data.get("check", True)
+    if value is False or (isinstance(value, (int, float)) and not isinstance(value, bool) and value == 0):
+        return False, ""
+    if isinstance(value, str) and value.strip().lower() in _OFF_WORDS:
+        return False, ""
+    return True, ""
+
+
+def enabled(root, environ=None):
+    return settings(root, environ)[0]
 
 
 def updates_home(root, environ=None):
@@ -261,6 +288,19 @@ def _safe_members(archive):
     return roots.pop(), files
 
 
+def _own_release_url(url, repo):
+    """https://github.com/<repo>/releases/download/<tag>/<name>, with no dot segments (raw or %-encoded), no query,
+    no fragment and no credentials."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme != "https" or parts.netloc != "github.com" or parts.query or parts.fragment:
+        return False
+    segments = urllib.parse.unquote(parts.path).split("/")
+    if any(seg in (".", "..") or "\\" in seg for seg in segments):
+        return False
+    prefix = "/{}/releases/download/".format(repo)
+    return parts.path.startswith(prefix) and len(segments) == len(prefix.split("/")) + 1
+
+
 def fetch(root, profile, http=http_get, environ=None):
     """Download, verify and unpack the latest release aside; write its candidate inventory. Changes nothing installed.
 
@@ -276,7 +316,7 @@ def fetch(root, profile, http=http_get, environ=None):
         raise ValueError("release {} has no asset named {}".format(found["tag"], profile.asset.format(version=found["version"])))
     if not asset["sha256"]:
         raise ValueError("GitHub publishes no SHA-256 digest for {}; refusing an unverifiable download".format(asset["name"]))
-    if not asset["url"].startswith("https://github.com/{}/releases/download/".format(profile.repo)):
+    if not _own_release_url(asset["url"], profile.repo):
         raise ValueError("the asset's download address is not this repository's release")
     commit = _json(http, "{}/repos/{}/commits/{}".format(API, profile.repo, found["tag"])).get("sha")
     if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
@@ -298,31 +338,44 @@ def fetch(root, profile, http=http_get, environ=None):
         part.unlink(missing_ok=True)
 
     source = work / "unpacked"
-    if source.exists():
-        shutil.rmtree(source)                   # our own earlier unpack of this same version (same-run scratch)
+    candidate_path = work / "candidate.json"
+    for stale in (source, candidate_path):      # our own earlier unpack of this same version (same-run scratch)
+        if stale.is_dir():
+            shutil.rmtree(stale)
+        elif stale.exists():
+            stale.unlink()
     try:
-        with zipfile.ZipFile(zip_path) as archive:
-            top, members = _safe_members(archive)
-            for rel, info in members.items():
-                target = source.joinpath(*rel.split("/"))
-                target.parent.mkdir(parents=True, exist_ok=True)
-                with archive.open(info) as src, target.open("xb") as dst:
-                    shutil.copyfileobj(src, dst)
-    except zipfile.BadZipFile as exc:
-        raise ValueError("the release zip is damaged: {}".format(exc)) from None
-    info = build_info(source)
-    if parse_version(info.get("version")) != parse_version(found["version"]):
-        raise ValueError("the zip's BUILD-INFO names version {}, not {}".format(info.get("version"), found["version"]))
-    if info.get("commit") != commit:
-        raise ValueError("the zip's BUILD-INFO names a different commit than tag {}".format(found["tag"]))
+        try:
+            with zipfile.ZipFile(zip_path) as archive:
+                top, members = _safe_members(archive)
+                for rel, info in members.items():
+                    target = source.joinpath(*rel.split("/"))
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    with archive.open(info) as src, target.open("xb") as dst:
+                        shutil.copyfileobj(src, dst)
+        except zipfile.BadZipFile as exc:
+            raise ValueError("the release zip is damaged: {}".format(exc)) from None
+        info = build_info(source)
+        if parse_version(info.get("version")) != parse_version(found["version"]):
+            raise ValueError("the zip's BUILD-INFO names version {}, not {}".format(info.get("version"), found["version"]))
+        if info.get("commit") != commit:
+            raise ValueError("the zip's BUILD-INFO names a different commit than tag {}".format(found["tag"]))
+    except BaseException:
+        if source.exists():
+            shutil.rmtree(source, ignore_errors=True)   # a refused release leaves nothing unpacked behind
+        zip_path.unlink(missing_ok=True)
+        raise
     candidate = {"v": 1, "files": {}}
     for path in sorted(p for p in source.rglob("*") if p.is_file()):
         candidate["files"][path.relative_to(source).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
-    (work / "candidate.json").write_bytes((json.dumps(candidate, sort_keys=True) + "\n").encode("utf-8"))
+    candidate_path.write_bytes((json.dumps(candidate, sort_keys=True) + "\n").encode("utf-8"))
     previous, why = _previous(profile, installed, http, work)
+    # A fresh review bundle folder each fetch: the upgrader refuses an existing destination, so a second try at the
+    # same version (the user said "not now", or a stale review was refused) would otherwise dead-end.
+    bundle = work / ("bundle-" + uuid.uuid4().hex[:12])
     return {"version": found["version"], "installed": installed, "tag": found["tag"], "commit": commit,
-            "zip": str(zip_path), "sha256": sha, "source": str(source), "candidate": str(work / "candidate.json"),
-            "previous": previous, "previous_note": why, "bundle": str(work / "bundle"),
+            "zip": str(zip_path), "sha256": sha, "source": str(source), "candidate": str(candidate_path),
+            "previous": previous, "previous_note": why, "bundle": str(bundle),
             "files": len(candidate["files"]), "installed_changed": False}
 
 
@@ -372,9 +425,10 @@ def handle(args, root, profile):
     if args.command == "update-check":
         state = check(root, profile, force=args.now)
         installed = profile.installed_version(root)
+        problem = settings(root)[1]
         return {"installed": installed, "latest": state.get("latest"), "status": state.get("status"),
                 "update_available": newer(state.get("latest"), installed), "checked_at": state.get("checked_at"),
-                "error": state.get("error")}
+                "error": state.get("error") or problem or None}
     if args.command == "update-fetch":
         return fetch(root, profile)
     raise ValueError("not a release command")
