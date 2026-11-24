@@ -46,6 +46,10 @@ def _json_type(v, present: bool) -> str:
     return "array" if isinstance(v, list) else "object"
 
 
+# the file tools whose new text detached.py reads (S-NO-DETACHED-LAUNCH)
+FILE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+
+
 def _file_path(tool_name: str, ti: dict) -> str:
     key = PATH_KEYS.get(tool_name)
     if key is None:
@@ -106,6 +110,7 @@ def extract(payload_text: str) -> dict:
         "cwd": cwd.replace("\x00", "") if isinstance(cwd, str) else "",
         "shell": SHELLS.get(tool_name, ""),
         "mcp_input": ti if tool_name.startswith("mcp__") else {},
+        "tool_input": ti if tool_name in FILE_TOOLS else {},
         "session_id": _sub(d.get("session_id")),
         "transcript_path": _sub(d.get("transcript_path")),
     }
@@ -131,4 +136,5 @@ def to_request(p: dict, kind: str):
                    shell=(p.get("shell") or None) if kind == "shell" else None,
                    command=p["command"], paths=(p["file_path"],) if p["file_path"] else (),
                    cwd=p.get("cwd", ""), session_id=p.get("session_id", ""),
-                   tool_name=p["tool_name"], empty=p["empty"])
+                   tool_name=p["tool_name"], empty=p["empty"],
+                   tool_input=json.dumps(p["tool_input"]) if p.get("tool_input") else "")

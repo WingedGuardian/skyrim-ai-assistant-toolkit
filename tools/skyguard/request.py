@@ -28,3 +28,4 @@ class Request(NamedTuple):
     empty: bool = False
     failure: str = ""
     execution_cwd_known: bool = True  # false: native host supplied session cwd only
+    tool_input: str = ""              # a file tool's own input as JSON (the new text): read by detached.py only

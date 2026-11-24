@@ -92,6 +92,7 @@ CORE_REQUIRED = (
     "tools/skyguard/vault_watch.py",
     "tools/skyguard/update_check.py",  # v4.3.0: the update check and its release profile
     "tools/skyguard/hidden.py",        # v4.3.0: how every session-start helper starts (no console window)
+    "tools/skyguard/detached.py",      # v4.3.0: S-/W-NO-DETACHED-LAUNCH, the detached-launch detector
     "tools/loot_advisor.py",          # v4.1.0: LOOT's read-only advice, through libloot
     "tools/libloot/libloot_loader.py",
     "tools/libloot/build.py",

@@ -72,6 +72,8 @@ CLASSIFICATION: Dict[str, Tuple[str, str]] = {
     "mcp.S-MCP-WRITE": ("hook_only", "an MCP tool call, not a command"),
     "mcp.S-MCP-MESH-WRITE": ("hook_only", "an MCP tool call, not a command"),
     "shell.S-BODYSLIDE-BUILD": ("hook_only", _PATH + " (where --targetdir resolves, or its absence)"),
+    "shell.S-NO-DETACHED-LAUNCH": ("hook_only", "the flag is inside the script text, not a prefix"),
+    "write.W-NO-DETACHED-LAUNCH": ("hook_only", "a file write, not a command"),
     "write.DENY_PLUGIN": ("hook_only", "a file write, not a command"),
     "write.NO_PATH_DENY": ("hook_only", _INERT),
 }

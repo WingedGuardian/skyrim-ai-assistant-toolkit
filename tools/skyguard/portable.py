@@ -40,7 +40,8 @@ def request(action, transcript=""):
                    mcp_tool=action.tool if kind == "mcp" else "", mcp_args=json.dumps(arguments),
                    cwd=action.cwd, tool_name=action.tool, session_id=action.session_id,
                    transcript_path=transcript,
-                   execution_cwd_known=action.provenance.get("execution_cwd_known", True) is not False)
+                   execution_cwd_known=action.provenance.get("execution_cwd_known", True) is not False,
+                   tool_input=json.dumps(arguments) if kind == "write" and isinstance(arguments, dict) else "")
 
 
 class _PreviewAudit(Audit):

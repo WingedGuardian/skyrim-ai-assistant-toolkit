@@ -407,6 +407,8 @@ def main(argv=None) -> int:
         roots = paths.roots(a.root, a.root_win, env if env is not None else {})
         v = engine.evaluate_write(p["file_path"], audit, roots=roots, cwd=p.get("cwd", ""),
                                   transcript=p.get("transcript_path", "") or "")
+        # the new text itself (S-/W-NO-DETACHED-LAUNCH): evaluate_write is handed the path alone
+        v = engine.with_detached(v, claude.to_request(p, "write"), audit)
         v = _saves(a, p, audit, v, "{} {}".format(p["tool_name"], p["file_path"]))
     elif a.role == "protect-mcp":
         # Plan 5 Task 11: the DevBench MCP tools. Only the save-exists check reads the declared config dirs, so an

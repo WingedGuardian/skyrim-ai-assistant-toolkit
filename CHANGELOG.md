@@ -20,6 +20,13 @@
 - Fixed: the housekeep sweep and the save vault watcher that a session start launches could open a visible
   console window when the hook's Python is the `py` launcher or a venv (Windows ignores "no window" for a detached
   process's own children). Every session-start helper now starts hidden, the same way.
+- **Helpers launched detached are refused.** A process started with Windows `DETACHED_PROCESS` has no console,
+  so each console program it starts opens a visible window (one every second, for a whole headless run, on
+  2026-11-24). Code an agent writes or runs that launches that way is now refused (S-NO-DETACHED-LAUNCH,
+  W-NO-DETACHED-LAUNCH) on Claude Code, Codex and OpenCode: shell commands, inline scripts, written and edited
+  files and patches. A deliberate visible console (`CREATE_NEW_CONSOLE`, `Start-Process`) is allowed. Use
+  `CREATE_NO_WINDOW` (optionally with `CREATE_NEW_PROCESS_GROUP`): the child still outlives its caller. Known
+  limits are in docs/guard-coverage.md.
 - Fixed: the Nexus pack builder downloaded every zip on a release, and refused v4.2.0's pack because of
   `ToolkitProbe.zip`; it now downloads only the bundle.
 

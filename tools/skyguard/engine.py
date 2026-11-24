@@ -40,7 +40,7 @@ def evaluate_shell(req, roots, audit) -> Verdict:
     `python -c "print(1"`: writes.py cannot parse its literal write scope). That is a refusal of THIS command, with
     the text the portable dispatcher gives the same failure -- never an exception that ends the hook as GUARD INERT."""
     try:
-        return _evaluate_shell(req, roots, audit)
+        return with_detached(_evaluate_shell(req, roots, audit), req, audit)
     except ValueError as exc:
         return Verdict("deny", UNPARSED + str(exc), status="failed", code="engine.UNPARSED")
 
@@ -177,7 +177,8 @@ def evaluate_writes(req, audit, roots=None) -> Verdict:
                 continue
         out.append(evaluate_write(p, audit, roots=roots, cwd=req.cwd or "", op=SAVE_OP.get(op, "write"),
                                   transcript=req.transcript_path or ""))
-    return combine(out)
+    # a shell request's own code was judged by evaluate_shell; a write request's new text is judged here
+    return with_detached(combine(out), req, audit) if req.kind == "write" else combine(out)
 
 
 INERT_TRANSLATE = ("GUARD INERT: the agent's hook could not read this call ({}), so it checked NOTHING. "
@@ -217,6 +218,33 @@ def _write_roots(req, roots_fn):
         file, key = roots.malformed[0]
         return None, _failed(rules.message("S-INERT-CONFIG", file=file, op=key), "run.ENV_MALFORMED")
     return roots, None
+
+
+def _detached(req, audit) -> Optional[Verdict]:
+    """S-/W-NO-DETACHED-LAUNCH (4.3): code this call runs or writes that launches a process DETACHED. Fail open, never
+    silently: a detector error allows the call and is written to the audit log (detached.py's docstring says why)."""
+    rid = "S-NO-DETACHED-LAUNCH" if req.kind == "shell" else "W-NO-DETACHED-LAUNCH"
+    hook = rules.RULES[rid]["hook"]
+    try:
+        from . import detached
+        hit = detached.finding(req)
+    except Exception as exc:  # noqa: BLE001 -- fail open, never silently: the audit log names the broken check
+        audit.log(hook, "FAILED", "the no-detached-launch check raised {} -- this call was NOT judged for a detached "
+                  "launch".format(type(exc).__name__))
+        return None
+    if not hit:
+        return None
+    reason = rules.message(rid, op=hit)
+    audit.rule(hook, rid, "deny", reason)
+    return Verdict("deny", reason, code=codes.rule_code(rid))
+
+
+def with_detached(v: Verdict, req, audit) -> Verdict:
+    """V, refused instead when this call's code launches a process detached (an already refused call stays as it is)."""
+    if v.decision == "deny":
+        return v
+    refused = _detached(req, audit)
+    return v if refused is None else combine([v, refused])
 
 
 def _rules(req, roots_fn, audit) -> Verdict:

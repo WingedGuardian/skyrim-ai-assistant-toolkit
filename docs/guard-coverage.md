@@ -125,6 +125,39 @@ Ranked by what an agent can do through the route, the uncovered routes to close 
    is judged too, not allowed unjudged (row `p8t6-mcp-devbench-after-double-underscore`).
 4. **C9 worktree tools**, **C13** and **C17**: lower impact; record and watch.
 
+## No detached launches (4.3): S-NO-DETACHED-LAUNCH / W-NO-DETACHED-LAUNCH
+
+A process started with Windows `DETACHED_PROCESS` (0x00000008) has no console, so every console program it starts
+gets a new visible window (MEASURED 2026-11-24: a headless-VR helper launched detached opened a console window
+every second for a whole run). The rule refuses code that launches that way; a deliberate visible console
+(`CREATE_NEW_CONSOLE`, `Start-Process`, a terminal) is not refused. The detector, `tools/skyguard/detached.py`,
+is the reviewed packet `WingedGuardian/skyrimvr-save-guard-ci` @ 23918cc, unchanged except its own exemption list.
+
+- **Routes (READ `engine.evaluate_shell`, `engine.evaluate_writes`, `run.py` protect-files):** Claude Code's
+  Bash, PowerShell and Monitor commands (C1-C3) and Write, Edit and NotebookEdit text (C4, C5); Codex's shell
+  commands and `apply_patch` (X1, X2); OpenCode's `bash`, `write`, `edit` and `apply_patch` tools. An edit is
+  judged on the file after the edit, around the changed lines, and so is a patch to an existing file (each hunk
+  placed after its `@@` anchor line, whole lines only). Tests
+  `tests/test_detached_launch.py` (the packet's own cases, plus one per agent route), twins `detached-*`.
+- **Judged:** `DETACHED_PROCESS` used as a launch flag, a creationflags value with bit 0x8, Node
+  `detached: true`, in code files and in inline `-c` / `-e` / `-Command` scripts (in any quoting, after `env`,
+  `timeout`, `nohup` or an assignment, and with the interpreter as a variable or quoted path), heredocs and
+  here-strings fed to an interpreter or written to a code file. Other heredoc text (a note, a commit message) is
+  data and is not read as commands.
+- **Fail open (deliberate), never silent:** the rule prevents pop-ups and preserves nothing, so a detector error
+  allows the call and writes `the no-detached-launch check raised <error>` to `.claude/backups/AUDIT_LOG.txt`
+  (test `test_a_detector_failure_allows_the_call`). Like every rule except the never-shadowed ones, it is off
+  while the guards are turned off.
+- **KNOWN LIMITS:** a flag built at run time (arithmetic, a variable holding 8, a helper's keyword argument); a
+  launch inside a script the command only names; a write beyond its first 4 MB, a command beyond its first 20,000
+  words; a patch whose file cannot be read, with more than 2,000 hunks, slower than 5 s to place, or whose hunk is
+  not found in it is judged on each hunk's own lines, so a flag split across the hunk's edge is missed and a hunk
+  starting inside a docstring can be refused; of stacked `@@` anchors (`@@ class A` then `@@ def f`) only the last
+  is used, and a hunk whose lines differ from the file only in whitespace is not placed. After an interpreter option that takes a value, the next plain word
+  is taken as that value, so in `python -B script.py -c "..."` the script's own `-c` argument is read as code. Node `detached: true` is refused anywhere in
+  JS/TS, including a test asserting it is absent (found by the X4 toolkit's review, 2026-11-24). Antigravity's
+  adapter is not measured with this rule.
+
 ## Saves (4.1): the save vault, no rule
 
 No rule decides on a save since 4.1 (user ruling 2026-11-10). `tools/save_vault.py` keeps every settled version of

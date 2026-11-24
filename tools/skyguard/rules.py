@@ -185,6 +185,28 @@ RULES = {
         'Build into a scratch folder (--targetdir "<folder>" --quiet), then install that folder as a mod.'
     ),
     },
+    # 4.3: a helper launched DETACHED (DETACHED_PROCESS) gives each console child it starts a visible window
+    # (tools/skyguard/detached.py; user ruling 2026-11-24: only this, never a deliberate visible console).
+    'S-NO-DETACHED-LAUNCH': {
+        "decision": 'deny',
+        "hook": 'protect-bash',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Blocked: this launches a process DETACHED ({op}); every console program it starts would open a visible window.' + '\n'
+        'Use creationflags=CREATE_NO_WINDOW (0x08000000), optionally | CREATE_NEW_PROCESS_GROUP (0x200): the child still outlives the caller.'
+    ),
+    },
+    'W-NO-DETACHED-LAUNCH': {
+        "decision": 'deny',
+        "hook": 'protect-files',
+        "legacy": False,
+        "prefixes": [],
+        "template": (
+        'Blocked: this writes code that launches a process DETACHED ({op}); every console program it starts would open a visible window.' + '\n'
+        'Use creationflags=CREATE_NO_WINDOW (0x08000000), optionally | CREATE_NEW_PROCESS_GROUP (0x200): the child still outlives the caller.'
+    ),
+    },
     'S-RELATIVE-UNKNOWN': {
         "decision": 'advise',
         "hook": 'protect-bash',
