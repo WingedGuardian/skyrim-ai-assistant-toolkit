@@ -685,10 +685,18 @@ def _words(command, mode):
     '...' is one quote, "..." takes backtick escapes. A heredoc body (bash, `<<` outside quotes) and a here-string
     (PowerShell @'...'@) are data, not commands: they are skipped here (one placeholder word for a here-string), and
     shell_payloads() judges them where they are fed to an interpreter or written to a code file."""
-    out, cur, have, i, n, pending = [], [], False, 0, len(command), []
+    out, cur, have, i, n, pending, arith = [], [], False, 0, len(command), [], 0
     while i < n and len(out) < MAX_WORDS:
         ch = command[i]
-        if mode == "bash" and ch == "<" and command.startswith("<<", i) and not command.startswith("<<<", i):
+        if mode == "bash" and command.startswith("<<<", i):
+            cur.append("<<<")                   # a here-string (`cat <<< "x"`), never a heredoc
+            have, i = True, i + 3
+            continue
+        if mode == "bash" and command.startswith("$((", i):
+            arith += 1
+        elif arith and command.startswith("))", i):
+            arith -= 1
+        if mode == "bash" and ch == "<" and command.startswith("<<", i) and not arith:   # $((a<<b)) is a shift
             m = HEREDOC_OP.match(command, i)
             if m:
                 if have:

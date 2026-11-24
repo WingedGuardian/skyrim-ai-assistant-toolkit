@@ -153,7 +153,8 @@ is the reviewed packet `WingedGuardian/skyrimvr-save-guard-ci` @ 23918cc, unchan
   words; a patch whose file cannot be read, with more than 2,000 hunks, slower than 5 s to place, or whose hunk is
   not found in it is judged on each hunk's own lines, so a flag split across the hunk's edge is missed and a hunk
   starting inside a docstring can be refused; of stacked `@@` anchors (`@@ class A` then `@@ def f`) only the last
-  is used, and a hunk whose lines differ from the file only in whitespace is not placed. After an interpreter option that takes a value, the next plain word
+  is used, and a hunk whose lines differ from the file only in whitespace is not placed; a heredoc delimiter that
+  is only partly quoted (`<<E"OF"`) is read short, so the rest of that command is taken as its body. After an interpreter option that takes a value, the next plain word
   is taken as that value, so in `python -B script.py -c "..."` the script's own `-c` argument is read as code. Node `detached: true` is refused anywhere in
   JS/TS, including a test asserting it is absent (found by the X4 toolkit's review, 2026-11-24). Antigravity's
   adapter is not measured with this rule.

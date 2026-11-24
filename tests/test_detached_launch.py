@@ -654,3 +654,12 @@ def test_the_adversarial_patch_stays_inside_the_engine_budget(tmp_path):
     t0 = time.perf_counter()
     detached.judge_patch(patch, str(tmp_path))
     assert time.perf_counter() - t0 < 15, "the engine's whole budget is 20 s"
+
+
+@pytest.mark.parametrize("cmd", [
+    "cat <<< \"x\"\npython -c 'Popen([\"x\"], creationflags=8)'\n",
+    "echo $((flags<<shift))\npython -c 'Popen([\"x\"], creationflags=8)'\n",
+])
+def test_a_here_string_or_a_shift_does_not_hide_the_next_line(cmd):
+    words = detached._words(cmd, "bash")
+    assert "python" in words and detached.judge_words(cmd, "bash")
