@@ -91,6 +91,18 @@ def judge():
     ("mcp__outfit-studio__convert", {"to": DATA + "/meshes/x.nif"}),
     ("mcp__outfit-studio__set_output_path", {"path": DATA + "/meshes"}),
     ("mcp__outfit-studio__load_and_export", {"out": DATA + "/meshes/x.nif"}),      # a read verb with a write word
+    # confirmation review N1: a read word in a type/command never switches the rule off for the rest of the call
+    ("mcp__outfit-studio__run_automation", {"command": "load C:/Temp/p.osp; export " + DATA + "/meshes/x.nif"}),
+    ("mcp__outfit-studio__run_steps", {"steps": [{"type": "Load: Outfit", "path": "C:/Temp/a.nif",
+                                                  "outputPath": DATA + "/meshes/x.nif"}]}),
+    ("mcp__outfit-studio__run_steps", {"steps": [{"action": "open-and-export", "path": DATA + "/meshes/x.nif"}]}),
+    ("mcp__outfit-studio__save_project", {"type": "Load: Outfit", "path": DATA + "/meshes/x.nif"}),   # not a step
+    ("mcp__outfit-studio__run_automation",
+     {"script": '<Step type="Load: Outfit" path="C:/Temp/a.nif" output="' + DATA + '/meshes/x.nif"/>'}),
+    # N2: a `|` between paths
+    ("mcp__outfit-studio__run_automation", {"script": "C:/Temp/a.nif|" + DATA + "/meshes/x.nif"}),
+    # N4: a tool that takes its source away has its inputs judged
+    ("mcp__outfit-studio__move_file", {"source": DATA + "/meshes/x.nif", "destination": "C:/Temp/"}),
 ])
 def test_an_outfit_studio_write_into_loaded_folders_is_refused(judge, name, args):
     assert judge(name, args) == "deny"
@@ -104,6 +116,8 @@ def test_an_outfit_studio_write_into_loaded_folders_is_refused(judge, name, args
     ("mcp__other__save_project", {"outputPath": DATA + "/meshes/x.nif"}),          # not Outfit Studio
     ("mcp__outfit-studio__save_project", {"outputPath": "SliderSets/../ShapeData/x.nif"}),   # stays in BodySlide's
     ("mcp__outfit-studio__get_shape_info", {"path": DATA + "/meshes/x.nif"}),       # read verb, no write word
+    ("mcp__outfit-studio__import_nif", {"path": DATA + "/meshes/armor/x.nif"}),     # N3: an import only reads
+    ("mcp__outfit-studio__validate_mesh", {"path": DATA + "/meshes/armor/x.nif"}),
     # review 4.3 I3: an INPUT from Data or a mod with the output in scratch is ordinary work
     ("mcp__outfit-studio__run_steps", {"steps": [{"type": "Load: Reference", "path": DATA + "/meshes/x.nif"},
                                                  {"type": "Export: File", "path": "C:/Temp/x.nif"}]}),
@@ -123,6 +137,24 @@ def test_absolute_paths_inside_text_are_found_on_every_os_spelling():
         assert path in list(mcp_rules._absolute_candidates(text)), path
     assert list(mcp_rules._absolute_candidates('<Step path="SliderSets/a/b.osp"/>')) == []   # relative: not absolute
     assert "C:/Program Files (x86)/Steam/x.nif" in list(mcp_rules._absolute_candidates("C:/Program Files (x86)/Steam/x.nif"))
+
+
+def test_paths_after_any_separator_or_a_short_flag_are_found():
+    """Confirmation review N2: a drive path starts anywhere not glued to a letter or digit, and after a short flag."""
+    for text, path in (("C:/Temp/a.nif|D:/Games/Data/x.nif", "D:/Games/Data/x.nif"),
+                       ("-oD:/Games/Data/x.nif", "D:/Games/Data/x.nif"),
+                       ("(D:/Games/Data/x.nif)", "D:/Games/Data/x.nif"),
+                       ("cmd `/home/u/Data/x.nif`", "/home/u/Data/x.nif"),
+                       ("a.nif|/home/u/Data/x.nif", "/home/u/Data/x.nif"),
+                       ("(targetdir D:/Games/Data)", "D:/Games/Data"),
+                       ("D:/Mods/Armor (v2)/x.nif", "D:/Mods/Armor (v2)/x.nif")):    # a matched bracket stays
+        assert path in list(mcp_rules._absolute_candidates(text)), text
+
+
+def test_a_folder_name_with_a_space_is_not_cut_into_a_protected_one():
+    """Confirmation review N5: `<root>/Data Exports/x.nif` is not `<root>/Data`; `<root>/Data then quit` is."""
+    assert "D:/Games/Data" not in list(mcp_rules._absolute_candidates("D:/Games/Data Exports/x.nif"))
+    assert "D:/Games/Data" in list(mcp_rules._absolute_candidates("targetdir D:/Games/Data then quit"))
 
 
 def test_the_whole_of_a_long_string_is_scanned():

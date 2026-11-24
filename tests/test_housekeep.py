@@ -1041,7 +1041,8 @@ def test_an_integration_test_opts_in_to_the_real_bin_explicitly(tmp_path, monkey
 
 
 def test_the_users_sweep_switch_never_blocks_the_recycle_bin(tmp_path, monkeypatch, capsys):
-    """review2 B-tools L2 / C-docs L7: SKYGUARD_HOUSEKEEP_SWEEP=off is a user switch for the session sweep only. With
+    """review2 B-tools L2 / C-docs L7: SKYGUARD_HOUSEKEEP_SWEEP=off is a user switch for the session start's background helpers (the sweep, and
+    since 4.3 the update check) only. With
     no test marker, `housekeep recycle` (and so apply and kb-guard's rotation) must reach the shell, not refuse with
     "under the test harness". The shell is stubbed to raise: reaching it is the proof, and nothing is recycled."""
     d = tmp_path / "x"

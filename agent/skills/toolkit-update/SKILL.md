@@ -21,6 +21,8 @@ python tools/agent-harness.py update-check --now
 `update_available: true` names `installed` and `latest`. Tell the user, in one line, which version is out and ask
 whether to update now. `status: unreachable` means GitHub could not be reached: say so, do not retry in a loop.
 `status: off` means the user turned checking off (`.modding-agent-harness/updates.json`); honour it unless they ask.
+If `error` is set with `status: off`, that file exists but cannot be read (checking stays off until it is fixed):
+tell the user, and that `{"v": 1, "check": false}` (or deleting the file) is the valid form.
 
 ## 2. Download and verify (changes nothing installed)
 
@@ -97,3 +99,7 @@ Then tell the user:
   their mod manager (never copy it into `Data` yourself).
 
 If setup or the canary fails, say so with the output, and offer the rollback.
+
+Each `update-fetch` names a fresh `bundle-<id>` folder, so trying again later just works. Older bundle folders in the
+updates folder are not removed by the update; once an update is applied and the user is happy with it, offer to
+move the older ones to the Recycle Bin (the rollback record lives in the install, not in them).

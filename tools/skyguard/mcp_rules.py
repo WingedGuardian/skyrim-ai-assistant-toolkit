@@ -222,10 +222,16 @@ def named_tool(name: str) -> str:
 # render ...) and says nothing of saving, exporting, building, writing or steps. A judged call is refused when a path
 # in its arguments is an absolute path into the protected area (anchored.mesh_output_protected), or a relative path
 # whose `..` climbs out of BodySlide's folder (relative paths resolve against it, and it is inside Data). Paths given
-# as INPUTS are not judged: a value under an input-like key (`source`, `inputPath`, `reference` ...), a step whose type
-# says load/read/import/open/reference, and an automation `<Step type="Load: ...">` element.
-_MESH_WRITE_WORDS = ("save", "export", "build", "write", "step", "automation", "convert", "copy", "output")
-_MESH_READ_VERBS = frozenset(("load", "open", "read", "get", "list", "info", "render", "preview", "inspect",
+# as INPUTS are not judged: a value under an input-like key (`source`, `inputPath`, `reference` ...), the path keys of
+# a listed step whose type is exactly a read (`Load: Outfit`, `Import`), and the path attributes of an automation
+# `<Step type="Load: ...">` element -- except on a tool that takes its source away (move, rename, delete ...).
+_MESH_WRITE_WORDS = ("save", "export", "build", "write", "step", "automation", "convert", "copy", "output", "move",
+                     "rename", "remove", "delete")
+# A tool that takes its source AWAY (move, rename, cut, remove, delete): its input paths are judged too.
+_MESH_MOVE_WORDS = ("move", "rename", "cut", "remove", "delete")
+_MESH_READ_VERBS = frozenset(("load", "open", "read", "import", "validate", "check", "verify", "analyze", "analyse",
+                              "compare", "diff", "measure", "count", "scan", "browse", "get", "list", "info",
+                              "render", "preview", "inspect",
                               "describe", "status", "help", "search", "find", "view", "show", "query", "select"))
 
 
@@ -246,38 +252,48 @@ def is_outfit_studio(name: str) -> bool:
 
 
 # Where an absolute path STARTS inside a string (an inline automation script, a JSON-encoded step list, `path=...`):
-# a drive path, a UNC or `//` path, or a POSIX or MSYS path (`/home/...`, `/c/...`), optionally as a file: URI, only
-# at the start of the string or after a space, quote, `=`, `:`, `,`, `;`, `<`, `>` or an opening bracket -- so the
-# `/` inside a relative path or another path never starts one.
-_PATH_START = re.compile(r"(?<![^\s\"'=:,;<>\[{(])(?:file:/*)?(?:[A-Za-z]:/|//|/(?=[\w.~-]))")
+# a drive path (anywhere not glued to a letter or digit, or after a short flag: `-oC:/...`); a UNC, `//`, POSIX or
+# MSYS path (`/home/...`, `/c/...`) only at the start or after a space, quote, `=:,;<>|&+`, a backtick or an opening
+# bracket -- so the `/` inside a relative path or another path (`Program Files (x86)/Steam`) never starts one.
+# Each may be a file: URI.
+_PATH_START = re.compile(r"(?:(?<=-[A-Za-z])|(?<=-[A-Za-z]{2})|(?<![A-Za-z0-9]))(?:file:/*)?[A-Za-z]:/"
+                         r"|(?<![^\s\"'=:,;<>\[{(|`&+])(?:file:/*)?(?://|/(?=[\w.~-]))")
 _PATH_END = re.compile(r"[\"'<>\r\n|*?]")
 # Where a RELATIVE path resolves: Outfit Studio takes it against BodySlide's own folder (its wiki), which a stock
 # install keeps inside Data. A `..` that stays inside that folder is fine; one that climbs out reaches Data or beyond.
 _BS_HOME = "/_install_/data/calientetools/bodyslide"
 _INPUT_KEY = re.compile(r"^(?:input|inputs|source|sources|src|from|reference|ref|load|open|read)"
                         r"(?:path|paths|file|files|dir|folder|nif|name)?$")
-_READ_STEP = re.compile(r"^\s*(?:load|read|import|open|reference)\b", re.IGNORECASE)
-_READ_ELEMENT = re.compile(r"<[^<>]*\btype\s*=\s*[\"']\s*(?:load|read|import|open|reference)\b[^<>]*>",
+_READ_TYPE = re.compile(r"^\s*(?:load|read|import|open)(?:\s*:[^;\n]*)?\s*$", re.IGNORECASE)
+_STEP_PATH_KEYS = frozenset(("path", "paths", "file", "files", "filename", "filepath", "nif", "source", "src",
+                             "input", "inputpath", "reference", "ref"))
+_READ_ELEMENT = re.compile(r"<[^<>]*\btype\s*=\s*[\"']\s*(?:load|read|import|open)(?:\s*:[^\"'<>]*)?[\"'][^<>]*>",
                            re.IGNORECASE)
 _STEP_TYPE_KEYS = ("type", "action", "op", "kind", "step", "command")
+_ELEMENT_PATH_ATTR = re.compile(r"\b(?:path|file|filename|source|src|input)\s*=\s*(?:\"[^\"]*\"|'[^']*')",
+                                re.IGNORECASE)
 
 
 def _absolute_candidates(text: str):
     """Each absolute path in `text`, one per start (a path list on one line gives each its own candidate). A segment
     runs to the next start or a quote/angle bracket/line end; paths may hold spaces, so the segment cut at each of
-    its first 64 spaces is a candidate too (`.../Data then quit` is judged as `.../Data`)."""
+    its first 64 spaces is a candidate too when nothing after that space is a path (`.../Data then quit` is judged
+    as `.../Data`; `.../Data Exports/x.nif` is not cut to `.../Data`)."""
     t = text.replace("\\", "/")
     starts = [m.start() for m in _PATH_START.finditer(t)]
     for i, s in enumerate(starts):
         stop = starts[i + 1] if i + 1 < len(starts) else len(t)
         end = _PATH_END.search(t, s, stop)
         seg = t[s:end.start() if end else stop]
-        cuts = [m.start() for m in re.finditer(r"\s", seg)][:64]
+        cuts = [m.start() for m in re.finditer(r"\s", seg[:4096]) if "/" not in seg[m.start():]][:64]
         for piece in [seg] + [seg[:c] for c in cuts]:
             c = urllib.parse.unquote(re.sub(r"^file:/*", "", piece)) if piece.lower().startswith("file:") else piece
             if re.match(r"^[A-Za-z]:/", c) is None and not c.startswith("/"):
                 c = "/" + c.lstrip("/")
-            c = c.rstrip(" .,;:")
+            c = c.rstrip(" .,;:`")
+            for close, open_ in ((")", "("), ("]", "["), ("}", "{")):   # `(D:/x/Data)`: an unmatched closer is not the path's
+                while c.endswith(close) and c.count(close) > c.count(open_):
+                    c = c[:-1].rstrip(" .,;:`")
             if len(c) > 1:
                 yield c
 
@@ -299,33 +315,35 @@ def _relative_in_text(text: str) -> bool:
     return any(_relative_escapes(tok) for tok in re.split(r"[\s\"'<>=,;|]+", text.replace("\\", "/")) if ".." in tok)
 
 
-def _mesh_texts(obj, depth: int = 0):
-    """The strings an Outfit Studio call could write to: every string in its arguments except INPUTS (a value under
-    an input-like key, a step dict whose type says load/read/import/open/reference, a `<Step type="Load...">`
-    element). A string holding JSON is walked the same way."""
+def _mesh_texts(obj, skip_inputs: bool = True, depth: int = 0, in_list: bool = False):
+    """The strings an Outfit Studio call could write to: every string in its arguments except INPUTS -- a value under
+    an input-like key, the path keys of a step (a LIST item) whose type is exactly a read (`Load: Outfit`, `Import`),
+    the path attributes of a `<Step type="Load: ...">` element. A tool that takes its source away (`skip_inputs`
+    False: move, rename, delete ...) has its inputs judged too. A string holding JSON is walked the same way."""
     if depth > 32:
         return
     if isinstance(obj, str):
-        s = obj.strip()
-        if s[:1] in "[{":
+        text = obj.strip()
+        if text[:1] in "[{":
             try:
-                yield from _mesh_texts(json.loads(s), depth + 1)
-                return
+                parsed = json.loads(text)
             except ValueError:
-                pass
-        yield _READ_ELEMENT.sub(" ", obj)
-    elif isinstance(obj, dict):
-        for k in _STEP_TYPE_KEYS:
-            v = obj.get(k)
-            if isinstance(v, str) and _READ_STEP.match(v):
+                parsed = None
+            else:
+                yield from _mesh_texts(parsed, skip_inputs, depth + 1, in_list)
                 return
+        yield _READ_ELEMENT.sub(lambda m: _ELEMENT_PATH_ATTR.sub(" ", m.group(0)), obj) if skip_inputs else obj
+    elif hasattr(obj, "items"):                       # a mapping (spelled apart from _strings: unique twin anchors)
+        read_step = in_list and skip_inputs and any(
+            isinstance(obj.get(k), str) and _READ_TYPE.match(obj[k]) for k in _STEP_TYPE_KEYS)
         for k, v in obj.items():
-            if isinstance(k, str) and _INPUT_KEY.match(tool_key(k)):
+            key = tool_key(k) if isinstance(k, str) else ""
+            if skip_inputs and (_INPUT_KEY.match(key) or (read_step and key in _STEP_PATH_KEYS)):
                 continue
-            yield from _mesh_texts(v, depth + 1)
-    elif isinstance(obj, (list, tuple)):
+            yield from _mesh_texts(v, skip_inputs, depth + 1, False)
+    elif type(obj) in (list, tuple):
         for v in obj:
-            yield from _mesh_texts(v, depth + 1)
+            yield from _mesh_texts(v, skip_inputs, depth + 1, True)
 
 
 def mesh_write_target(tool: str, args, roots) -> str:
@@ -335,7 +353,8 @@ def mesh_write_target(tool: str, args, roots) -> str:
     from . import anchored
     if not mesh_tool_judged(tool):
         return ""
-    for text in _mesh_texts(args):
+    skip_inputs = not any(w in tool_key(tool) for w in _MESH_MOVE_WORDS)
+    for text in _mesh_texts(args, skip_inputs):
         if _relative_in_text(text):
             return text if len(text) <= 300 else text[:300]
         if roots is None:
