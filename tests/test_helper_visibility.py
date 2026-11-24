@@ -201,9 +201,12 @@ def test_spawn_background_passes_the_hidden_flags_and_no_handles(monkeypatch):
     from skyguard import hidden
     seen = []
     monkeypatch.setattr(subprocess, "Popen", lambda argv, **kw: seen.append((argv, kw)))
+    # the Windows value on every OS: FLAGS is 0 off Windows, where a call passing 0 would look the same
+    sentinel = hidden.CREATE_NEW_PROCESS_GROUP | hidden.CREATE_NO_WINDOW
+    monkeypatch.setattr(hidden, "FLAGS", sentinel)
     hidden.spawn_background(["x", "y"], REPO)
     (argv, kw), = seen
-    assert argv == ["x", "y"] and kw["creationflags"] == hidden.FLAGS and kw["close_fds"] is True
+    assert argv == ["x", "y"] and kw["creationflags"] == sentinel and kw["close_fds"] is True
     assert kw["stdin"] is kw["stdout"] is kw["stderr"] is subprocess.DEVNULL
 
 
