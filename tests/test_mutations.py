@@ -9139,10 +9139,10 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in _BS]
 _DET = [
     ('tools/skyguard/engine.py', '        return with_detached(_evaluate_shell(req, roots, audit), req, audit)\n',
      '        return _evaluate_shell(req, roots, audit)\n',
-     'tests/test_detached_launch.py::test_opencode_refuses_a_detached_command', 'detached-shell-judged'),
+     'tests/test_detached_launch.py::test_opencode_refuses_a_detached_command', 'rule-S-NO-DETACHED-LAUNCH-shell-judged'),
     ('tools/skyguard/engine.py', '    return with_detached(combine(out), req, audit) if req.kind == "write" else combine(out)\n',
      '    return combine(out)\n',
-     'tests/test_detached_launch.py::test_opencode_refuses_a_detached_write', 'detached-writes-judged'),
+     'tests/test_detached_launch.py::test_opencode_refuses_a_detached_write', 'rule-W-NO-DETACHED-LAUNCH-writes-judged'),
     ('tools/skyguard/run.py', '        v = engine.with_detached(v, claude.to_request(p, "write"), audit)\n',
      '',
      'tests/test_detached_launch.py::test_claude_code_refuses_a_detached_write_through_its_hook', 'detached-claude-write-judged'),

@@ -138,7 +138,7 @@ is the reviewed packet `WingedGuardian/skyrimvr-save-guard-ci` @ 23918cc, unchan
   commands and `apply_patch` (X1, X2); OpenCode's `bash`, `write`, `edit` and `apply_patch` tools. An edit is
   judged on the file after the edit, around the changed lines, and so is a patch to an existing file (each hunk
   placed after its `@@` anchor line, whole lines only). Tests
-  `tests/test_detached_launch.py` (the packet's own cases, plus one per agent route), twins `detached-*`.
+  `tests/test_detached_launch.py` (the packet's own cases, plus one per agent route), twins `rule-*-NO-DETACHED-LAUNCH-*` and `detached-*`.
 - **Judged:** `DETACHED_PROCESS` used as a launch flag, a creationflags value with bit 0x8, Node
   `detached: true`, in code files and in inline `-c` / `-e` / `-Command` scripts (in any quoting, after `env`,
   `timeout`, `nohup` or an assignment, and with the interpreter as a variable or quoted path), heredocs and
