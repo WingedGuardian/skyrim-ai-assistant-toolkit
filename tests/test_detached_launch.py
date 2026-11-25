@@ -324,7 +324,9 @@ def game(tmp_path):
 def _codex(game, tool, tool_input):
     g = game.as_posix()
     req = codex.to_request(json.dumps({"hook_event_name": "PreToolUse", "tool_name": tool, "cwd": g,
-                                       "tool_input": tool_input}), "win32")
+                                       "tool_input": tool_input}), sys.platform)
+    # the host platform, as the hook passes it: "win32" on Linux makes a POSIX workdir non-absolute, and the engine
+    # refuses the call as INERT_EXECUTION_CWD before the detached check runs (CI e421985)
     audit = Audit(g)
     v = engine.pre_tool(req, g, lambda: paths.roots(g, "", {}), audit)
     return v, {rid for rid, _ in audit.fired}
