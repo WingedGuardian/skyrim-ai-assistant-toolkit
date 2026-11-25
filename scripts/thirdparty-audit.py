@@ -1616,6 +1616,10 @@ DELIVERY_EXEMPT = [
     ("tools/modding_harness/release.py", "follows-latest", r"[Dd]ownload, verify and unpack the latest release aside",
      "the toolkit's own update from its own GitHub release, only after the user's yes: refused unless the zip matches "
      "GitHub's published SHA-256 and its BUILD-INFO names the tag's commit; applied by the reviewed upgrader"),
+    ("tools/modding_harness/guarded_update.py", "follows-latest",
+     r"Fetch the newest release and stage it for review",
+     "the core's guarded update of the toolkit's own GitHub release: it stages only (installs and authorizes "
+     "nothing), with the same SHA-256 and BUILD-INFO checks as release.py; not wired into this toolkit yet"),
     ("tools/skyguard/shellparse.py", "pipe-to-shell", r"An installer piped to sh \(`curl \.\.\. \| sh`\)",
      "skyguard's own rule documentation, describing what that rule does not treat as decoded text"),
 ]

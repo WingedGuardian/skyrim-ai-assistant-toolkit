@@ -1,12 +1,12 @@
 # Changelog
 
-## Unreleased
+## v4.4.0 — unreleased
 
-- **The detached-launch detector now lives in the shared core** (`tools/modding_harness/detached.py`, core
-  dc71f64), so the X4 toolkit can use the same one. The guard refuses what 4.3 refused; `tools/skyguard/detached.py`
-  keeps the toolkit's wiring, and the mutation twins now break the core copy.
-- The core pin moves from 9038e6c to dc71f64. That also vendors the core's guarded-update modules, which nothing in
-  the toolkit calls yet.
+- **The detached-launch detector now lives in the shared core** (`tools/modding_harness/detached.py`), so the X4
+  toolkit can use the same one. The guard refuses what 4.3 refused; `tools/skyguard/detached.py` keeps the toolkit's
+  wiring, and the mutation twins now break the core copy.
+- Shared preservation core pinned to dc71f64 (public core master, PRs #14 and #15). That also vendors the core's
+  guarded-update modules, which nothing in the toolkit calls yet.
 
 ## v4.3.0 — 2026-11-24
 
