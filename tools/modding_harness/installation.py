@@ -22,6 +22,7 @@ from .preservation import DEFAULT_RESERVE, protects
 
 LOCAL_ONLY = frozenset((".claude/settings.local.json", ".codex/config.toml", ".opencode/opencode.jsonc",
                         ".modding-agent-harness/config.json", ".modding-agent-harness/updates.json",
+                        ".modding-agent-harness/update-failed.json", ".modding-agent-harness/update-in-flight.json",
                         "KNOWLEDGEBASE.local.md", "CLAUDE.local.md"))
 #: Private notes every toolkit shares: the learned-facts file and a user's private per-project rules file. No toolkit
 #: ships either. A toolkit's own extra notes files (a game's legacy notes name, say) are passed as `notes_files`; the

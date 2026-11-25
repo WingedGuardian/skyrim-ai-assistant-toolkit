@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **The detached-launch detector now lives in the shared core** (`tools/modding_harness/detached.py`, core
+  dc71f64), so the X4 toolkit can use the same one. The guard refuses what 4.3 refused; `tools/skyguard/detached.py`
+  keeps the toolkit's wiring, and the mutation twins now break the core copy.
+- The core pin moves from 9038e6c to dc71f64. That also vendors the core's guarded-update modules, which nothing in
+  the toolkit calls yet.
+
 ## v4.3.0 — 2026-11-24
 
 - **Updates come from GitHub, done by your agent.** On Claude Code and Codex each session start says once when a

@@ -1,7 +1,7 @@
 {
   "v": 1,
   "project": "modding-agent-harness",
-  "revision": "9038e6cd717caa8547e1396b668a6b23616421f0",
+  "revision": "dc71f64631048876845774dd3fa4752506e08831",
   "api_version": 1,
   "files": {
     "tools/modding_harness/LICENSE": "07a5c5e4aac6c4eda67565a716c8f4967dc318abe03098e5dee6a8fa7672d619",
@@ -9,12 +9,14 @@
     "tools/modding_harness/approval.py": "257f5ba1acbc1b6731b676d6c8dcc310c6e8ee8769df38b0eff896956d5d1334",
     "tools/modding_harness/charter.py": "671684e02bceaab723d4f5ef5a56b57121ceb4875e2270c2a4884dd590e17237",
     "tools/modding_harness/contracts.py": "306a5bb0cf7fc8cb02a51b9919a3200e1a647675b579141abd3e06b152b8a5ec",
+    "tools/modding_harness/detached.py": "a3750e89db0d950af5bfcb833e1503a09c5f9afe8dc4e64af2e189bfeb49c225",
     "tools/modding_harness/discovery.py": "05e335477d7ea707436606bde533c1197f43608ff1fdd1bd52ecd936b488ae4e",
     "tools/modding_harness/dispatch.py": "d44dc3e5a4f70a59e8a175c44cf7b6243be1a64ce1399c3845d185ae3231bdf2",
     "tools/modding_harness/durable.py": "2305d273461440dab9081ce88cb363afbe7ede17eae782d659c3791cb963e71f",
     "tools/modding_harness/find_session.py": "bdc2e6a8c15245831b2ff3ad791054badf4925c1223a83429cda145c2a23eaae",
     "tools/modding_harness/generic.py": "662227e3d75048529066905cb742cd07936bd1958424bd634a7d10d60f49176f",
-    "tools/modding_harness/installation.py": "701e2e1c9f7a77df2657aa72672dcb858a17e4f815dde2d9e165b55eb286057e",
+    "tools/modding_harness/guarded_update.py": "d8940b95acac8bee00d984a05f1c06df1f2c05c56e0248e41cbf515b22d7e247",
+    "tools/modding_harness/installation.py": "14ae1929930150daf7b5743d2e32e5c74c19f2f4c523b7838a80091d078ffd07",
     "tools/modding_harness/launcher.py": "2a64dc95f4a7e0255b75ab19419a2117b296246d144d025c83c3167b96b1e21e",
     "tools/modding_harness/ledger.py": "0d1ff04dd6159913e88e9179d4002ca923699c8a103a9966eab17934b478055a",
     "tools/modding_harness/locking.py": "42c8d3322567e6225cf74429aeb0b8b5361edf92986f3e488a8fb2433f9e476a",
@@ -28,7 +30,8 @@
     "tools/modding_harness/sentinel.py": "40e00c9487e984ec4f0ca1f7fa72bf74a6490bda79bd0f1d0c7af83fb66fb9a1",
     "tools/modding_harness/telemetry.py": "fdfd78ad65dd681fe311bf35b459d6969f032edf6b7bde177ec3b76d2e396f40",
     "tools/modding_harness/transport.py": "fa01781cea531e16c26f66ec89ffeea0de023f2ccb5486e59e7a849be0393db5",
-    "tools/modding_harness/upgrade.py": "b4742b93dbeeb70701184e96721a58275f8f3c01154ac960aeb24af3e93108a7",
+    "tools/modding_harness/update_review.py": "8ad16fdab6a40d9700e865bcb72bcf40ba1fb671d4cfaafd50201038b25ff77f",
+    "tools/modding_harness/upgrade.py": "a7cf2b08fc27773b3b3f8881c7eeddb0c9a42f633c34eb526c2b95cb0a15f6b5",
     "tools/modding_harness/workspace.py": "264d871f6eca26dd91d8616cdcc1424d0d101d436c3aec01f4d52d4b67ba7d64"
   }
 }

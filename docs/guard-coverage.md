@@ -130,12 +130,13 @@ Ranked by what an agent can do through the route, the uncovered routes to close 
 A process started with Windows `DETACHED_PROCESS` (0x00000008) has no console, so every console program it starts
 gets a new visible window (MEASURED 2026-11-24: a headless-VR helper launched detached opened a console window
 every second for a whole run). The rule refuses code that launches that way; a deliberate visible console
-(`CREATE_NEW_CONSOLE`, `Start-Process`, a terminal) is not refused. In `tools/skyguard/detached.py`, the statement
-detector is the reviewed packet `WingedGuardian/skyrimvr-save-guard-ci` @ 23918cc, unchanged except its own exemption
-list. The toolkit adds two readers of its own, reviewed in this release: one for apply_patch text, and one for shell
-words, which finds a `-c` script in any quoting, after `env` / `timeout` / `nohup`, or with the interpreter as a
-variable. The shell-word reader closes gaps the packet has (the X4 toolkit's review, 2026-11-24), so this rule
-refuses more than the packet alone does.
+(`CREATE_NEW_CONSOLE`, `Start-Process`, a terminal) is not refused. Since 4.4 the detector is the shared core's
+(`tools/modding_harness/detached.py`, vendored; its docstring lists the known limits), and `tools/skyguard/detached.py`
+is the toolkit's wiring (`finding()`), passing the core's exemption list plus the toolkit's own files. The statement
+detector is the reviewed packet `WingedGuardian/skyrimvr-save-guard-ci` @ 23918cc. Two readers were added in 4.3 and
+moved into the core with it: one for apply_patch text, and one for shell words, which finds a `-c` script in any
+quoting, after `env` / `timeout` / `nohup`, or with the interpreter as a variable. The shell-word reader closes gaps
+the packet has (the X4 toolkit's review, 2026-11-24), so this rule refuses more than the packet alone does.
 
 - **Routes (READ `engine.evaluate_shell`, `engine.evaluate_writes`, `run.py` protect-files):** Claude Code's
   Bash, PowerShell and Monitor commands (C1-C3) and Write, Edit and NotebookEdit text (C4, C5); Codex's shell

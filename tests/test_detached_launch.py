@@ -1,8 +1,9 @@
 """S-/W-NO-DETACHED-LAUNCH (4.3): a helper launched DETACHED gives each console child a visible window.
 
 The DENY / ALLOW tables and the edit-in-context tests are the reviewed packet's own (skyrimvr-save-guard-ci 23918cc,
-no_detached_launch/test_no_detached_launch.py), run against tools/skyguard/detached.py in process instead of through
-the packet's hook process. The rest checks the wiring: each agent's real entry point (Claude Code's hook wrapper,
+no_detached_launch/test_no_detached_launch.py), run in process against the detector (the core's
+tools/modding_harness/detached.py, re-exported by tools/skyguard/detached.py) instead of through the packet's hook
+process. The rest checks the wiring: each agent's real entry point (Claude Code's hook wrapper,
 Codex's adapter, OpenCode's adapter) refuses, a refused call names the fix, and a detector failure allows (fail open).
 """
 import json
@@ -20,7 +21,8 @@ from skyguard.audit import Audit  # noqa: E402
 
 
 def decide(tool, tool_input):
-    return "deny" if detached.judge(tool, tool_input) else "allow"
+    # the toolkit's exempt list, as finding() passes it (the core's default names only its own files)
+    return "deny" if detached.judge(tool, tool_input, exempt=detached.EXEMPT) else "allow"
 
 
 INCIDENT = ("    p = subprocess.Popen(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,\n"
@@ -370,6 +372,13 @@ def _opencode(game, tool, args):
 def test_opencode_refuses_a_detached_write(game):
     got = _opencode(game, "write", {"filePath": str(game / "drive.py"), "content": INCIDENT})
     assert got["decision"] == "deny" and "DETACHED" in got["reason"]
+
+
+def test_the_toolkits_own_detector_files_stay_editable(game):
+    """finding() passes the toolkit's exempt list: the core's default names only the vendored core files."""
+    for rel in ("tools/skyguard/detached.py", "tools/modding_harness/detached.py"):
+        got = _opencode(game, "write", {"filePath": str(game / rel), "content": INCIDENT})
+        assert got["decision"] != "deny", (rel, got)     # nothing else refuses this write, so a deny is this rule's
 
 
 def test_opencode_refuses_a_detached_edit_in_context(game):
