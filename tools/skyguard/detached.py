@@ -692,10 +692,16 @@ def _words(command, mode):
             cur.append("<<<")                   # a here-string (`cat <<< "x"`), never a heredoc
             have, i = True, i + 3
             continue
+        if ch == "#" and not have:              # a comment, to the end of the line (bash and PowerShell)
+            eol = command.find("\n", i)
+            i = n if eol < 0 else eol
+            continue
         if mode == "bash" and command.startswith("$((", i):
-            arith += 1
-        elif arith and command.startswith("))", i):
-            arith -= 1
+            cur.append("$((")                   # arithmetic: `<<` inside it is a shift; depth counts its brackets
+            have, arith, i = True, arith + 2, i + 3
+            continue
+        if arith and ch in "()":
+            arith = max(arith + (1 if ch == "(" else -1), 0)
         if mode == "bash" and ch == "<" and command.startswith("<<", i) and not arith:   # $((a<<b)) is a shift
             m = HEREDOC_OP.match(command, i)
             if m:

@@ -663,3 +663,15 @@ def test_the_adversarial_patch_stays_inside_the_engine_budget(tmp_path):
 def test_a_here_string_or_a_shift_does_not_hide_the_next_line(cmd):
     words = detached._words(cmd, "bash")
     assert "python" in words and detached.judge_words(cmd, "bash")
+
+
+@pytest.mark.parametrize("cmd", [
+    "# use $(( here\ncat > notes.md <<'EOF'\n| python -c \"creationflags=8\" |\nEOF\n",
+    "echo $(( ((x)) << y ))\ncat > notes.md <<'EOF'\n| python -c \"creationflags=8\" |\nEOF\n",
+])
+def test_a_comment_or_nested_brackets_do_not_unbalance_arithmetic(cmd):
+    assert not detached.judge_words(cmd, "bash")
+
+
+def test_a_detached_launch_after_arithmetic_is_still_seen():
+    assert detached.judge_words("echo $(( ((x)) << y ))\npython -c 'Popen([\"x\"], creationflags=8)'\n", "bash")
