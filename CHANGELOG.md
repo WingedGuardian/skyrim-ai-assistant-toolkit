@@ -13,6 +13,10 @@
   wiring, and the mutation twins now break the core copy.
 - Shared preservation core pinned to a84098c (public core master, PRs #14, #15 and #17). That also vendors the
   core's guarded-update modules, which nothing in the toolkit calls yet.
+- Housekeeping (the archive helper shared with the X4 toolkit): a stray X4 save is recognised by its name too, never
+  archived; small top-level `.json`, `.jsonl` and `.log` evidence stays local beside `ARCHIVED.md` (still in the
+  zip); hashing a file no longer records a read, so housekeeping's own look never holds a folder; the restore line
+  in `ARCHIVED.md` names the helper by its full path.
 - Fixed: on Linux and macOS, resolving a very long path in the guard took time quadratic in its length (core
   issue #16).
 

@@ -1922,7 +1922,7 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
            "        w, r = max(w, st.st_mtime), 0.0",
            "tests/test_housekeep_rules.py::ReadsCountAsUse::test_build_output_a_live_build_is_reading_is_kept"),
           ("hashing-counts-as-a-read", "tools/housekeep_archive.py",
-           "        os.utime(path, ns=(before.st_atime_ns, after.st_mtime_ns))", "        pass",
+           "    with open_unrecorded(path) as stream:", "    with open(path, 'rb') as stream:",
            "tests/test_housekeep_archive.py::Selection::test_housekeep_hashing_does_not_count_as_a_read"),
           ("approval-gate-bypassed", "tools/housekeep_daily.py",
            '    return bool(cfg["approved_sha256"]) and cfg["approved_sha256"] == code_sha256()', "    return True",

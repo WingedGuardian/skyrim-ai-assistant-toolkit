@@ -7,7 +7,7 @@ re-copying unchanged scripts thousands of times. Very little of it was *old*; it
 policy; `tools/housekeep.py` implements the parts a tool can.
 
 <!-- shared-policy:begin -->
-## Shared policy (identical in the Skyrim and X4 toolkits -- change both)
+## Shared policy (identical in every toolkit built on the shared core -- change all copies)
 
 ### Certainty before removal
 
