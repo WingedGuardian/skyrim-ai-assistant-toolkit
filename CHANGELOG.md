@@ -1,6 +1,6 @@
 # Changelog
 
-## v4.4.0 — unreleased
+## v4.3.1 — unreleased
 
 - **The detached-launch detector now lives in the shared core** (`tools/modding_harness/detached.py`), so the X4
   toolkit can use the same one. The guard refuses what 4.3 refused; `tools/skyguard/detached.py` keeps the toolkit's
