@@ -8,7 +8,7 @@ import sys
 import time
 
 sys.dont_write_bytecode = True
-from modding_harness import contracts, generic, installation, release, telemetry
+from modding_harness import contracts, generic, guarded_update, installation, release, telemetry
 from skyguard import portable, save_store
 
 # The files of a 3.x personal save policy (one reviewed install's; kept by user ruling 2026-10-20). An upgrade keeps
@@ -16,6 +16,8 @@ from skyguard import portable, save_store
 LEGACY_POLICY_FILES = (".claude/hooks/protect-save-access.py", ".claude/hooks/save-access-entry.ps1",
                        ".claude/scripts/guarded-runtime-load.py", ".claude/hooks/restore-save-backup.py",
                        ".claude/hooks/test_protect_save_access.py")
+#: Files an upgrade keeps as this install's own: the legacy policy above and the paths file setup writes.
+SKYRIM_LOCAL = (*LEGACY_POLICY_FILES, "skyrim-paths.env", ".claude/skyrim-paths.env")
 
 
 def main(argv=None):
@@ -30,6 +32,7 @@ def main(argv=None):
     sub.add_parser("preferences")
     installation.add_arguments(sub)
     release.add_arguments(sub)
+    guarded_update.add_arguments(sub)
     sub.add_parser("save-list")
     restore = sub.add_parser("save-restore")
     restore.add_argument("transaction")
@@ -54,8 +57,8 @@ def main(argv=None):
             from skyguard import upgrade_render
             # A 3.x personal save policy's files are kept as local files and never registered: no save policy is
             # consulted since 4.1 (the save vault), so --integrate-local-policy has nothing to build.
-            result = installation.handle(args, root, local_files=(*LEGACY_POLICY_FILES,
-                "skyrim-paths.env", ".claude/skyrim-paths.env"), candidate_preparer=upgrade_render.prepare,
+            result = installation.handle(args, root, local_files=SKYRIM_LOCAL,
+                candidate_preparer=upgrade_render.prepare,
                 candidate_validator=upgrade_render.validate, review_builder=None)
         elif args.command in release.COMMANDS:
             from skyguard import update_check
@@ -68,6 +71,19 @@ def main(argv=None):
                 # This install's paths for upgrade-stage --render-config: the applied hooks must work at once.
                 result["render_config"] = update_check.write_render_config(
                     args.installed_root or root, Path(result["candidate"]).parent)
+        elif args.command in guarded_update.COMMANDS:
+            # The guarded update (asks first, keeps the user's files, setup + canary, rolls back on failure). The
+            # policy is this INSTALLED toolkit's code; for apply the pre-update canary is kept outside the install.
+            from skyguard import update_check, upgrade_render
+            target = Path(args.installed_root or root)
+            policy, new_policy = update_check.update_policy(target), None
+            if args.command == "update-apply":
+                new_policy = policy
+                policy = update_check.update_policy(target, canary=update_check.keep_installed_canary(target, args.bundle))
+            result = guarded_update.handle(args, root, update_check.PROFILE, policy, notes_files=SKYRIM_LOCAL,
+                                           candidate_preparer=upgrade_render.prepare,
+                                           candidate_validator=upgrade_render.validate, new_policy=new_policy)
+            exit_status = guarded_update.exit_code(result)
         elif args.command == "save-list":
             from modding_harness import workspace
             target = save_store.store(root)
@@ -95,7 +111,10 @@ def main(argv=None):
             if args.preview:
                 result.update(preview=True, execution_authorized=False, runtime_writes=False)
     except (OSError, ValueError, UnicodeError, RecursionError) as exc:
-        if args.command in release.COMMANDS:
+        if args.command in guarded_update.COMMANDS:
+            # A refusal before anything changed (exit 2); the review or report says why.
+            result, exit_status = {"ok": False, "error": str(exc), "installed_changed": False}, guarded_update.exit_code(exc)
+        elif args.command in release.COMMANDS:
             # A refused or failed update fetch says why, and fails; nothing installed has changed.
             result, exit_status = {"ok": False, "error": str(exc), "installed_changed": False}, 2
         elif args.command in installation.COMMANDS:

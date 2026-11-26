@@ -615,7 +615,9 @@ A: Ask your agent: say "update the toolkit". Updates come from the toolkit's Git
 found it and downloaded it the first time). On Claude Code and Codex each session start says once when a newer
 release is out (on other agents, ask "check for toolkit updates"); the agent
 then downloads it, refuses it unless it matches the SHA-256 GitHub publishes for it, shows you what changes (your
-own edited files first), and installs nothing until you say yes. Every applied update can be undone with
+own edited files first, and any change to the guards, which needs a separate yes), and installs nothing until you
+say yes. After applying it runs setup and checks that the installed guards still refuse what they should and allow a
+harmless command; if either fails, the update is rolled back by itself. Every applied update can be undone with
 `python tools/agent-harness.py upgrade-rollback <id> --installed-root . --quiescent`. The check asks GitHub at most
 once a day, in the background; turn it off with `{"v": 1, "check": false}` in
 `.modding-agent-harness/updates.json`. Skill: `toolkit-update`.

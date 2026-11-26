@@ -345,10 +345,12 @@ def test_the_update_setting_survives_every_upgrade():
 
 def test_the_skill_is_shipped_and_names_every_step():
     text = (REPO / "agent/skills/toolkit-update/SKILL.md").read_text(encoding="utf-8")
-    for step in ("update-check --now", "update-fetch", "upgrade-stage", "--render-config", "upgrade-apply",
-                 "--quiescent", "setup.sh --agent auto", "hook-canary.sh", "upgrade-rollback",
-                 "preserve_collision", "merged_settings_hashes", "previous_sha256"):   # learned from the E2E run
+    for step in ("update-check --now", "update-stage", "update-apply", "--quiescent", "--accept-guard-changes",
+                 "separate, explicit go", "in the background", "setup.sh --agent auto", "update_canary.py",
+                 "hook-canary.sh", "upgrade-rollback", "update-clear-failed", "TOOLKIT UPDATE NEEDS THE USER",
+                 "preserve_collision", "merged_settings", "unchanged upstream"):   # 4.3 E2E + the guarded update
         assert step in text, step
+    assert "update-fetch" not in text and "upgrade-apply" not in text     # the unguarded path skips the health check
 
 
 # --- one refusal per clause (each is the named test of a mutation twin) ---------------------------------------------

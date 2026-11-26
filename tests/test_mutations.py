@@ -9256,6 +9256,47 @@ _DET = [
      'tests/test_detached_launch.py::test_allows', 'detached-toolkit-files-exempt'),
 ]
 MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in _DET]
+
+# ---- 4.3.1: the guarded update (update-stage / update-apply wiring, the canary) ----
+_GU = [
+    ('tools/agent-harness.py', '                new_policy = policy\n',
+     '                pass\n',
+     'tests/test_guarded_update_wiring.py::test_apply_runs_with_the_kept_canary_and_the_new_policy', 'gu-apply-passes-new-policy'),
+    ('tools/agent-harness.py', '                policy = update_check.update_policy(target, canary=update_check.keep_installed_canary(target, args.bundle))\n',
+     '                pass\n',
+     'tests/test_guarded_update_wiring.py::test_apply_runs_with_the_kept_canary_and_the_new_policy', 'gu-apply-runs-the-kept-canary'),
+    ('tools/agent-harness.py', '            result = guarded_update.handle(args, root, update_check.PROFILE, policy, notes_files=SKYRIM_LOCAL,\n',
+     '            result = guarded_update.handle(args, root, update_check.PROFILE, policy, notes_files=(),\n',
+     'tests/test_guarded_update_wiring.py::test_apply_runs_with_the_kept_canary_and_the_new_policy', 'gu-skyrim-local-files-kept'),
+    ('tools/agent-harness.py', '            exit_status = guarded_update.exit_code(result)\n',
+     '            pass\n',
+     'tests/test_guarded_update_wiring.py::test_a_failed_apply_exits_1', 'gu-failed-apply-exits-1'),
+    ('tools/skyguard/update_check.py', '    if off(env) or env.get("PYTEST_CURRENT_TEST") or env.get("HARNESS_FIXTURE_ROOT"):\n        return failed\n',
+     '    if off(env) or env.get("PYTEST_CURRENT_TEST") or env.get("HARNESS_FIXTURE_ROOT"):\n        return ""\n',
+     'tests/test_guarded_update_wiring.py::test_a_failed_update_is_said_at_every_session_start_even_with_checking_off', 'gu-failed-note-even-when-off'),
+    ('tools/skyguard/update_check.py', '"agent/guards/*", "tools/agent-harness.py", "tools/skyguard/*", "tools/modding_harness/*",',
+     '"agent/guards/*", "tools/agent-harness.py", "tools/modding_harness/*",',
+     'tests/test_guarded_update_wiring.py::test_every_shipped_guard_file_is_guard_code_to_the_update', 'gu-skyguard-is-guard-code'),
+    ('tools/skyguard/update_check.py', '    target = Path(bundle).resolve().parent / INSTALLED_CANARY\n',
+     '    target = Path(root) / INSTALLED_CANARY\n',
+     'tests/test_guarded_update_wiring.py::test_a_kept_canary_is_the_installed_bytes_outside_the_install', 'gu-kept-canary-outside-install'),
+    ('tools/skyguard/update_canary.py', '        return str(decision).lower() in ("deny", "block")\n',
+     '        return True\n',
+     'tests/test_update_canary.py::test_a_working_install_passes', 'gu-canary-reads-the-decision'),
+    ('tools/skyguard/update_canary.py', '    ok = any(code is not None and refused(code, out) for _c, code, out in results)\n',
+     '    ok = True\n',
+     'tests/test_update_canary.py::test_a_guard_that_allows_everything_fails', 'gu-canary-requires-a-refusal'),
+    ('tools/skyguard/update_canary.py', '        checks.append(("Claude Code allows a harmless command ({})".format(c), code == 0 and not refused(code, out),\n',
+     '        checks.append(("Claude Code allows a harmless command ({})".format(c), code == 0,\n',
+     'tests/test_update_canary.py::test_a_guard_that_refuses_everything_fails', 'gu-canary-requires-an-allow'),
+    ('tools/skyguard/update_canary.py', '    return [("OpenCode refuses a raw plugin write", code is not None and refused(code, out),\n',
+     '    return [("OpenCode refuses a raw plugin write", True,\n',
+     'tests/test_update_canary.py::test_a_broken_opencode_adapter_fails', 'gu-canary-checks-opencode'),
+    ('tools/skyguard/update_canary.py', '    if not checks:\n',
+     '    if False:\n',
+     'tests/test_update_canary.py::test_nothing_to_check_fails', 'gu-canary-nothing-checked-fails'),
+]
+MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in _GU]
 _BS2 = [
     ('tools/skyguard/mcp_rules.py', '        for c in _absolute_candidates(text):', '        for c in [text]:',
      'tests/test_bodyslide_guard.py::test_an_outfit_studio_write_into_loaded_folders_is_refused', 'mesh-paths-inside-text'),

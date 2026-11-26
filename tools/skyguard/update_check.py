@@ -93,6 +93,59 @@ def write_render_config(root, folder):
     return str(path)
 
 
+# --- the guarded update (modding_harness.guarded_update): what is guard code, how to set up, how to check ---------
+
+#: Guard code: the shipped paths `self_rules.install_kind` calls GUARD (S-SELF-GUARD), as posix globs. A release that
+#: changes one of them needs the user's separate go (`--accept-guard-changes`) before it is applied.
+GUARD_GLOBS = (".claude/hooks/*", ".claude/settings*.json", ".codex/*", ".opencode/hooks/*", ".opencode/plugins/*",
+               "agent/guards/*", "tools/agent-harness.py", "tools/skyguard/*", "tools/modding_harness/*",
+               "tools/modding-harness.lock.json", "tools/resaver_cli_cache.py", "tools/kb-guard.sh",
+               "tools/session-charter.sh", "GUARD-FILES.sha256")
+CANARY = "tools/skyguard/update_canary.py"
+#: The files that define the setup and the canary below: a release that changes one runs the new canary AND the
+#: pre-update one (a copy kept beside the staged bundle, so it is the installed bytes).
+POLICY_FILES = ("setup.sh", CANARY, "tools/skyguard/update_check.py")
+INSTALLED_CANARY = "installed-canary.py"
+RENDER_CONFIG = ".modding-agent-harness/update-render-config.json"
+
+
+def _python(root):
+    """The hooks' interpreter (SKYGUARD_PYTHON in skyrim-paths.env), else the one running this."""
+    from skyguard import paths
+    try:
+        recorded = paths.read_install(str(root), {}).first("SKYGUARD_PYTHON")
+    except Exception:
+        recorded = None
+    return recorded if recorded and Path(recorded).is_file() else Path(sys.executable).as_posix()
+
+
+def _render_config_file(root):
+    path = Path(root) / RENDER_CONFIG
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes((json.dumps(render_config(root), indent=1, sort_keys=True) + "\n").encode("utf-8"))
+    return path
+
+
+def update_policy(root, canary=None):
+    """This install's `UpdatePolicy`: setup is `setup.sh --agent auto` under Git Bash, the canary asks the installed
+    guards to judge a refused and an allowed call (update_canary.py). CANARY (a path) runs a kept copy instead."""
+    from modding_harness.update_review import UpdatePolicy
+    root = Path(root).resolve()
+    return UpdatePolicy(GUARD_GLOBS, POLICY_FILES, (_bash(), "setup.sh", "--agent", "auto"),
+                        (_python(root), "-B", str(canary or root / CANARY), "--root", str(root)), _render_config_file)
+
+
+def keep_installed_canary(root, bundle):
+    """Copy the INSTALLED canary beside the staged bundle (outside the install), before apply replaces it, and return
+    the copy: when a release changes the canary or setup, the core runs the pre-update canary too."""
+    source = Path(root) / CANARY
+    if not source.is_file():
+        raise ValueError("{} is missing from this install; re-run setup.sh or reinstall before updating".format(CANARY))
+    target = Path(bundle).resolve().parent / INSTALLED_CANARY
+    target.write_bytes(source.read_bytes())
+    return target
+
+
 def off(env):
     """The Skyrim switches that turn update checks off, for the session note AND `update-check` itself:
     SKYGUARD_UPDATE_CHECK=off, MODDING_HARNESS_UPDATE_CHECK=off, and SKYGUARD_HOUSEKEEP_SWEEP=off -- the switch that
@@ -114,16 +167,20 @@ def session_note(project) -> str:
         own = (Path(project).resolve() / "tools" / "agent-harness.py") == tool
     except OSError:
         own = False
-    if not (own and tool.is_file()) or off(env):
+    if not (own and tool.is_file()):
         return ""
-    if env.get("PYTEST_CURRENT_TEST") or env.get("HARNESS_FIXTURE_ROOT"):
-        return ""
+    # A failed or interrupted update leaves the guards unverified: said every session, even with checking off.
+    from modding_harness import guarded_update
+    failed = guarded_update.session_note(project)
+    failed = failed + "\n" if failed else ""
+    if off(env) or env.get("PYTEST_CURRENT_TEST") or env.get("HARNESS_FIXTURE_ROOT"):
+        return failed
     if installed_version(project) is None:
-        return ""                               # a git checkout: nothing to compare, so never ask GitHub
+        return failed                           # a git checkout: nothing to compare, so never ask GitHub
     line = release.note(project, PROFILE)
     try:
         from skyguard import hidden                      # no console window, ever (hidden.py); never waits
         hidden.spawn_background([sys.executable, "-B", str(tool), "update-check"], project)
     except Exception:
         pass
-    return line + "\n" if line else ""
+    return failed + (line + "\n" if line else "")
