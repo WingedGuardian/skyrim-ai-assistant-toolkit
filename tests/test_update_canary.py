@@ -1,6 +1,7 @@
 """The toolkit-update canary (tools/skyguard/update_canary.py): run after an update's setup, it must pass on a working
 install and fail when a guard is broken, because a failure is what rolls the update back."""
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -104,7 +105,7 @@ def codex_toolkit(tmp_path):
     shutil.copy2(REPO / "tools" / "kb-guard.sh", root / "tools" / "kb-guard.sh")
     hooks_json = (REPO / ".codex" / "hooks.json").read_text(encoding="utf-8")
     (root / ".codex" / "hooks.json").write_text(hooks_json.replace("{{CODEX_ROOT_POSIX}}", root.as_posix())
-                                                .replace("{{CODEX_ROOT}}", str(root)), encoding="utf-8")
+                                                .replace("{{CODEX_ROOT}}", root.as_posix()), encoding="utf-8")
     return root
 
 
@@ -113,13 +114,47 @@ def test_a_set_up_codex_hook_refuses_the_plugin_write(tmp_path):
     or every update on a Codex install would roll itself back."""
     code, out = canary(codex_toolkit(tmp_path))
     assert code == 0 and "ok    Codex refuses a raw plugin write" in out, out
+    assert "ok    Codex allows a harmless command" in out, out
+
+
+def replace_codex_entry(root, ps, sh):
+    hooks = root / ".codex" / "hooks"
+    entry = hooks / ("skyguard-entry.ps1" if os.name == "nt" else "skyguard-entry.sh")
+    entry.write_text(ps if os.name == "nt" else sh, encoding="ascii", newline="\n")
 
 
 def test_a_codex_hook_that_allows_everything_fails(tmp_path):
     root = codex_toolkit(tmp_path)
-    (root / ".codex" / "hooks" / "skyguard-entry.sh").write_text("#!/bin/bash\ncat >/dev/null\nexit 0\n", newline="\n")
+    replace_codex_entry(root, "exit 0\n", "cat >/dev/null\nexit 0\n")
     code, out = canary(root)
     assert code == 1 and "FAIL  Codex refuses a raw plugin write" in out, out
+
+
+def test_a_codex_canary_runs_the_rendered_command(tmp_path):
+    root = codex_toolkit(tmp_path)
+    definitions = root / ".codex" / "hooks.json"
+    data = json.loads(definitions.read_text(encoding="utf-8"))
+    hook = data["hooks"]["PreToolUse"][0]["hooks"][0]
+    hook["commandWindows" if os.name == "nt" else "command"] = "echo not-a-hook-verdict"
+    definitions.write_text(json.dumps(data), encoding="utf-8")
+    code, out = canary(root)
+    assert code == 1 and "FAIL  Codex refuses a raw plugin write" in out, out
+
+
+def test_a_codex_hook_that_exits_2_does_not_prove_a_refusal(tmp_path):
+    root = codex_toolkit(tmp_path)
+    replace_codex_entry(root, "exit 2\n", "cat >/dev/null\nexit 2\n")
+    code, out = canary(root)
+    assert code == 1 and "FAIL  Codex refuses a raw plugin write" in out, out
+
+
+def test_a_codex_hook_that_refuses_everything_fails(tmp_path):
+    root = codex_toolkit(tmp_path)
+    deny = '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"}}'
+    replace_codex_entry(root, "[Console]::WriteLine('" + deny + "')\n", "printf '%s\\n' '" + deny + "'\n")
+    code, out = canary(root)
+    assert code == 1 and "ok    Codex refuses a raw plugin write" in out, out
+    assert "FAIL  Codex allows a harmless command" in out, out
 
 
 def test_an_unrendered_codex_install_is_not_checked(tmp_path):

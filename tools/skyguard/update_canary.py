@@ -6,7 +6,8 @@ each configured host's real hook entry the way that host does, a payload on stdi
 
 - a raw text write to a plugin file (`Data/<name>.esp`) is REFUSED: the guard is alive and judging;
 - a harmless shell command (`echo`) is ALLOWED: the guard does not refuse everything (Claude Code only, where a
-  hook that blocks every call would block the very session that has to repair it).
+  hook that blocks every call would block the very session that has to repair it, and Codex, whose Windows entry
+  reports an engine failure as a deny).
 
 Hosts checked: Claude Code (every PreToolUse hook in .claude/settings.json whose matcher covers the tool), Codex
 (.codex/hooks.json, once setup has filled in its paths) and OpenCode (its Python adapter, which every install
@@ -21,6 +22,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -79,8 +81,6 @@ def claude_checks(root, shell):
     except (OSError, ValueError):
         return []
     groups = (settings.get("hooks") or {}).get("PreToolUse") or []
-    import re
-
     def commands(tool):
         out = []
         for group in groups:
@@ -111,23 +111,66 @@ def claude_checks(root, shell):
     return checks
 
 
+def codex_verdict(code, out):
+    """Codex needs exit 0 and a PreToolUse decision inside hookSpecificOutput."""
+    if code != 0:
+        return "invalid"
+    if not out.strip():
+        return "allow"
+    try:
+        body = json.loads(out)["hookSpecificOutput"]
+        if body["hookEventName"] == "PreToolUse":
+            decision = body.get("permissionDecision", "allow")
+            if decision in ("allow", "deny"):
+                return decision
+    except (KeyError, TypeError, ValueError):
+        pass
+    return "invalid"
+
+
 def codex_checks(root, shell):
     path = root / ".codex" / "hooks.json"
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError:
+    except FileNotFoundError:
         return []
+    except (OSError, ValueError) as exc:
+        return [("Codex hook", False, str(exc))]
     if "{{" in text:
         return []                                     # setup has not configured Codex on this install
-    entry = root / ".codex" / "hooks" / "skyguard-entry.sh"
-    if shell is None or not entry.is_file():
-        return [("Codex hook", False, "Git Bash or .codex/hooks/skyguard-entry.sh is missing")]
+    windows = os.name == "nt"
+    try:
+        groups = json.loads(text)["hooks"]["PreToolUse"]
+        commands = [(re.compile(group.get("matcher") or ".*"),
+                     hook["commandWindows"] if windows and "commandWindows" in hook
+                     else hook["command"]) for group in groups for hook in group["hooks"] if hook["type"] == "command"]
+    except (KeyError, TypeError, ValueError, re.error) as exc:
+        return [("Codex hook", False, "invalid rendered hook definition: {}".format(exc))]
+    if not windows and shell is None:
+        return [("Codex hook", False, "Bash was not found")]
     patch = "*** Begin Patch\n*** Add File: {}\n+update canary\n*** End Patch".format(PROBE)
-    payload = {"hook_event_name": "PreToolUse", "tool_name": "apply_patch", "cwd": root.as_posix(),
-               "session_id": "update-canary", "tool_input": {"command": patch}}
-    code, out = run([shell, entry.as_posix(), "pre-tool"], payload, root)
-    return [("Codex refuses a raw plugin write", code is not None and refused(code, out),
-             "could not run: " + out if code is None else "exit %d" % code)]
+    checks = []
+    for tool, sample, expected, label in (
+        ("apply_patch", patch, "deny", "Codex refuses a raw plugin write"),
+        ("Bash", "echo toolkit-update-canary", "allow", "Codex allows a harmless command"),
+    ):
+        payload = {"hook_event_name": "PreToolUse", "tool_name": tool, "cwd": root.as_posix(),
+                   "session_id": "update-canary", "tool_input": {"command": sample}}
+        results = []
+        for matcher, command in commands:
+            if not matcher.fullmatch(tool):
+                continue
+            if windows:
+                # Keep the rendered command's quoting and its PowerShell fallback intact under cmd.exe.
+                cmd = subprocess.list2cmdline([os.environ.get("COMSPEC") or "cmd.exe"])
+                argv = '{} /D /S /C "{}"'.format(cmd, command)
+            else:
+                argv = [shell, "-c", command]
+            code, out = run(argv, payload, root)
+            results.append(codex_verdict(code, out))
+        ok = bool(results) and "invalid" not in results and ("deny" in results) == (expected == "deny")
+        checks.append((label, ok, ", ".join(results) if results else "no matching command hook"))
+    return checks
 
 
 def opencode_checks(root):

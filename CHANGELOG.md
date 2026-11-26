@@ -4,7 +4,7 @@
 
 - **Updates check themselves and roll back on failure.** "Update the toolkit" now stages the release for review,
   asks a separate yes for any change to the guards, then applies it, runs setup and checks the installed guards
-  (each agent's hooks must refuse a raw plugin write; Claude Code's must allow a harmless command). If setup or that
+  (each agent's hooks must refuse a raw plugin write, and Claude Code and Codex must allow a harmless command). If setup or that
   check fails, the update is rolled back by itself. If even the rollback cannot be verified, every session start
   says so and further updates refuse until you have looked (`update-clear-failed`).
 
