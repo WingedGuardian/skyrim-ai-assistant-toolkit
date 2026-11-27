@@ -82,10 +82,9 @@ python tools/agent-harness.py update-apply --installed-root . --bundle "<bundle>
 
 Add `--accept-guard-changes` only when the user gave the separate go for the guard changes in step 3.
 
-What it does after replacing the files: `bash setup.sh --agent auto`, then the guard check
-(`tools/skyguard/update_canary.py`: each configured agent's installed hooks must refuse a raw plugin write, and
-Claude Code's must allow a harmless command). When the release changes setup or that check, the pre-update check
-runs too.
+After replacing the files, it runs `bash setup.sh --agent auto` and `tools/skyguard/update_canary.py`. The canary
+requires each configured agent's installed hooks to refuse a raw plugin write. It also checks that any harmless
+command it probes is allowed. When the release changes setup or the canary, the pre-update check runs too.
 
 ## 5. Report
 
