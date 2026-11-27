@@ -13,6 +13,7 @@ import time
 import unittest
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from conftest import REPO  # noqa: E402
@@ -192,6 +193,23 @@ class ArchiveFolder(Base):
                     ha.restore_archive(stub, (".other",))
                 self.assertFalse((t / "ordinary.txt").exists())
                 self.assertFalse((t / name).exists())
+
+    def test_restore_refuses_names_rewritten_by_windows(self):
+        t = self.task()
+        for name in ("kept.ESS.", "kept.SKSE ", "subfolder /notes.txt", "file?.txt"):
+            with self.subTest(name=name):
+                archive = self.d / "old.zip"
+                with zipfile.ZipFile(archive, "w") as z:
+                    z.writestr("ordinary.txt", b"ordinary")
+                    z.writestr(name, b"synthetic")
+                receipt = json.dumps({"zip": str(archive), "save_exts": []})
+                stub = t / ha.STUB
+                stub.write_text(f"<!-- {receipt} -->", encoding="utf-8")
+                before = tree_hash(t)
+                with patch.object(ha, "os", SimpleNamespace(name="nt")):
+                    with self.assertRaisesRegex(ha.ArchiveError, "archive member name changes during Windows extraction"):
+                        ha.restore_archive(stub)
+                self.assertEqual(before, tree_hash(t))
 
     def test_worktree_git_file_is_refused_by_archive_helper(self):
         t = self.task()
