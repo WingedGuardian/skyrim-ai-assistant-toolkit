@@ -40,10 +40,10 @@ other slices) and a totals job checks the shards' logs as one gate
 independent of this queue.
 
 Before any push, run the local pre-push gate: `python scripts/prepush-gate.py`
-(5-10 minutes: collection against the recorded floors, the generated-file and
-guard-hash drift checks, the deterministic sentinels -- mutation anchors and
-inventory, corpus rows, rule codes, timing shapes, pin audits, the CI tripwire
-and workflow tests -- and the tests for the files the push changes). Of ten red
+(collection against the recorded floors, generated-file and guard-hash drift,
+lint, static sentinels such as mutation anchors and workflow tests, and the
+selected tests for changed files). CI runs the mutations and slow or
+load-sensitive suites. Of ten red
 full runs in the last week of October 2026, seven failed on something this gate
 catches at the desk in minutes. The maintainers' clones install it as a git
 `pre-push` hook; `--no-verify` is not a workflow.

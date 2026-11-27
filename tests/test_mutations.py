@@ -10691,10 +10691,6 @@ MUTATIONS += [pytest.param(*m[:4], id=m[4]) for m in [
     ("tools/skyguard/writes.py", 'modules.get(func.value.id, func.value.id) == "pathlib")', 'func.value.id == "pathlib")',
      "tests/test_review_v4_guard_gaps.py::test_literal_python_spellings_of_a_plugin_write_are_seen[module-alias]",
      "python-path-module-alias"),
-    ("scripts/prepush-gate.py", '    files = {p for p in changed if p != "tests/test_mutations.py"}', '    files = set()',
-     "tests/test_prepush_gate.py::test_a_changed_guard_file_selects_its_twins", "gate-selects-twins-of-changed-files"),
-    ("scripts/prepush-gate.py", '    if count > processes * per_process:', '    if False:',
-     "tests/test_prepush_gate.py::test_a_tree_without_the_twin_selector_leaves_twins_to_ci", "gate-leaves-unselected-twins-to-ci"),
     # v4.0.0 line-by-line review, guard gaps: one twin per clause.
     # v4.0.0 line-by-line review, tools.
     ('scripts/prepush-gate.py', 'sum(p[5] is None for p in procs) < limit:', 'True:',

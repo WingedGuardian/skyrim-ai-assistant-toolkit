@@ -62,21 +62,17 @@ def test_a_changed_test_file_selects_only_itself_by_reference(tmp_path):
     assert g.referencing_tests(["tests/test_b.py"], test_dir=tests) == []
 
 
-def test_a_tree_without_the_twin_selector_leaves_twins_to_ci(monkeypatch, capsys):
-    """A listing over the cap means the selector was ignored: running it would be four copies of the whole table."""
-    g = _gate()
-    node = "tests/test_mutations.py::test_guard_actually_bites"
-
-    def listing(count):
-        out = "\n".join("{}[t{}]".format(node, i) for i in range(count))
-        return lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout=out, stderr="")
-    monkeypatch.setattr(g, "twin_selection", lambda *a: ["tools/x.py"])
-    monkeypatch.setattr(g, "twin_aliases", lambda: {})
-    monkeypatch.setattr(g.subprocess, "run", listing(201))
-    assert g.twin_steps("py", "", ["tools/x.py"]) == []
-    assert "left to CI" in capsys.readouterr().out
-    monkeypatch.setattr(g.subprocess, "run", listing(200))           # the cap itself still runs, shared out
-    assert len(g.twin_steps("py", "", ["tools/x.py"])) == 4
+def test_mutation_and_slow_tests_stay_on_ci_even_when_selected_by_the_diff(tmp_path):
+    gate = _gate()
+    gate.REPO = tmp_path
+    ordinary = "tests/test_example.py"
+    for name in [ordinary, *gate.CI_ONLY]:
+        path = tmp_path / name
+        path.parent.mkdir(exist_ok=True)
+        path.write_text('# references ".github/workflows"\n', encoding="utf-8")
+    changed = [".github/workflows/ci.yml", *gate.CI_ONLY, ordinary]
+    assert gate.tests_for(changed) == [ordinary]
+    assert not gate.CI_ONLY.intersection(gate.SENTINELS)
 
 
 class _Pool:
@@ -167,24 +163,6 @@ def test_the_real_batch_that_turned_ci_red_is_now_selected():
                               "scripts/build_release_zip.py"]))
     assert {"tests/test_dependency_locks.py", "tests/test_pr_ci_policy.py", "tests/test_verify_release.py"} <= picked, picked
     assert "tests/test_mutations.py" not in picked
-
-
-def test_a_changed_guard_file_selects_its_twins():
-    """CI run 41560815549: three surviving twins of a file the gate had otherwise passed."""
-    gate = _gate()
-    assert gate.twin_selection(["tools/skyguard/writes.py"]) == ["tools/skyguard/writes.py"]
-    assert gate.twin_selection(["tests/test_mutations.py"]) == []                    # the table alone names nothing yet
-
-
-def test_lines_added_to_the_twin_table_select_the_files_they_name():
-    gate = _gate()
-    added = """+    ("tools/skyguard/saves.py", 'a', 'b', "tests/test_x.py::test_y", "id"),\n+    ("x", _WR, 'a', 'b'),\n"""
-    assert gate.twin_selection(["tests/test_mutations.py"], added, {"_WR": "tools/skyguard/writes.py", "_NO": "tools/no.py"}) == [
-        "tests/test_x.py", "tools/skyguard/saves.py", "tools/skyguard/writes.py"]
-
-
-def test_the_twin_table_aliases_are_read_from_the_table():
-    assert _gate().twin_aliases()["_WR"] == "tools/skyguard/writes.py"
 
 
 def _collected(**env):
