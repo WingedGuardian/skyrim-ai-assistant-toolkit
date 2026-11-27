@@ -19,7 +19,7 @@ import uuid
 from . import Refusal
 from .files import backup, contained, exclusive, json_write, plain_plugin, publish, sha
 from .order import BASE as IMPLICIT_MASTERS, capture, plugin_header
-from .runtime import Backend, READS, WRITES, context, response_json
+from .runtime import Backend, READS, WRITES, context, reopen_candidate, response_json
 
 
 def load_config(root):
@@ -126,6 +126,20 @@ def _json_manifest(value, key):
                       "plain lists and result artifacts.") from None
 
 
+def _create_records(value):
+    """Freeze any records file spelling that the pinned backend accepts."""
+    if isinstance(value, list) and len(value) == 1 and isinstance(value[0], str) and value[0].lstrip().startswith("@"):
+        value = value[0]
+    if isinstance(value, str):
+        token = value.strip().strip("\"'")
+        if not token.startswith("@") and not Path(token).is_absolute():
+            raise Refusal("records must be an inline array or a JSON array file named by an absolute path.")
+        value = _json_manifest(token if token.startswith("@") else "@" + token, "records")
+        if not isinstance(value, list) or any(not isinstance(record, dict) for record in value):
+            raise Refusal("records file must contain a JSON array of objects.")
+    return value
+
+
 def check_arguments(name, arguments, config):
     if name not in READS | WRITES | {"toolkit_housecarl_status"}:
         raise Refusal("This integration does not expose " + name + "; use the existing toolkit workflow.")
@@ -144,8 +158,16 @@ def check_arguments(name, arguments, config):
         # Freeze manifests into the transaction request before deriving its permitted edit set.
         for key in ("ops", "assignments", "records"):
             value = a.get(key)
-            if isinstance(value, str) and value.startswith("@"):
+            if (key != "records" or name != "housecarl_create") and isinstance(value, str) and value.startswith("@"):
                 a[key] = _json_manifest(value, key)
+        if name == "housecarl_create" and "records" in a:
+            records = a["records"] = _create_records(a["records"])
+            if isinstance(records, list) and any(
+                    key.casefold() == "record_type" and isinstance(value, str)
+                    and value.strip().casefold() in {"weather", "wthr"}
+                    for record in records if isinstance(record, dict) for key, value in record.items()):
+                raise Refusal("Creating Weather records is not qualified. Forward an existing Weather record "
+                              "and edit the forwarded record.")
         # A FormID @file follows House Carl's own grammar (issue 20): one @file stands in place of the whole list.
         value = a.get("formids")
         items = [value] if isinstance(value, str) else value if isinstance(value, list) else []
@@ -628,21 +650,23 @@ class Gateway:
         allowed = allowed_records(arguments)
         if name == "housecarl_create":
             allowed |= {r["formid"].casefold().lstrip("0") for r in result.get("created", []) if r.get("formid")}
+        candidate_digest = sha(candidate)
         verified = independent_check(config, candidate, snap, baseline, allowed)
+        reopen = reopen_candidate(config, candidate, work)
         if capture(config).fingerprint != snap.fingerprint:
             raise Refusal("Authoritative inputs changed during preparation; nothing published.")
         target = original if original else Path(config["state_dir"]) / "patches" / ident / candidate.name
         target.parent.mkdir(parents=True, exist_ok=True)
         receipt = {"id": ident, "state": "prepared", "tool": name, "arguments": arguments,
                    "target": str(target), "before_sha256": digest, "backup": preservation,
-                   "candidate_sha256": sha(candidate), "validation": verified,
+                   "candidate_sha256": candidate_digest, "validation": verified, "reopen": reopen,
                    "context": context(config, snap), "backend_result": result,
                    "private_forward_target_detached_from_read_provider": detached_forward,
                    "retained_header": retained_header}
         receipt_path = work / "receipt.json"
         json_write(receipt_path, receipt)
         try:
-            after = publish(candidate, target, digest)
+            after = publish(candidate, target, digest, candidate_expected=candidate_digest)
             receipt.update(state="published", after_sha256=after,
                            note="Active file only; no alternate supplier changed. Redeployment can replace this edit."
                            if original else "Staged patch; activate manually in the mod manager.")

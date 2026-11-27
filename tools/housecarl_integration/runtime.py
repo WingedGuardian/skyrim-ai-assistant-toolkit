@@ -5,10 +5,11 @@ from contextlib import AsyncExitStack
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
 
 from . import Refusal, UPSTREAM_COMMIT, UPSTREAM_VERSION
-from .files import sha
+from .files import json_write, sha
 from .order import write_profile
 
 READS = {"housecarl_records", "housecarl_check", "housecarl_asset_status", "housecarl_nif_inspect",
@@ -32,6 +33,39 @@ def verify_installation(config):
         if Path(relative).name != relative or sha(server.parent / relative) != digest:
             raise Refusal("House Carl installation changed: " + relative + "; rerun setup with the pinned archive.")
     return len(expected)
+
+
+def reopen_candidate(config, candidate, work):
+    """Check the final scratch file with the backend's eager reader."""
+    helper = Path(__file__).with_name("validator") / "HouseCarlReopen.dll"
+    server = Path(config["server"]).parent
+    runtime = server / "housecarl-mcp.runtimeconfig.json"
+    log = work / "reopen.json"
+    detail = None
+    try:
+        if not helper.is_file():
+            raise Refusal("The packaged House Carl reader is missing. Restore it from the toolkit archive.")
+        if runtime.name not in config["server_hashes"]:
+            raise Refusal("The installed House Carl manifest does not cover its runtime configuration.")
+        verify_installation(config)
+        result = subprocess.run(
+            ["dotnet", "exec", "--runtimeconfig", str(runtime), str(helper), str(server), str(candidate)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=120, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if result.returncode != 0 or result.stdout.strip() != "Readable":
+            detail = (result.stderr.strip() or result.stdout.strip() or "The reader gave no result.")[:1800]
+    except subprocess.TimeoutExpired:
+        detail = "The reader did not finish within 120 seconds."
+    except (OSError, Refusal) as exc:
+        detail = str(exc)
+    if detail is not None:
+        json_write(log, {"ok": False, "error": detail})
+        raise Refusal("House Carl could not reopen the final candidate. Nothing published. "
+                      + detail + " Retained: " + str(log))
+    result = {"ok": True, "reader": UPSTREAM_VERSION + "+" + UPSTREAM_COMMIT}
+    json_write(log, result)
+    return result
 
 
 def response_json(result):

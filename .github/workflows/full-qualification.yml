@@ -306,6 +306,15 @@ jobs:
             echo "::warning::round trip: same records, different bytes"
           fi
 
+      - name: Install the compiler for the shipped House Carl reader
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+        if: runner.os == 'Windows'
+        with:
+          dotnet-version: "10.0.404"  # Reproducible build input for the small managed helper.
+      - name: Rebuild and exercise the packaged House Carl reader
+        if: runner.os == 'Windows'
+        run: python -B scripts/build_housecarl_reopen.py --verify-runtime
+
   # v4.0.0: ReSaver Plus (the opt-in native ReSaver backend) is BUILT on the user's machine and never shipped, so CI
   # builds it exactly that way on a machine that never saw the dev install -- the "second machine" build: the pin
   # verified, the 10 patches applied, every changed/added file checked against SOURCE-SHA256, the CLI and tests built

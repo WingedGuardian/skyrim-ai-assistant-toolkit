@@ -2,6 +2,9 @@
 
 ## v4.3.1 — unreleased
 
+- House Carl validates the final staged plugin with its full reader before publishing (#28).
+  To author a Weather variant, forward an existing Weather record and edit it.
+
 - **Updates check themselves and roll back on failure.** "Update the toolkit" now stages the release for review,
   asks a separate yes for any change to the guards, then applies it, runs setup and checks the installed guards
   (each agent's hooks must refuse a raw plugin write, and Claude Code and Codex must allow a harmless command). If setup or that

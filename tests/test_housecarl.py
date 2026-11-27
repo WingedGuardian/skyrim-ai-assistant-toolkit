@@ -73,7 +73,10 @@ def test_a_staged_patch_name_with_brackets_is_a_name_not_a_glob(tmp_path):
 
 
 @pytest.fixture
-def install(tmp_path):
+def install(tmp_path, monkeypatch):
+    # These transactions use a fake writer and synthetic files. Model a successful eager read unless
+    # the test exercises the reopen gate itself.
+    monkeypatch.setattr(gateway, "reopen_candidate", lambda *_args: {"ok": True})
     data = tmp_path / "Data"
     data.mkdir()
     ini = tmp_path / "ini"
@@ -325,7 +328,8 @@ def test_manifest_expansion_is_in_receipt_edit_set(install):
     assert gateway.allowed_records(args) == {"12eb7:skyrim.esm"}
 
 
-@pytest.mark.parametrize("stage", ["backup", "baseline", "backend", "candidate", "stale", "publication"])
+@pytest.mark.parametrize("stage", ["backup", "baseline", "backend", "candidate", "reopen", "changed_candidate",
+                                   "stale", "publication"])
 def test_transaction_failures_never_publish(install, monkeypatch, stage):
     from types import SimpleNamespace
     target = Path(install["data_dir"]) / "Sword.esp"
@@ -364,6 +368,13 @@ def test_transaction_failures_never_publish(install, monkeypatch, stage):
 
     monkeypatch.setattr(gateway, "Backend", FakeBackend)
     monkeypatch.setattr(gateway, "independent_check", check)
+    if stage == "reopen":
+        monkeypatch.setattr(gateway, "reopen_candidate", fail)
+    if stage == "changed_candidate":
+        def change_after_reopen(_config, candidate, _work):
+            plugin(candidate, flags=0, masters=["Skyrim.esm"], version=1.7)
+            return {"ok": True}
+        monkeypatch.setattr(gateway, "reopen_candidate", change_after_reopen)
     if stage == "backup":
         monkeypatch.setattr(gateway, "backup", fail)
     if stage == "publication":
@@ -374,6 +385,85 @@ def test_transaction_failures_never_publish(install, monkeypatch, stage):
     assert target.read_bytes() == original
     if stage in ("backup", "baseline"):
         assert calls == []
+
+
+@pytest.mark.parametrize("record_type", ["Weather", " wthr "])
+@pytest.mark.parametrize("manifest", ["inline", "file", "array_file", "plain_absolute"])
+def test_weather_creation_refuses_a_mixed_batch_before_starting_a_transaction(install, record_type, manifest):
+    records = [{"record_type": "Global"}, {"Record_Type": record_type, "fields": {"VolumetricLighting": "linked"}}]
+    if manifest != "inline":
+        path = Path(install["root"]) / "records.json"
+        path.write_text(json.dumps(records), encoding="utf-8")
+        records = str(path) if manifest == "plain_absolute" else "@" + str(path)
+        if manifest == "array_file":
+            records = [records]
+    with pytest.raises(Refusal, match="Forward an existing Weather"):
+        asyncio.run(gateway.Gateway(install).call("housecarl_create", {"patch": "New.esp", "records": records}))
+    assert not Path(install["state_dir"]).exists()
+
+
+def test_reopen_refusal_prevents_publication_of_a_new_patch(install, monkeypatch):
+    from types import SimpleNamespace
+
+    class FakeBackend:
+        def __init__(self, _config, _snapshot, work):
+            self.work = work
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
+
+        async def call(self, _name, _args):
+            output = self.work / "mods"
+            output.mkdir()
+            plugin(output / "New.esp")
+            return SimpleNamespace(content=[])
+
+    def unreadable(_config, candidate, _work):
+        assert candidate.is_file()
+        raise Refusal("injected reopen failure")
+
+    monkeypatch.setattr(gateway, "Backend", FakeBackend)
+    monkeypatch.setattr(gateway, "independent_check", lambda *_args: {"complete": True, "errors": []})
+    monkeypatch.setattr(gateway, "reopen_candidate", unreadable)
+    with pytest.raises(Refusal, match="injected reopen failure"):
+        asyncio.run(gateway.Gateway(install).call("housecarl_create_plugin", {"patch": "New.esp"}))
+    state = Path(install["state_dir"])
+    assert not (state / "patches").exists()
+    assert list((state / "transactions").rglob("New.esp"))
+
+
+@pytest.mark.parametrize("outcome", ["parse_error", "missing_verdict", "timeout"])
+def test_final_reader_fails_closed_and_leaves_a_diagnostic(tmp_path, monkeypatch, outcome):
+    from types import SimpleNamespace
+    import subprocess
+    from housecarl_integration import runtime
+
+    config = {"server": str(tmp_path / "housecarl-mcp.exe"),
+              "server_hashes": {"housecarl-mcp.runtimeconfig.json": "test"}}
+    candidate = tmp_path / "New.esp"
+    plugin(candidate)
+    monkeypatch.setattr(runtime, "verify_installation", lambda _config: 1)
+
+    def run(args, **options):
+        assert args[-1] == str(candidate)
+        assert options["creationflags"] == getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        assert options["timeout"] == 120
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(args, options["timeout"])
+        if outcome == "parse_error":
+            return SimpleNamespace(returncode=1, stdout="", stderr="SubrecordException: bad Weather")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(runtime.subprocess, "run", run)
+    with pytest.raises(Refusal, match="could not reopen the final candidate. Nothing published"):
+        runtime.reopen_candidate(config, candidate, tmp_path)
+    logged = json.loads((tmp_path / "reopen.json").read_bytes())
+    assert logged["ok"] is False
+    assert logged["error"]
+    assert candidate.is_file()
 
 
 def test_independent_checker_rejects_unrequested_new_records(install, monkeypatch):

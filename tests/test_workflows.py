@@ -118,6 +118,9 @@ def test_the_behavior_matrix_is_both_oses_times_the_tested_pythons():
 
 
 def test_node_comes_from_node_version_and_dotnet_is_channel_10():
+    reader_build = (REPO / "scripts/build_housecarl_reopen.py").read_text(encoding="utf-8")
+    reader_sdk = re.search(r'^SDK = "(10\.0\.\d+)"', reader_build, re.MULTILINE)
+    assert reader_sdk is not None
     for name in _workflows():
         _, data = _load(name)
         for jid, job in data["jobs"].items():
@@ -126,7 +129,11 @@ def test_node_comes_from_node_version_and_dotnet_is_channel_10():
                 if u.startswith("actions/setup-node@"):
                     assert s["with"] == {"node-version-file": ".node-version"}, (name, jid)
                 if u.startswith("actions/setup-dotnet@"):
-                    assert s["with"]["dotnet-version"] == "10.0.x", (name, jid)
+                    if s.get("name") == "Install the compiler for the shipped House Carl reader":
+                        assert jid == "dotnet" and s["if"] == "runner.os == 'Windows'", (name, jid)
+                        assert s["with"]["dotnet-version"] == reader_sdk[1], (name, jid)
+                    else:
+                        assert s["with"]["dotnet-version"] == "10.0.x", (name, jid)
     _, data = _load("ci.yml")
     assert any(str(s.get("uses", "")).startswith("actions/setup-dotnet@") for s in _steps(data["jobs"]["dotnet"]))
 

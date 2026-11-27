@@ -105,7 +105,7 @@ def backup(path, store):
     return record
 
 
-def publish(candidate, target, expected):
+def publish(candidate, target, expected, *, candidate_expected=None):
     """Replace the deployed directory entry, never write through a manager hardlink."""
     target, candidate = Path(target), Path(candidate)
     if target.is_symlink() or target.parent.is_symlink():
@@ -113,7 +113,7 @@ def publish(candidate, target, expected):
     current = sha(target) if target.exists() else None
     if current != expected:
         raise Refusal("Target changed after preparation; no file was published.")
-    digest = sha(candidate)
+    digest = sha(candidate) if candidate_expected is None else candidate_expected
     part = target.with_name(target.name + ".housecarl-" + uuid.uuid4().hex)
     try:
         with candidate.open("rb") as src, part.open("xb") as dst:

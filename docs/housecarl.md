@@ -115,11 +115,16 @@ the original report used 2.1.0.
 The gateway first copies and independently hash-verifies the original into its permanent backup
 store. Upstream writes only a private target copy. xEdit then parses the candidate and checks its
 references; unchanged records are compared with the original outside the requested edit set.
+After master restoration and xEdit validation, House Carl's full reader must reopen the final
+candidate. Publication requires the copy to match the hash of the validated candidate. If the
+reader fails, the transaction retains the candidate and its diagnostic.
 Identical-to-master/previous-override findings are retained as warnings, since forwarding can intentionally
 produce them; structural, reference and unknown error groups block publication. Nothing is auto-cleaned.
 These group definitions follow upstream [xeErrors.pas](https://github.com/matortheeternal/xedit-lib/blob/DelphiTokyo/src/xeErrors.pas).
 Upstream preflight and readback remain additional checks. A failed or incomplete check prevents
 publication. Changes to the original or captured inputs also prevent publication.
+To author a Weather variant, forward an existing Weather record first and then edit the forwarded
+record. The gateway refuses creating Weather records directly.
 
 Publication replaces the directory entry using a verified sibling file. It never writes through a
 mod manager's hardlink into its source copy. The receipt records hashes, backup, requested operation,
@@ -160,3 +165,6 @@ to reconnect it. These commands preserve unrelated server entries and retain reg
 
 The toolkit remains MIT. House Carl and its references remain GPL-3.0-only in their separate package;
 they are downloaded at installation, not included in the toolkit release archive. The MCP SDK is MIT.
+The toolkit's small reader helper calls these installed libraries with the runtime already required by
+House Carl. Maintainers can check the committed helper against a reproducible build with
+`python scripts/build_housecarl_reopen.py --verify-runtime`.

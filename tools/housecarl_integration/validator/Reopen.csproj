@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>HouseCarlReopen</AssemblyName>
+    <TargetFramework>net10.0</TargetFramework>
+    <UseAppHost>false</UseAppHost>
+    <Deterministic>true</Deterministic>
+    <DebugType>none</DebugType>
+    <PathMap>$(MSBuildProjectDirectory)=/_/housecarl-validator</PathMap>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="housecarl-core" HintPath="$(HouseCarlServer)/housecarl-core.dll" Private="false" />
+    <Reference Include="Mutagen.Bethesda.Skyrim" HintPath="$(HouseCarlServer)/Mutagen.Bethesda.Skyrim.dll" Private="false" />
+    <Reference Include="Mutagen.Bethesda.Core" HintPath="$(HouseCarlServer)/Mutagen.Bethesda.Core.dll" Private="false" />
+    <Reference Include="Mutagen.Bethesda.Kernel" HintPath="$(HouseCarlServer)/Mutagen.Bethesda.Kernel.dll" Private="false" />
+    <Reference Include="Noggog.CSharpExt" HintPath="$(HouseCarlServer)/Noggog.CSharpExt.dll" Private="false" />
+    <Reference Include="Loqui" HintPath="$(HouseCarlServer)/Loqui.dll" Private="false" />
+  </ItemGroup>
+</Project>
