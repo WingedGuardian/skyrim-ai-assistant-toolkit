@@ -83,6 +83,9 @@ def main(argv=None):
             result = guarded_update.handle(args, root, update_check.PROFILE, policy, notes_files=SKYRIM_LOCAL,
                                            candidate_preparer=upgrade_render.prepare,
                                            candidate_validator=upgrade_render.validate, new_policy=new_policy)
+            if args.command == "update-apply" and not result["ok"]:
+                result["recovery_verified"] = (result.get("rolled_back") is True
+                                               and guarded_update.session_note(target) is None)
             exit_status = guarded_update.exit_code(result)
         elif args.command == "save-list":
             from modding_harness import workspace

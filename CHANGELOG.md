@@ -7,8 +7,8 @@
 
 - **Updates check themselves and roll back on failure.** "Update the toolkit" now stages the release for review,
   asks a separate yes for any change to the guards, then applies it, runs setup and checks the installed guards
-  (each agent's hooks must refuse a raw plugin write, and Claude Code and Codex must allow a harmless command). If setup or that
-  check fails, the update is rolled back by itself. If even the rollback cannot be verified, every session start
+  (each agent's hooks must refuse a raw plugin write and allow a harmless command). If setup or that check fails,
+  the updater restores the previous files and checks the restored guards. If recovery cannot be verified, every session start
   says so and further updates refuse until you have looked (`update-clear-failed`).
 
 - **The detached-launch detector now lives in the shared core** (`tools/modding_harness/detached.py`), so the X4

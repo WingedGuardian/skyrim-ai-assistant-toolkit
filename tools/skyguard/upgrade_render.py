@@ -1,6 +1,7 @@
 """Render private upgrade candidates; never discover or write a live installation."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import os
 import re
@@ -12,6 +13,8 @@ if __package__ in (None, ""):
 from skyguard import codex_definitions, guard_hash, paths
 
 DOC_TOKENS = ("{{GAME_ROOT}}", "{{CONFIG_DIR}}", "{{LOADORDER_DIR}}", "{{SKYRIM_FOLDER}}", "{{MOD_MANAGER_PATHS}}")
+DEVCONTAINER = ".devcontainer/devcontainer.json"
+MOUNT_TOKENS = tuple("{{DEVCONTAINER_" + name + "_MOUNT}}" for name in ("MODS", "PROFILE", "OVERWRITE"))
 BOM = b"\xef\xbb\xbf"
 STOCK = ("- **Mod manager**: stock layout (Vortex or manual) — mods deploy their files directly into `Data/`,\n"
          "  so `Data/` is the real, merged view of everything installed.")
@@ -54,7 +57,7 @@ def _path_key(value):
 
 def _config(root, config):
     required = {"v", "config_dir", "loadorder_dir", "skyrim_folder", "python", "bash", "mod_manager"}
-    if (not isinstance(config, dict) or set(config) not in (required, required | {"game_root"}) or
+    if (not isinstance(config, dict) or not required <= set(config) <= required | {"game_root", "root_posix"} or
             type(config["v"]) is not int or config["v"] != 1):
         raise ValueError("expected complete Skyrim render configuration version 1")
     data = {name: _path(config[name]) for name in ("config_dir", "loadorder_dir", "python", "bash")}
@@ -87,8 +90,12 @@ def _config(root, config):
     data["game_root"] = _path(config.get("game_root", installed.first("SKYRIM_GAME_ROOT") or data["root"]))
     if installed.first("SKYRIM_GAME_ROOT") and _path_key(installed.first("SKYRIM_GAME_ROOT")) != _path_key(data["game_root"]):
         raise ValueError("render configuration differs from retained game root")
-    data["posix"] = ("/" + data["root"][0].lower() + data["root"][2:]
+    stock_data = data["game_root"].rstrip("/") + "/Data"
+    data["mounts"] = ((manager["mods"], manager["profile_dir"], manager["overwrite"]) if manager["kind"] == "mo2"
+                      else (stock_data, data["config_dir"], stock_data))
+    default_posix = ("/" + data["root"][0].lower() + data["root"][2:]
                      if re.match(r"^[A-Za-z]:/", data["root"]) else data["root"])
+    data["posix"] = _path(config.get("root_posix", default_posix))
     return data
 
 
@@ -126,10 +133,16 @@ def prepare(root, staged, files, config):
             for token, value in replacements.items():
                 text = text.replace(token, value)
             result[name] = text.encode("utf-8")
-    if ".codex/hooks.json" in files:
+    if ".codex/hooks.json" in files and os.name == "nt":
         text = (staged / ".codex/hooks.json").read_bytes().decode("utf-8-sig")
         # The existing canonical renderer retains its frozen command normalization.
         result[".codex/hooks.json"] = codex_definitions.render(text, data["root"], data["posix"]).encode("utf-8")
+    if DEVCONTAINER in files:
+        # The template is JSON with comments. Replace only the string fragments used for the mounts.
+        text = (staged / DEVCONTAINER).read_bytes().decode("utf-8")
+        for token, mount in zip(MOUNT_TOKENS, data["mounts"]):
+            text = text.replace(token, json.dumps(mount, ensure_ascii=False)[1:-1])
+        result[DEVCONTAINER] = text.encode("utf-8")
     for name in guard_hash.CONFIGURED:
         if name in files:
             result[name] = _hook(name, (staged / name).read_bytes(), data)
@@ -140,11 +153,12 @@ def prepare(root, staged, files, config):
 def validate(root, changes):
     for row in changes:
         name = row["path"]
-        if name not in ("AGENTS.md", "CLAUDE.md", ".codex/hooks.json", *guard_hash.CONFIGURED):
+        if name not in ("AGENTS.md", "CLAUDE.md", DEVCONTAINER, ".codex/hooks.json", *guard_hash.CONFIGURED):
             continue
         raw = row["data"] if "data" in row else Path(row["source"]).read_bytes()
         text = raw.decode("utf-8-sig")
-        tokens = (*DOC_TOKENS, *codex_definitions.PLACEHOLDERS, "{{PYTHON_PATH}}", "{{BASH_PATH}}")
+        codex_tokens = codex_definitions.PLACEHOLDERS if os.name == "nt" else ()
+        tokens = (*DOC_TOKENS, *MOUNT_TOKENS, *codex_tokens, "{{PYTHON_PATH}}", "{{BASH_PATH}}")
         if any(token in text for token in tokens):
             raise ValueError("candidate needs destination rendering before application: " + name)
         if name == "AGENTS.md" and len(raw) > 32768:

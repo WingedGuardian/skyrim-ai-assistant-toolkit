@@ -13,7 +13,9 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 from modding_harness import release
@@ -82,9 +84,19 @@ def render_config(root):
     mods, overwrite = cfg.first("SKYRIM_MO2_MODS"), cfg.first("SKYRIM_MO2_OVERWRITE")
     manager = ({"kind": "mo2", "instance": Path(mods).parent.as_posix(), "profile": Path(config_dir).name,
                 "mods": mods, "overwrite": overwrite, "profile_dir": config_dir} if mods else {"kind": "stock"})
-    return {"v": 1, "config_dir": config_dir, "loadorder_dir": loadorder, "skyrim_folder": folder,
-            "python": cfg.first("SKYGUARD_PYTHON") or Path(sys.executable).as_posix(), "bash": _bash(),
-            "mod_manager": manager, "game_root": game_root}
+    shell = _bash()
+    data = {"v": 1, "config_dir": config_dir, "loadorder_dir": loadorder, "skyrim_folder": folder,
+            "python": _python(root), "bash": shell, "mod_manager": manager, "game_root": game_root}
+    if os.name == "nt":
+        # setup.sh renders the Codex definition using Git Bash's cwd spelling. Drive paths alone miss mounts such as /tmp.
+        try:
+            cwd = subprocess.run([shell, "--noprofile", "--norc", "-c", "pwd"], cwd=root.resolve(),
+                                 stdin=subprocess.DEVNULL, capture_output=True, check=True, timeout=10,
+                                 creationflags=subprocess.CREATE_NO_WINDOW)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ValueError("Git Bash could not resolve the update destination: " + str(exc)) from exc
+        data["root_posix"] = cwd.stdout.decode("utf-8").rstrip("\r\n")
+    return data
 
 
 def write_render_config(root, folder):
@@ -105,7 +117,6 @@ CANARY = "tools/skyguard/update_canary.py"
 #: The files that define the setup and the canary below: a release that changes one runs the new canary AND the
 #: pre-update one (a copy kept beside the staged bundle, so it is the installed bytes).
 POLICY_FILES = ("setup.sh", CANARY, "tools/skyguard/update_check.py")
-INSTALLED_CANARY = "installed-canary.py"
 RENDER_CONFIG = ".modding-agent-harness/update-render-config.json"
 
 
@@ -116,7 +127,7 @@ def _python(root):
         recorded = paths.read_install(str(root), {}).first("SKYGUARD_PYTHON")
     except Exception:
         recorded = None
-    return recorded if recorded and Path(recorded).is_file() else Path(sys.executable).as_posix()
+    return Path(recorded if recorded and Path(recorded).is_file() else sys.executable).as_posix()
 
 
 def _render_config_file(root):
@@ -127,12 +138,14 @@ def _render_config_file(root):
 
 
 def update_policy(root, canary=None):
-    """This install's `UpdatePolicy`: setup is `setup.sh --agent auto` under Git Bash, the canary asks the installed
+    """This install's `UpdatePolicy`: setup runs under Git Bash, the canary asks the installed
     guards to judge a refused and an allowed call (update_canary.py). CANARY (a path) runs a kept copy instead."""
     from modding_harness.update_review import UpdatePolicy
     root = Path(root).resolve()
-    return UpdatePolicy(GUARD_GLOBS, POLICY_FILES, (_bash(), "setup.sh", "--agent", "auto"),
-                        (_python(root), "-B", str(canary or root / CANARY), "--root", str(root)), _render_config_file)
+    python = _python(root)
+    setup = (_bash(), "setup.sh", "--agent", "auto", "--guarded-update-python", python)
+    return UpdatePolicy(GUARD_GLOBS, POLICY_FILES, setup,
+                        (python, "-B", str(canary or root / CANARY), "--root", str(root)), _render_config_file)
 
 
 def keep_installed_canary(root, bundle):
@@ -141,8 +154,11 @@ def keep_installed_canary(root, bundle):
     source = Path(root) / CANARY
     if not source.is_file():
         raise ValueError("{} is missing from this install; re-run setup.sh or reinstall before updating".format(CANARY))
-    target = Path(bundle).resolve().parent / INSTALLED_CANARY
-    target.write_bytes(source.read_bytes())
+    # Keep each attempt separate: an apply refused by the core must not replace a running apply's old canary.
+    raw = source.read_bytes()
+    target = Path(bundle).resolve().parent / f"installed-canary-{uuid.uuid4().hex}.py"
+    with target.open("xb") as stream:
+        stream.write(raw)
     return target
 
 

@@ -32,7 +32,8 @@ def fixture(base, names=None):
     root, source, bundle = base / "destination [fixture]", base / "source", base / "review"
     root.mkdir()
     source.mkdir()
-    names = names or ("AGENTS.md", "CLAUDE.md", *((".codex/hooks.json",) if os.name == "nt" else ()), *guard_hash.CONFIGURED)
+    names = names or ("AGENTS.md", "CLAUDE.md", upgrade_render.DEVCONTAINER,
+                      *((".codex/hooks.json",) if os.name == "nt" else ()), *guard_hash.CONFIGURED)
     for name in names:
         path = source / name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -54,8 +55,13 @@ def test_private_rendered_candidate_applies_and_rolls_back_without_rewriting_sou
     assert data["config_dir"] in doc and data["loadorder_dir"] in doc and root.as_posix() in doc
     if manager == "mo2":
         assert "MO2 has no real" in doc and data["mod_manager"]["mods"] in doc
+        mounts = [data["mod_manager"][key] for key in ("mods", "profile_dir", "overwrite")]
     else:
         assert upgrade_render.STOCK in doc
+        mounts = [root.as_posix() + "/Data", data["config_dir"], root.as_posix() + "/Data"]
+    container = (bundle / "candidate" / upgrade_render.DEVCONTAINER).read_text(encoding="utf-8")
+    for key, path in zip(("mods", "profile", "overwrite"), mounts):
+        assert f"source={path},target=/skyrim/{key}" in container
     if ".codex/hooks.json" in manifest["files"]:
         expected = codex_definitions.render((source / ".codex/hooks.json").read_text(), root.as_posix(),
                                            "/" + root.drive[0].lower() + root.as_posix()[2:])

@@ -43,6 +43,7 @@ def test_a_working_install_passes(tmp_path):
     assert "ok    Claude Code refuses a raw plugin write" in out
     assert "ok    Claude Code allows a harmless command" in out
     assert "ok    OpenCode refuses a raw plugin write" in out
+    assert "ok    OpenCode allows a harmless command" in out
 
 
 def test_a_guard_that_allows_everything_fails(tmp_path):
@@ -61,12 +62,44 @@ def test_a_guard_that_refuses_everything_fails(tmp_path):
     assert code == 1 and "FAIL  Claude Code allows a harmless command" in out, out
 
 
-def test_a_broken_opencode_adapter_fails(tmp_path):
+def test_a_claude_hook_can_allow_with_json(tmp_path):
+    root = toolkit(tmp_path, opencode=False)
+    (root / ".claude" / "hooks" / "protect-bash.sh").write_text(
+        "#!/bin/bash\necho '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\"}}'\n",
+        newline="\n")
+    code, out = canary(root)
+    assert code == 0 and "ok    Claude Code allows a harmless command" in out, out
+
+
+@pytest.mark.parametrize("program", [
+    "print('SKYGUARD-OPENCODE {\"v\": 1, \"decision\": \"allow\"}')",
+    "raise SystemExit(2)",
+    "print('{\"decision\": \"deny\"}')",
+    "print('debug\\nSKYGUARD-OPENCODE {\"decision\": \"deny\"}')",
+    "print('SKYGUARD-OPENCODE {\"decision\": \"deny\", \"inert\": true}')",
+])
+def test_a_broken_opencode_adapter_fails(tmp_path, program):
     root = toolkit(tmp_path, hooks=False)
-    (root / ".opencode" / "hooks" / "skyguard_adapter.py").write_text(
-        "print('SKYGUARD-OPENCODE {\"v\": 1, \"decision\": \"allow\"}')\n")
+    (root / ".opencode" / "hooks" / "skyguard_adapter.py").write_text(program + "\n")
     code, out = canary(root)
     assert code == 1 and "FAIL  OpenCode refuses a raw plugin write" in out, out
+
+
+def test_an_opencode_adapter_that_denies_everything_fails(tmp_path):
+    root = toolkit(tmp_path, hooks=False)
+    (root / ".opencode" / "hooks" / "skyguard_adapter.py").write_text(
+        "print('SKYGUARD-OPENCODE {\"decision\": \"deny\"}')\n")
+    code, out = canary(root)
+    assert code == 1 and "FAIL  OpenCode allows a harmless command" in out, out
+
+
+def test_an_installed_opencode_plugin_requires_its_adapter(tmp_path):
+    root = toolkit(tmp_path, opencode=False)
+    plugin = root / ".opencode" / "plugins" / "skyguard.js"
+    plugin.parent.mkdir(parents=True)
+    shutil.copyfile(REPO / ".opencode" / "plugins" / "skyguard.js", plugin)
+    code, out = canary(root)
+    assert code == 1 and "FAIL  OpenCode adapter" in out, out
 
 
 def test_nothing_to_check_fails(tmp_path):

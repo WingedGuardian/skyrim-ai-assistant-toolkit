@@ -5,9 +5,7 @@
 each configured host's real hook entry the way that host does, a payload on stdin through a pipe, and requires:
 
 - a raw text write to a plugin file (`Data/<name>.esp`) is REFUSED: the guard is alive and judging;
-- a harmless shell command (`echo`) is ALLOWED: the guard does not refuse everything (Claude Code only, where a
-  hook that blocks every call would block the very session that has to repair it, and Codex, whose Windows entry
-  reports an engine failure as a deny).
+- a harmless shell command (`echo`) is ALLOWED: a guard that fails closed on every call cannot pass the canary.
 
 Hosts checked: Claude Code (every PreToolUse hook in .claude/settings.json whose matcher covers the tool), Codex
 (.codex/hooks.json, once setup has filled in its paths) and OpenCode (its Python adapter, which every install
@@ -56,12 +54,10 @@ def run(argv, payload, root, env=None):
 
 
 def refused(code, out):
-    """A host's refusal: exit 2 (Claude Code's blocking exit) or a JSON deny on stdout."""
+    """Claude Code's refusal: exit 2 or a JSON deny on stdout."""
     if code == 2:
         return True
     for line in reversed(out.strip().splitlines()):
-        if line.startswith("SKYGUARD-OPENCODE "):
-            line = line[len("SKYGUARD-OPENCODE "):]          # the OpenCode adapter's reply prefix
         try:
             data = json.loads(line)
         except ValueError:
@@ -173,15 +169,38 @@ def codex_checks(root, shell):
     return checks
 
 
+def opencode_verdict(code, output):
+    """Match the live OpenCode transport: exit 0 and one prefixed JSON verdict."""
+    prefix = "SKYGUARD-OPENCODE "
+    lines = [line for line in output.splitlines() if line.strip()]
+    if code != 0 or len(lines) != 1 or not lines[0].startswith(prefix):
+        return "invalid"
+    try:
+        data = json.loads(lines[0][len(prefix):])
+    except ValueError:
+        return "invalid"
+    decision = data.get("decision") if isinstance(data, dict) and data.get("inert") is not True else None
+    return decision if decision in ("allow", "advise", "deny") else "invalid"
+
+
 def opencode_checks(root):
     adapter = root / ".opencode" / "hooks" / "skyguard_adapter.py"
     if not adapter.is_file():
+        if (root / ".opencode" / "plugins" / "skyguard.js").is_file():
+            return [("OpenCode adapter", False, "the installed plugin has no adapter")]
         return []
     payload = {"v": 1, "tool": "write", "directory": str(root),
                "args": {"filePath": str(root / PROBE), "content": "update canary\n"}}
     code, out = run([sys.executable, "-B", str(adapter), "pre"], payload, root)
-    return [("OpenCode refuses a raw plugin write", code is not None and refused(code, out),
-             "could not run: " + out if code is None else "exit %d" % code)]
+    refusal = opencode_verdict(code, out)
+    allow = {"v": 1, "tool": "bash", "shell": "bash", "directory": str(root),
+             "args": {"command": "echo toolkit-update-canary"}}
+    mode, output = run([sys.executable, "-B", str(adapter), "pre"], allow, root)
+    decision = opencode_verdict(mode, output)
+    return [("OpenCode refuses a raw plugin write", refusal == "deny",
+             "could not run: " + out if code is None else refusal),
+            ("OpenCode allows a harmless command", decision in ("allow", "advise"),
+             "could not run: " + output if mode is None else decision)]
 
 
 def main(argv=None):

@@ -93,8 +93,8 @@ command it probes is allowed. When the release changes setup or the canary, the 
   hooks in its hook review; and, if `Data/SKSE/Plugins/ToolkitProbe.dll` exists, that the release also carries a
   `ToolkitProbe.zip` to install through their mod manager (never copy it into `Data` yourself). Then run
   `bash tools/hook-canary.sh` after a few real tool calls in the new session.
-- **`ok: false`, `rolled_back: true` (exit 1):** the update was undone. Show the `report` (the failed step's output)
-  and stop; the installed version is unchanged.
+- **`ok: false`, `recovery_verified: true` (exit 1):** rollback completed and the restored setup and canary passed.
+  Show the `report` (the failed step's output) and stop.
 - **`ok: false` otherwise, or any exit 1 without a report:** the update failed and could not be rolled back and
   verified. Tell the user at once and go to section 6.
 - **Exit 2:** refused before anything changed; report the `error`.

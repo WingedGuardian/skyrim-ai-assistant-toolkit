@@ -33,11 +33,13 @@ usage() {
     echo "  --no-save-lock  leave save locking off without asking"
     echo "  --save-vault-task     start the save vault's watcher at Windows sign-in (asked when neither flag is given)"
     echo "  --no-save-vault-task  do not register it (each agent session still starts the watcher)"
+    echo "  --guarded-update-python PATH  use the update's interpreter and keep rendered hook files intact"
 }
 AGENT_ARG="auto"
 WANT_LOCK=""
 WANT_SAVE_LOCK=""
 WANT_VAULT_TASK=""
+GUARDED_UPDATE_PYTHON=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --agent)
@@ -51,6 +53,11 @@ while [ $# -gt 0 ]; do
         --no-save-lock) WANT_SAVE_LOCK=no; shift ;;
         --save-vault-task) WANT_VAULT_TASK=yes; shift ;;
         --no-save-vault-task) WANT_VAULT_TASK=no; shift ;;
+        --guarded-update-python)
+            if [ $# -lt 2 ] || [ -z "$2" ]; then
+                echo "setup.sh: --guarded-update-python needs an interpreter path." >&2; exit 2
+            fi
+            GUARDED_UPDATE_PYTHON="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) echo "setup.sh: unknown option '$1'. Nothing was changed." >&2; usage >&2; exit 2 ;;
     esac
@@ -258,13 +265,22 @@ fi
 echo ""
 echo "Checking for Python 3..."
 PY_FOUND=""
-for c in "py -3" "python" "python3"; do
-    # >= 3.10 is the shared harness floor: an older Python that passes a bare "is it 3?" probe makes hooks
-    # deny "engine failed" with nothing saying why.
-    if $c -c 'import sys; sys.exit(0 if sys.version_info[:2]>=(3,10) else 1)' >/dev/null 2>&1; then
-        PY_FOUND="$c"; echo "  Found Python 3: '$c' -> $($c --version 2>&1)"; break
+if [ -n "$GUARDED_UPDATE_PYTHON" ]; then
+    update_python() { "$GUARDED_UPDATE_PYTHON" "$@"; }
+    if ! update_python -c 'import sys; sys.exit(0 if sys.version_info[:2]>=(3,10) else 1)' >/dev/null 2>&1; then
+        echo "setup.sh: the update's Python could not run or is older than 3.10." >&2
+        exit 1
     fi
-done
+    PY_FOUND=update_python
+else
+    for c in "py -3" "python" "python3"; do
+        # >= 3.10 is the shared harness floor: an older Python that passes a bare "is it 3?" probe makes hooks
+        # deny "engine failed" with nothing saying why.
+        if $c -c 'import sys; sys.exit(0 if sys.version_info[:2]>=(3,10) else 1)' >/dev/null 2>&1; then
+            PY_FOUND="$c"; echo "  Found Python 3: '$c' -> $($c --version 2>&1)"; break
+        fi
+    done
+fi
 if [ -z "$PY_FOUND" ]; then
     for c in "py -3" "python" "python3"; do
         if $c -c 'import sys; sys.exit(0 if sys.version_info[0]==3 else 1)' >/dev/null 2>&1; then
@@ -296,7 +312,11 @@ fi
 PYTHON_PATH=""
 PY_STORE=""
 PY_HOOK_CAND=""; PY_STORE_CAND=""
-if [ -n "$PY_FOUND" ]; then
+if [ -n "$GUARDED_UPDATE_PYTHON" ]; then
+    PYTHON_PATH="$GUARDED_UPDATE_PYTHON"
+    PY_HOOK_CAND="$PY_FOUND"
+    echo "  Hooks will use the update's interpreter: $PYTHON_PATH"
+elif [ -n "$PY_FOUND" ]; then
     for c in "py -3" "python" "python3"; do
         $c -c 'import sys; sys.exit(0 if sys.version_info[:2]>=(3,10) else 1)' >/dev/null 2>&1 || continue
         exe=$($c -c 'import sys; print(sys.executable)' 2>/dev/null | tr -d '\r' | tr '\134' '/') || exe=""
@@ -718,9 +738,10 @@ for hook in .claude/hooks/protect-bash.sh .claude/hooks/protect-files.sh .claude
         else
             echo "  NOT CONFIGURED: $hook -- no Python 3 found, so this hook will refuse until setup.sh is re-run"
         fi
-    elif [ -n "$PYTHON_PATH" ] && ! grep -qxF "$H_LINE" "$GAME_DIR/$hook"; then
+    elif [ -z "$GUARDED_UPDATE_PYTHON" ] && [ -n "$PYTHON_PATH" ] && ! grep -qxF "$H_LINE" "$GAME_DIR/$hook"; then
         # Already configured, but for a different interpreter (Python upgraded or moved). Left alone,
         # the hook would refuse every command while this script said "Already configured".
+        # Guarded updates have already reviewed the rendered hook. Keep that file intact for rollback.
         OLD_PY=$(grep -m1 "$H_RE" "$GAME_DIR/$hook" || true)
         sed -i "s|$H_RE.*|$H_NEW|" "$GAME_DIR/$hook"
         echo "  Updated interpreter: $hook ($OLD_PY -> PY=$PYTHON_PATH)"
