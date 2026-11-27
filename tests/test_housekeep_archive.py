@@ -176,6 +176,23 @@ class ArchiveFolder(Base):
             ha.archive_folder(t, self.nas, self.recycler)
         self.assertFalse(self.nas.exists() and any(self.nas.iterdir()))
 
+    def test_receipt_and_caller_extensions_cannot_remove_save_protection(self):
+        t = self.task()
+        for name, extensions in (("kept.ESS", []), ("kept.SkSe", [".custom"]),
+                                 ("kept.SAV", [".sav"])):
+            with self.subTest(name=name):
+                archive = self.d / "old.zip"
+                with zipfile.ZipFile(archive, "w") as z:
+                    z.writestr("ordinary.txt", b"would be extracted before the save")
+                    z.writestr(name, b"synthetic")
+                receipt = json.dumps({"zip": str(archive), "save_exts": extensions})
+                stub = t / ha.STUB
+                stub.write_text(f"<!-- {receipt} -->", encoding="utf-8")
+                with self.assertRaisesRegex(ha.ArchiveError, "protected save"):
+                    ha.restore_archive(stub, (".other",))
+                self.assertFalse((t / "ordinary.txt").exists())
+                self.assertFalse((t / name).exists())
+
     def test_worktree_git_file_is_refused_by_archive_helper(self):
         t = self.task()
         touch(t / '.git', b'gitdir: elsewhere')
