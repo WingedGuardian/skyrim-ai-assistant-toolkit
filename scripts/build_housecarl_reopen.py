@@ -44,21 +44,23 @@ def runtime_controls(work, server):
     def record(sig, content, form_id=0):
         return struct.pack("<4sIIIIHH", sig, len(content), 0, form_id, 0, 44, 0) + content
 
-    def plugin(path, weather=None):
-        header = subrecord(b"HEDR", struct.pack("<fII", 1.7, bool(weather), 0x801))
-        group = b"" if weather is None else struct.pack("<4sI4sIII", b"GRUP", 24 + len(weather),
-                                                        b"WTHR", 0, 0, 0) + weather
+    def plugin(path, entry=b""):
+        header = subrecord(b"HEDR", struct.pack("<fII", 1.7, bool(entry), 0x801))
+        group = b"" if not entry else struct.pack("<4sI4sIII", b"GRUP", 24 + len(entry), entry[:4], 0, 0, 0) + entry
         path.write_bytes(record(b"TES4", header) + group)
 
     empty, valid, invalid = (work / name for name in ("Empty.esp", "Complete.esp", "Incomplete.esp"))
+    ordinary = work / "Ordinary.esp"
     plugin(empty)
     edid = subrecord(b"EDID", "Café".encode("cp1252") + b"\0")
+    global_data = subrecord(b"FNAM", b"f") + subrecord(b"FLTV", struct.pack("<f", 1.0))
+    plugin(ordinary, record(b"GLOB", edid + global_data, 0x800))
     dalc = subrecord(b"DALC", bytes(32))
     plugin(valid, record(b"WTHR", edid + dalc * 4, 0x800))
     plugin(invalid, record(b"WTHR", edid + dalc, 0x800))
     command = [str(host), "exec", "--runtimeconfig", str(server.with_name("housecarl-mcp.runtimeconfig.json")),
                str(SOURCE / ARTIFACT), str(server.parent)]
-    for path in (empty, valid, ROOT / "tests/fixtures/spriggit/FixLimitsRoundTrip.esp"):
+    for path in (empty, valid, ordinary):
         result = subprocess.run([*command, str(path)], **opts)
         if result.returncode != 0 or result.stdout.strip() != "Readable":
             raise SystemExit("The runtime-only reader rejected " + path.name + ": " + result.stderr)
