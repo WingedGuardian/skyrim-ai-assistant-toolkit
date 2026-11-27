@@ -11,8 +11,8 @@
 - **The detached-launch detector now lives in the shared core** (`tools/modding_harness/detached.py`), so the X4
   toolkit can use the same one. The guard refuses what 4.3 refused; `tools/skyguard/detached.py` keeps the toolkit's
   wiring, and the mutation twins now break the core copy.
-- Shared preservation core pinned to a84098c (public core master, PRs #14, #15 and #17). That also vendors the
-  core's guarded-update modules, which nothing in the toolkit calls yet.
+- Shared preservation core pinned to a84098c (public core master, PRs #14, #15 and #17), including the modules
+  used by the guarded updater.
 - Housekeeping (the archive helper shared with the X4 toolkit): a stray X4 save is recognised by its name too, never
   archived; small top-level `.json`, `.jsonl` and `.log` evidence stays local beside `ARCHIVED.md` (still in the
   zip); hashing a file no longer records a read, so housekeeping's own look never holds a folder; the restore line
