@@ -60,6 +60,7 @@ CI_ONLY = {
     "tests/test_python_fallback.py",
     "tests/test_hook_deadline.py",
     "tests/test_housekeep_rules.py",
+    "tests/test_setup_agent.py",          # full setup runs in independent installed fixtures
     "tests/test_setup_paths.py",
 }
 # changed path prefix -> extra test files (a changed test file always runs itself)

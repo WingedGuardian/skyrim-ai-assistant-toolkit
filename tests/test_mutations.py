@@ -644,8 +644,8 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
     # A re-run of setup.sh must repair a hook configured for an interpreter that has since moved.
     pytest.param(
         "setup.sh",
-        'elif [ -n "$PYTHON_PATH" ] && ! grep -qxF',
-        'elif false && ! grep -qxF',
+        'elif [ -z "$GUARDED_UPDATE_PYTHON" ] && [ -n "$PYTHON_PATH" ] && ! grep -qxF',
+        'elif [ -z "$GUARDED_UPDATE_PYTHON" ] && false && ! grep -qxF',
         "tests/test_python_path.py::test_rerunning_setup_repairs_a_stale_interpreter_path",
         id="setup-rerun-repairs-a-stale-interpreter",
     ),
@@ -2706,8 +2706,8 @@ MUTATIONS = E2E_VERDICT_MUTATIONS + PROBE_RESULT_MUTATIONS + ANSI_C_MUTATIONS + 
     ),
     pytest.param(
         "setup.sh",
-        "sys.version_info[:2]>=(3,10) else 1)' >/dev/null 2>&1; then",
-        "sys.version_info[:2]>=(3,0) else 1)' >/dev/null 2>&1; then",
+        "if $c -c 'import sys; sys.exit(0 if sys.version_info[:2]>=(3,10) else 1)' >/dev/null 2>&1; then",
+        "if $c -c 'import sys; sys.exit(0 if sys.version_info[:2]>=(3,0) else 1)' >/dev/null 2>&1; then",
         'tests/test_python_path.py::test_setup_refuses_a_python_older_than_3_10',
         id="setup-accepts-python-older-than-3-10",
     ),
@@ -9068,7 +9068,8 @@ _SU = [
      'tests/test_update_check.py::test_turned_off_the_session_neither_notes_nor_checks', 'su-switch-off'),
     ('tools/skyguard/update_check.py', '            or env.get("SKYGUARD_HOUSEKEEP_SWEEP", "").strip().lower() == "off"', '            or False',
      'tests/test_update_check.py::test_turned_off_the_session_neither_notes_nor_checks[env2]', 'su-helpers-switch-off'),
-    ('tools/skyguard/update_check.py', '            "mod_manager": manager, "game_root": game_root}', '            "mod_manager": {"kind": "stock"}, "game_root": game_root}',
+    ('tools/skyguard/update_check.py', '"bash": shell, "mod_manager": manager, "game_root": game_root}',
+     '"bash": shell, "mod_manager": {"kind": "stock"}, "game_root": game_root}',
      'tests/test_update_check.py::test_an_mo2_render_config_names_the_profile_the_settings_live_in', 'su-render-mo2'),
     ('tools/skyguard/update_check.py', '    if installed_version(project) is None:', '    if False:',
      'tests/test_update_check.py::test_a_git_checkout_never_asks_github', 'su-git-checkout-no-check'),
