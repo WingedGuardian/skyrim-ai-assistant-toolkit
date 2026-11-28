@@ -1,7 +1,7 @@
 {
   "v": 1,
   "project": "modding-agent-harness",
-  "revision": "92c65ad147e33ea71bff30a73750543d12bbaba5",
+  "revision": "52c16c94af7eec2cef1e9f4e3ba9afb83816f1bb",
   "api_version": 1,
   "files": {
     "tools/modding_harness/LICENSE": "07a5c5e4aac6c4eda67565a716c8f4967dc318abe03098e5dee6a8fa7672d619",
@@ -15,7 +15,8 @@
     "tools/modding_harness/durable.py": "2305d273461440dab9081ce88cb363afbe7ede17eae782d659c3791cb963e71f",
     "tools/modding_harness/find_session.py": "bdc2e6a8c15245831b2ff3ad791054badf4925c1223a83429cda145c2a23eaae",
     "tools/modding_harness/generic.py": "662227e3d75048529066905cb742cd07936bd1958424bd634a7d10d60f49176f",
-    "tools/modding_harness/guarded_update.py": "d8940b95acac8bee00d984a05f1c06df1f2c05c56e0248e41cbf515b22d7e247",
+    "tools/modding_harness/guarded_update.py": "948433e7afe21a09e9d9b27cc4ead09c39676419f4c1ff680e33da0b27cdd45e",
+    "tools/modding_harness/housekeep_budget.py": "71deb579820128bec9264e9c44a6bf9b01f359b90b36829bd9890ddd3c6a4c76",
     "tools/modding_harness/installation.py": "14ae1929930150daf7b5743d2e32e5c74c19f2f4c523b7838a80091d078ffd07",
     "tools/modding_harness/launcher.py": "2a64dc95f4a7e0255b75ab19419a2117b296246d144d025c83c3167b96b1e21e",
     "tools/modding_harness/ledger.py": "0d1ff04dd6159913e88e9179d4002ca923699c8a103a9966eab17934b478055a",
@@ -25,7 +26,7 @@
     "tools/modding_harness/preferences.py": "e5efda32f1192a8a0975b17447d275ea509eca7cab7d69d15a83e4b531b9d158",
     "tools/modding_harness/preservation.py": "9e7c183bd12924cf52c43c23b123c0b79f7142c10681fcb43ccc4b229201bdc5",
     "tools/modding_harness/profiles.py": "26768b10e3832815d6d86e726b1007ff147033753a5e00a12bd0d461c4a925a2",
-    "tools/modding_harness/release.py": "44cb656dd336d9c2b4b54e89f2ffcd3f9164d2a5efe8e7738888f652db1759f4",
+    "tools/modding_harness/release.py": "5285652e04400344bae2bde487c97e8e82e1abf6b0c27e34f1e2141b922f74aa",
     "tools/modding_harness/save_lock.py": "ee5ebd592f6a6aa43e39d3f4b258ad49bf40312a949e2a20109e8cb670461fc9",
     "tools/modding_harness/sentinel.py": "40e00c9487e984ec4f0ca1f7fa72bf74a6490bda79bd0f1d0c7af83fb66fb9a1",
     "tools/modding_harness/telemetry.py": "fdfd78ad65dd681fe311bf35b459d6969f032edf6b7bde177ec3b76d2e396f40",

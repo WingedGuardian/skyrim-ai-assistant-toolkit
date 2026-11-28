@@ -260,11 +260,23 @@ def note(root, profile, environ=None, mark=True):
         return ""
 
 
+_WINDOWS_DEVICE = re.compile(r"(?:CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|(?:COM|LPT)[1-9¹²³])", re.IGNORECASE)
+
+
+def _windows_zip_component_is_unsafe(part):
+    return (part.endswith((" ", "."))
+            or any(ord(char) < 32 or char in '<>:"|?*' for char in part)
+            or _WINDOWS_DEVICE.fullmatch(part.partition(".")[0].rstrip(" ")) is not None)
+
+
 def _safe_members(archive):
     """Every entry under ONE root folder, no links, no unsafe names, within the size budget; returns (root, files)."""
     files, roots, total = {}, set(), 0
+    windows_spellings = {}
     for info in archive.infolist():
         name = info.filename
+        if name != info.orig_filename:
+            raise ValueError("ZIP member name changed while reading: " + repr(info.orig_filename))
         mode = (info.external_attr >> 16) & 0o170000
         if mode == stat.S_IFLNK:
             raise ValueError("the release zip contains a link: " + name)
@@ -273,6 +285,14 @@ def _safe_members(archive):
         parts = name.rstrip("/").split("/")
         if any(part in ("", ".", "..") for part in parts):
             raise ValueError("unsafe entry name in the release zip: " + name)
+        if os.name == "nt":
+            folded = []
+            for part in parts:
+                if _windows_zip_component_is_unsafe(part):
+                    raise ValueError("unsafe Windows release ZIP name: " + name)
+                folded.append(part.casefold())
+                if windows_spellings.setdefault("/".join(folded), part) != part:
+                    raise ValueError("ambiguous Windows release ZIP path: " + name)
         roots.add(parts[0])
         if info.is_dir():
             continue

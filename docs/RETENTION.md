@@ -35,10 +35,7 @@ permanent eligibility from a folder name, ownership marker or file extension.
 NAS backup payloads also use the recycler after exact-plan approval; without a
 working recycle route they stay in place. No automatic Bin purge is provided.
 
-The Windows session-start report warns at `recycle_bin_warn_gib` (default 10 GiB;
-0 disables the warning). It reads aggregate contents only and reports unavailable
-queries separately. The size is logical contents, not guaranteed reclaimable
-physical allocation. Report permanent deletions, recycling and failures separately.
+Housekeep does not inventory Recycle Bin contents. Report permanent deletions, recycling and failures separately.
 
 ### Classes
 
@@ -281,8 +278,15 @@ Cleanup never runs in the background on its own: there is no scheduled task and 
 Claude Code session, the session-start hook checks whether the daily run is due (at most once every
 `daily_every_hours`, 20; not while a process in `pause_while_running` runs, such as the game or SteamVR). If it is,
 the hook prints one line into the session **before anything starts** -- what will run, which approved version, where
-the log is -- and then starts `housekeep.py session` detached: low priority, no windows, time-boxed to
-`daily_minutes` (10); whatever is left waits for the next run. The run's summary is the next session's start note.
+the log is -- and then starts `housekeep.py session` detached without a window. One worker per install runs at a
+time. On Windows the worker and its children have a 0.75% machine CPU cap and a 384 MiB committed-memory cap.
+Foreground commands use the same budget. The worker paces its own reads and writes
+toward 4 MiB/s combined and 400 I/O operations/s. Native calls and OS cache activity may
+burst between checkpoints. Linux uses an address-space limit and cooperative CPU and I/O
+pacing. Other POSIX hosts use cooperative CPU and metadata pacing with an address-space limit.
+
+After planning, the apply pass stops starting actions after `daily_minutes` (10). Whatever is left waits for the
+next run. The run's summary is the next session's start note.
 
 It **applies only when the housekeep code matches `approved_sha256`** in your config. The first run, and the first
 run after any toolkit update that changes housekeep, only plans: it writes `.claude/diag/housekeep/REVIEW-NEEDED.md`
@@ -302,7 +306,7 @@ compress several times over). Anything protected in a finished folder (a Forever
 `.housekeep-keep`) stays where it is; the zip holds a verified copy and the rest of the folder is retired. Age never proves an archive obsolete. Point
 `archive_root` at another drive or a NAS share if you have one, and add `archive_roots` entries (`{"folder":
 days}`) for folders of your own whose subfolders should be archived after that many idle days. Restore a folder
-with `python tools/housekeep_archive.py restore "<folder>/ARCHIVED.md"`; it refuses to overwrite anything.
+with `python tools/housekeep.py restore "<folder>/ARCHIVED.md"`; it refuses to overwrite anything.
 
 ### Explicit obsolete decisions
 

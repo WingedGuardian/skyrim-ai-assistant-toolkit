@@ -10,38 +10,6 @@ import zipfile
 
 import pytest
 
-def test_recycle_bin_uses_windows_packed_64bit_abi():
-    import ctypes
-    class Query:
-        def __call__(self, root, pointer):
-            info = pointer._obj
-            assert root is None
-            expected = 24 if ctypes.sizeof(ctypes.c_void_p) == 8 else 20
-            assert ctypes.sizeof(info) == info.cbSize == expected
-            info.bytes = 12 * 1024**3
-            info.items = 12345
-            return 0
-    assert b.recycle_bin_usage(shell32=SimpleNamespace(SHQueryRecycleBinW=Query())) == dict(bytes=12*1024**3,items=12345)
-
-@pytest.mark.parametrize('width,size,offsets',[(4,20,(4,12)),(8,24,(8,16))])
-def test_recycle_bin_layout_matches_both_windows_header_branches(width,size,offsets):
-    import ctypes
-    info = b._recycle_bin_info_type(width)
-    assert ctypes.sizeof(info) == size
-    assert (info.bytes.offset,info.items.offset) == offsets
-
-def test_recycle_bin_warning_is_read_only_and_reports_failures():
-    assert '12.0 GiB' in b.recycle_bin_note({},query=lambda:dict(bytes=12*1024**3,items=7))
-    assert b.recycle_bin_note({},query=lambda:dict(bytes=1024**3,items=7)) == ''
-    assert b.recycle_bin_note({'recycle_bin_warn_gib':0},query=lambda:(_ for _ in ()).throw(AssertionError('disabled query'))) == ''
-    assert b.recycle_bin_note({},query=lambda:None) == ''
-    assert 'unavailable' in b.recycle_bin_note({},query=lambda:(_ for _ in ()).throw(OSError('probe failed')))
-
-def test_recycle_bin_hresult_failure_is_not_zero_usage():
-    query = lambda *_args:-2147024809
-    with pytest.raises(OSError,match='80070057'):
-        b.recycle_bin_usage(shell32=SimpleNamespace(SHQueryRecycleBinW=query))
-
 def test_failed_archive_recycling_keeps_payload_and_restore_receipts(setup):
     _,cfg,rows = archived(setup)
     records = [json.loads(Path(r['receipt']).read_text()) for r in rows]

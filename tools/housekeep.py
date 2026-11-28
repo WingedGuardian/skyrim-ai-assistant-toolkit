@@ -12,6 +12,7 @@ that repeat the one before. The policy this tool implements is docs/RETENTION.md
             [--only CLASS[,CLASS]]               (derived, recreatable, build, link, gzip, launch, snapshot, scratch,
                                                   superseded, archive, expire)
     python tools/housekeep.py sweep-temp          recycle the toolkit's own stale temp dirs (see "temp sweep")
+    python tools/housekeep.py restore STUB.md   restore a verified task archive
     python tools/housekeep.py session STATE.txt   sweep-temp, recycle settled .claude/retired batches (what the guard
                                                   pruned from its own stores), then write the session note to STATE.txt
     python tools/housekeep.py recycle PATH...     send exactly these paths to the Recycle Bin (OK/FAILED per path)
@@ -77,7 +78,6 @@ CLASSES = ("derived", "recreatable", "build", "link", "gzip", "launch", "snapsho
 NO_WINDOW = {"creationflags": 0x08000000} if os.name == "nt" else {}      # CREATE_NO_WINDOW
 RECYCLE_BATCH = 500                                                        # paths per PowerShell call
 DEFAULTS = {
-    "recycle_bin_warn_gib": 10,       # read-only Windows aggregate; 0 disables warning
     "obsolete_items": {},            # exact bytes + explicit reason/evidence; never age alone
     "backup_archive": {},            # opt-in cold backups; docs/BACKUP-ARCHIVE.md
     "agent_output": [],               # task-folder roots (relative to the toolkit root, or absolute)
@@ -148,6 +148,7 @@ def load_config(path: Path | None) -> dict:
     p = Path(path) if path else DEFAULT_CONFIG
     if p.is_file():
         data = json.loads(p.read_text(encoding="utf-8"))
+        data.pop("recycle_bin_warn_gib", None)  # Configs predating removal can still load.
         unknown = sorted(set(data) - set(DEFAULTS) - {"root", "_comment"})
         if unknown:
             raise ValueError("unknown config key(s) in {}: {}".format(p, ", ".join(unknown)))
@@ -2122,9 +2123,6 @@ def session(cfg, state: Path) -> int:
     free = shutil.disk_usage(str(cfg["root"])).free / GIB
     if floor and free - floor < 20:
         notes.append("{:.0f} GiB free, floor {} GiB".format(free, floor))
-    bin_note = certainty.recycle_bin_note(cfg)
-    if bin_note:
-        notes.append(bin_note)
     state.parent.mkdir(parents=True, exist_ok=True)
     state.write_text(("DISK: " + "; ".join(notes) + " -- python tools/housekeep.py report\n") if notes else "",
                      encoding="utf-8")
@@ -2208,7 +2206,7 @@ def report(cfg) -> int:
     return 0
 
 
-def main(argv) -> int:
+def main(argv, *, cli=False) -> int:
     args = list(argv)
     cfg_path = None
     if "--config" in args:
@@ -2224,11 +2222,12 @@ def main(argv) -> int:
         print("housekeep: {}".format(e), file=sys.stderr)
         return 2
     cmd = args.pop(0) if args else "report"
-    refusals = ["{} ({})".format(reason, root) for root in (_abs(cfg, r) for r in cfg["staging_roots"])
-                if (reason := staging_root_refusal(root, cfg))]
-    if refusals:
-        print("housekeep: staging cleanup REFUSED: " + "; ".join(refusals), file=sys.stderr)
     try:
+        if cli and cmd not in ("announce", "version"):
+            if cmd == "session" and sweep_switched_off():
+                return 0
+            from modding_harness.housekeep_budget import run
+            return run(cfg["root"], lambda: _run(cmd, args, cfg), busy_code=0 if cmd == "session" else 1)
         return _run(cmd, args, cfg)
     except Exception as e:                           # fail closed: a protection that cannot be evaluated refuses
         if not isinstance(e, (ProtectionUnavailable, OSError, ValueError, KeyError)) \
@@ -2239,6 +2238,10 @@ def main(argv) -> int:
 
 
 def _run(cmd, args, cfg) -> int:
+    refusals = ["{} ({})".format(reason, root) for root in (_abs(cfg, r) for r in cfg["staging_roots"])
+                if (reason := staging_root_refusal(root, cfg))]
+    if refusals:
+        print("housekeep: staging cleanup REFUSED: " + "; ".join(refusals), file=sys.stderr)
     if cmd == "version" and not args:
         print(cleanup_code_sha256())
         return 0
@@ -2254,6 +2257,9 @@ def _run(cmd, args, cfg) -> int:
             why = guard.why_protected(path)
             return "" if why in {"backup folder", "known-good baseline"} else why
         return housekeep_backups.main(args, cfg, recycle, protect_backup)
+    if cmd == "restore" and len(args) == 1:
+        print("restored into", _archive_module().restore_archive(Path(args[0])))
+        return 0
     if cmd == "report" and not args:
         return report(cfg)
     if cmd == "sweep-temp" and not args:
@@ -2304,4 +2310,4 @@ def _run(cmd, args, cfg) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(main(sys.argv[1:], cli=True))

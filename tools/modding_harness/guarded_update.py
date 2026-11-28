@@ -211,6 +211,7 @@ class Applied:
     operation: str
     rolled_back: bool
     report: str
+    recovery_verified: bool = False
 
 
 _OUTPUT_TAIL = 64 * 1024
@@ -792,7 +793,8 @@ def _recover(root, installed, runner, notes_files, operation, steps, failed, bef
         lines.append("  unknown: the rollback did not complete; journal {}".format(
             root / _JOURNALS / operation))
     lines += ["  setup's effects outside the install root (deployed copies, for example) are not tracked here.", ""]
-    return Applied(False, operation, rolled_back, "\n".join(lines) + "\n")
+    return Applied(False, operation, rolled_back, "\n".join(lines) + "\n",
+                   recovery_verified=rolled_back and problem is None)
 
 
 # --- command line ---------------------------------------------------------------------------------------------------
@@ -853,7 +855,7 @@ def handle(args, root, profile, policy, *, notes_files=(), candidate_preparer=No
                                accept_guard_changes=args.accept_guard_changes, quiescent=args.quiescent,
                                notes_files=notes_files, new_policy=new_policy, candidate_validator=candidate_validator)
         return {"ok": applied.ok, "operation": applied.operation, "rolled_back": applied.rolled_back,
-                "report": applied.report}
+                "recovery_verified": applied.recovery_verified, "report": applied.report}
     if args.command == "update-clear-failed":
         resolved = Path(root).resolve()
         present = [name for name in (FAILED_MARKER, IN_FLIGHT) if _present(resolved / name)]
