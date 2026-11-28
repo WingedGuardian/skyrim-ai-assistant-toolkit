@@ -522,58 +522,6 @@ def restore(receipt, destination):
     return str(dest)
 
 
-def _recycle_bin_info_type(pointer_bytes):
-    import ctypes
-    if pointer_bytes not in (4, 8):
-        raise ValueError('unsupported Windows pointer width')
-    class Info(ctypes.Structure):
-        _pack_ = 1
-        # shellapi.h packs x86 only. x64 has four padding bytes after DWORD.
-        _fields_ = [('cbSize', ctypes.c_uint32)] + (
-            [('_padding', ctypes.c_uint32)] if pointer_bytes == 8 else []) + [
-            ('bytes', ctypes.c_int64), ('items', ctypes.c_int64)]
-    return Info
-
-
-def recycle_bin_usage(*, shell32=None):
-    """Read-only Windows aggregate; unavailable is never reported as an empty bin.
-
-    SHQUERYRBINFO is 20 bytes on x86, 24 on x64 (shellapi.h's !_WIN64 packing).
-    https://learn.microsoft.com/windows/win32/api/shellapi/nf-shellapi-shqueryrecyclebinw
-    """
-    import ctypes
-    if shell32 is None:
-        if os.name != 'nt':
-            return None
-        shell32 = ctypes.WinDLL('shell32', use_last_error=True)
-    Info = _recycle_bin_info_type(ctypes.sizeof(ctypes.c_void_p))
-    info = Info()
-    info.cbSize = ctypes.sizeof(info)
-    query = shell32.SHQueryRecycleBinW
-    query.argtypes = [ctypes.c_wchar_p, ctypes.POINTER(Info)]
-    query.restype = ctypes.c_int32
-    result = query(None, ctypes.byref(info))
-    if result != 0:
-        raise OSError('SHQueryRecycleBinW failed: HRESULT 0x{:08x}'.format(result & 0xffffffff))
-    if info.bytes < 0 or info.items < 0:
-        raise OSError('Recycle Bin returned invalid size/item count')
-    return dict(bytes=info.bytes, items=info.items)
-
-
-def recycle_bin_note(cfg, *, query=None):
-    threshold = cfg.get('recycle_bin_warn_gib', 10)
-    if not threshold:
-        return ''
-    try:
-        usage = (query or recycle_bin_usage)()
-        if usage is not None and usage['bytes'] >= threshold * 1024**3:
-            return 'Recycle Bin is {:.1f} GiB logical ({} items); review and empty deliberately'.format(
-                usage['bytes']/1024**3, usage['items'])
-    except (OSError, ValueError, TypeError) as exc:
-        return 'Recycle Bin usage unavailable: '+str(exc)
-    return ''
-
-
 def periodic_note(cfg):
     """Session-governed reminder; never an unattended archive or deletion."""
     c = settings(cfg)

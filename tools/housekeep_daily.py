@@ -39,7 +39,8 @@ NAMES = {"LOG": "daily.log", "PLAN": "last-plan.json", "REVIEW": "REVIEW-NEEDED.
 def f(cfg, name) -> Path:
     return Path(cfg["root"]) / ".claude" / "diag" / "housekeep" / NAMES[name]
 GIB = 1024 ** 3
-CODE_FILES = ("housekeep.py", "housekeep_archive.py", "housekeep_archive_policy.py", "housekeep_daily.py", "housekeep_backups.py")
+CODE_FILES = ("housekeep.py", "housekeep_archive.py", "housekeep_archive_policy.py", "housekeep_daily.py",
+              "housekeep_backups.py", "modding_harness/housekeep_budget.py")
 
 
 def running_games(names):
@@ -191,7 +192,7 @@ def run(cfg, dry=False, now=None) -> str:
         else:
             # Keep the previous review receipt: approval does not prove its notes obsolete.
             if not dry and doc["actions"]:
-                done = housekeep.apply(doc, cfg, deadline=now + cfg["daily_minutes"] * 60, summary=True)
+                done = housekeep.apply(doc, cfg, deadline=time.time() + cfg["daily_minutes"] * 60, summary=True)
     if not dry:                     # the docstring's "plan and report only": a dry run must not move the growth baseline
         write_alerts(doc, cfg)
     if not ok:
@@ -214,8 +215,11 @@ def main(argv) -> int:
     if games and not dry:                # by hand as well: only the session path goes through due()
         print("housekeep: not run: {} running (--dry-run only plans)".format(", ".join(games)))
         return 1
-    print(run(cfg, dry=dry))
-    return 0
+    from modding_harness.housekeep_budget import run as budget_run
+    def command():
+        print(run(cfg, dry=dry))
+        return 0
+    return budget_run(cfg["root"], command, busy_code=1)
 
 
 if __name__ == "__main__":

@@ -55,7 +55,7 @@ def test_git_success_counts_tracked_paths_and_worktrees(tmp_path, monkeypatch):
 def test_session_preflight_failure_never_claims_a_recycle_attempt(tmp_path, monkeypatch):
     from types import SimpleNamespace
     cfg = cfg_for(tmp_path)
-    cfg.update(sweep_every_hours=0, daily_enabled=False, recycle_bin_warn_gib=0,
+    cfg.update(sweep_every_hours=0, daily_enabled=False,
                free_floor_gib=0)
     monkeypatch.delenv("X4_HOUSEKEEP_SWEEP", raising=False)
     monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)
@@ -83,25 +83,10 @@ def test_session_preflight_failure_never_claims_a_recycle_attempt(tmp_path, monk
     assert "moved 0 leftover" not in note
 
 
-def test_session_reports_large_recycle_bin_without_emptying_it(tmp_path,monkeypatch):
-    from types import SimpleNamespace
-    cfg = cfg_for(tmp_path)
-    cfg.update(recycle_bin_warn_gib=10,worktrees_warn=10**6,codex_sessions_warn_gib=10**6,
-               free_floor_gib=0,sweep_every_hours=0)
-    monkeypatch.delenv('X4_HOUSEKEEP_SWEEP',raising=False)
-    monkeypatch.delenv("SKYGUARD_HOUSEKEEP_SWEEP", raising=False)
-    monkeypatch.setattr(hk,'sweep_temp',lambda cfg:dict(rows={'recycled':0,'failed':0,
-        'kept: no Recycle Bin on this OS':0},failed=[]))
-    monkeypatch.setattr(hk,'dir_size',lambda *args:0)
-    monkeypatch.setattr(hk,'worktree_count',lambda *args:0)
-    monkeypatch.setattr(hk.certainty,'recycle_bin_usage',lambda:dict(bytes=12*1024**3,items=7))
-    monkeypatch.setattr(hk,'recycle',lambda *args:(_ for _ in ()).throw(AssertionError('report must not empty bin')))
-    if hasattr(hk,'_daily_module'):
-        monkeypatch.setattr(hk,'_daily_module',lambda:SimpleNamespace(due=lambda cfg:'disabled'))
-    state=tmp_path/'session-note.txt'
-    assert hk.session(cfg,state)==0
-    assert 'Recycle Bin is 12.0 GiB logical (7 items)' in state.read_text(encoding='utf-8')
-    assert 'review and empty deliberately' in state.read_text(encoding='utf-8')
+def test_removed_bin_warning_is_accepted_in_older_configs(tmp_path):
+    config = tmp_path / "housekeep.json"
+    config.write_text('{"recycle_bin_warn_gib": 10}', encoding="utf-8")
+    assert "recycle_bin_warn_gib" not in hk.load_config(config)
 
 
 def test_preexisting_hardlink_to_live_bytes_is_not_made_readonly(tree):
@@ -952,7 +937,6 @@ def bin_for(tmp_path):
 
 def sweep_cfg():
     cfg = hk.load_config(None)
-    cfg['recycle_bin_warn_gib'] = 0  # no real user-bin inventory in unit fixtures
     cfg["temp_prefixes"] = ["skyrim-harness-", "t11-nohome-"]
     return cfg
 
