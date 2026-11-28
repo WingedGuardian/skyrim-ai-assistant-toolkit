@@ -208,19 +208,21 @@ def run(cfg, dry=False, now=None) -> str:
     return "housekeep: " + summary + " -- " + str(f(cfg, "LOG"))
 
 
-def main(argv) -> int:
+def main(argv, *, cli=False) -> int:
     cfg = housekeep.load_config(None)
     dry = "--dry-run" in argv
     games = running_games(cfg["pause_while_running"])
     if games and not dry:                # by hand as well: only the session path goes through due()
         print("housekeep: not run: {} running (--dry-run only plans)".format(", ".join(games)))
         return 1
-    from modding_harness.housekeep_budget import run as budget_run
     def command():
         print(run(cfg, dry=dry))
         return 0
+    if not cli:
+        return command()
+    from modding_harness.housekeep_budget import run as budget_run
     return budget_run(cfg["root"], command, busy_code=1)
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(main(sys.argv[1:], cli=True))
