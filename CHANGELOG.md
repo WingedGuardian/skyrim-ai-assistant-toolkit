@@ -20,8 +20,8 @@
   archived; small top-level `.json`, `.jsonl` and `.log` evidence stays local beside `ARCHIVED.md` (still in the
   zip); hashing a file no longer records a read, so housekeeping's own look never holds a folder; the restore line
   in `ARCHIVED.md` names the helper by its full path.
-- Both toolkits protect `.ess` and `.skse` during archive selection and restore. Archive receipts can add
-  protected extensions.
+- Skyrim protects `.ess` and `.skse` during archive selection and restore. The shared helper uses each toolkit's
+  packaged save policy. Archive receipts can add protected extensions.
 - Fixed: on Linux and macOS, resolving a very long path in the guard took time quadratic in its length (core
   issue #16).
 
