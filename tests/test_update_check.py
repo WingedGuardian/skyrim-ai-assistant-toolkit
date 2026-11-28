@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import urllib.error
@@ -330,6 +331,26 @@ def test_update_fetch_gives_the_reviewed_upgraders_inputs_and_changes_nothing_in
     for key in ("source", "candidate", "previous", "render_config"):
         assert Path(out[key]).exists(), key
     assert json.loads(Path(out["render_config"]).read_text())["mod_manager"] == {"kind": "stock"}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="requires Unix executable mode bits")
+def test_update_stage_preserves_zip_executable_bits(tmp_path, monkeypatch):
+    root = install(tmp_path)
+    data = io.BytesIO(zip_of("4.3.0"))
+    name = "tools/executable.sh"
+    entry = zipfile.ZipInfo("skyrim-ai-assistant-toolkit-4.3.0/" + name)
+    entry.create_system = 3
+    entry.external_attr = (stat.S_IFREG | 0o4710) << 16
+    with zipfile.ZipFile(data, "a") as archive:
+        archive.writestr(entry, b"#!/bin/sh\n")
+
+    status, out = harness(root, "update-stage", http=GitHub(body=data.getvalue()), monkeypatch=monkeypatch)
+    assert status == 0, out
+    bundle = Path(out["bundle"])
+    staged = bundle / "candidate" / name
+    review = json.loads((bundle / "complete.json").read_bytes())
+    assert staged.stat().st_mode & 0o7111 == 0o110
+    assert review["candidate_modes"][name] & 0o111 == 0o110
 
 
 def test_a_refused_fetch_says_why_and_fails(tmp_path, monkeypatch):

@@ -353,6 +353,9 @@ def fetch(root, profile, http=http_get, environ=None):
                     target.parent.mkdir(parents=True, exist_ok=True)
                     with archive.open(info) as src, target.open("xb") as dst:
                         shutil.copyfileobj(src, dst)
+                    mode = info.external_attr >> 16
+                    if info.create_system == 3 and stat.S_IFMT(mode) in (0, stat.S_IFREG) and mode & 0o111:
+                        target.chmod(stat.S_IMODE(target.stat().st_mode) | (mode & 0o111))
         except zipfile.BadZipFile as exc:
             raise ValueError("the release zip is damaged: {}".format(exc)) from None
         info = build_info(source)
