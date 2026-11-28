@@ -15,11 +15,11 @@ import time
 import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
+from runpy import run_path
 
 STUB = "ARCHIVED.md"
-# These extensions, X4 save names and X4 profile paths are protected for every caller.
-# A toolkit or an archive receipt can supply additional extensions.
-SAVE_EXTS = (".ess", ".skse")
+# The toolkit supplies its packaged policy next to this shared helper. A missing policy stops the operation.
+SAVE_EXTS = run_path(str(Path(__file__).resolve().with_name("housekeep_archive_policy.py")))["SAVE_EXTS"]
 # X4's own save names: the policy's Forever class is "saves and every copy", and a copy is usually not under save/.
 SAVE_NAME = re.compile(r"^(?:save_\d+|quicksave|autosave_\d+)\.xml(?:\.gz)?$")
 # The policy's Evidence class. Top-level only, and only under KEEP_MAX_BYTES; everything stays in the zip regardless.
@@ -31,7 +31,7 @@ class ArchiveError(Exception):
     pass
 
 
-def is_save(path, exts=SAVE_EXTS):
+def is_save(path, exts=()):
     """A save by built-in or additional extension, X4 save name, or protected X4 profile path."""
     low = str(path).replace('\\','/').lower()
     return (low.endswith(SAVE_EXTS + tuple(ext.lower() for ext in exts)) or '/egosoft/x4/' in low.rstrip('/')+'/'
@@ -51,7 +51,7 @@ def _plain(path):
     return path
 
 
-def _walk(src: Path, save_exts=SAVE_EXTS):
+def _walk(src: Path, save_exts=()):
     """Archive proofs must cover the entire source, without following links."""
     def failed(exc):
         raise ArchiveError('unreadable archive source: {}'.format(exc)) from exc
@@ -75,7 +75,7 @@ def _walk(src: Path, save_exts=SAVE_EXTS):
         failed(exc)
 
 
-def _members(src: Path, save_exts=SAVE_EXTS):
+def _members(src: Path, save_exts=()):
     out = []
     for dp, dirs, files in _walk(src, save_exts):
         if ".git" in dirs or ".git" in files:
@@ -102,7 +102,7 @@ def _hash(path):
     return d.hexdigest()
 
 
-def verify_source(src, record, save_exts=SAVE_EXTS):
+def verify_source(src, record, save_exts=()):
     """The local payload still equals the verified archive, including population."""
     src = _plain(src)
     expected = record.get('source_hashes')
@@ -156,7 +156,7 @@ def nas_target(nas_dir: Path, name: str) -> Path:
     return t
 
 
-def archive_scope(action, cfg, save_exts=SAVE_EXTS):
+def archive_scope(action, cfg, save_exts=()):
     """A plan cannot select new source roots or redirect its configured destination."""
     try:
         src, destination = Path(action['path']), Path(action['nas'])
@@ -183,7 +183,7 @@ def archive_scope(action, cfg, save_exts=SAVE_EXTS):
         return 'archive source/destination scope could not be verified: '+str(exc)
 
 
-def archive_folder(src: Path, nas_dir: Path, recycler, extra_keep=(), save_exts=SAVE_EXTS) -> dict:
+def archive_folder(src: Path, nas_dir: Path, recycler, extra_keep=(), save_exts=()) -> dict:
     """Zip `src` into `nas_dir`, verify, write the stub, recycle everything not kept locally. Returns the record."""
     src, nas_dir = _plain(src), _plain(nas_dir)
     if nas_dir.is_relative_to(src) or src.is_relative_to(nas_dir):
@@ -255,7 +255,7 @@ def archive_folder(src: Path, nas_dir: Path, recycler, extra_keep=(), save_exts=
     record = {"zip": str(target), "files": len(files), "bytes": total, "date": time.strftime("%Y-%m-%d %H:%M"),
               "source_hashes": hashes, "zip_sha256": verified_zip_hash, "directories": directories,
               "kept_local": sorted(os.path.relpath(k, os.path.normcase(str(src))) for k in keep),
-              "save_exts": list(save_exts)}
+              "save_exts": list(SAVE_EXTS + tuple(save_exts))}
     (src / STUB).write_text(
         "# Archived\n\nThis folder's contents were zipped by housekeep and verified (every member's CRC and hash read "
         "back from the archive copy). Local retirement is a separate step; consult the action receipt "
@@ -365,7 +365,7 @@ def _retirement_hash(path, deadline, chunk=1024*1024):
     return d.hexdigest()
 
 
-def review_archives(cfg, protect=lambda path: '', now=None, save_exts=SAVE_EXTS):
+def review_archives(cfg, protect=lambda path: '', now=None, save_exts=()):
     """Read-only review, including retention=0. Age never supplies retirement proof."""
     root = Path(cfg['archive_root'])
     deadline = time.monotonic() + cfg.get('archive_review_seconds', 15)
@@ -440,7 +440,7 @@ def periodic_note(cfg, scanner, now=None):
 def restore_archive(stub: Path, save_exts=None) -> Path:
     """Extract the zip named in the stub back into its folder. Refuses if any member's path exists with other bytes.
 
-    Caller and receipt extensions add to the built-in protections. A legacy receipt can omit the extension list.
+    Caller and receipt extensions add to the toolkit's protections. A legacy receipt can omit the extension list.
     An old archive containing a protected path is refused before any member is extracted."""
     stub = Path(stub)
     text = stub.read_text(encoding="utf-8")

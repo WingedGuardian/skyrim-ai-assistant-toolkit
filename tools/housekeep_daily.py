@@ -39,7 +39,7 @@ NAMES = {"LOG": "daily.log", "PLAN": "last-plan.json", "REVIEW": "REVIEW-NEEDED.
 def f(cfg, name) -> Path:
     return Path(cfg["root"]) / ".claude" / "diag" / "housekeep" / NAMES[name]
 GIB = 1024 ** 3
-CODE_FILES = ("housekeep.py", "housekeep_archive.py", "housekeep_daily.py", "housekeep_backups.py")
+CODE_FILES = ("housekeep.py", "housekeep_archive.py", "housekeep_archive_policy.py", "housekeep_daily.py", "housekeep_backups.py")
 
 
 def running_games(names):

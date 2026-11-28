@@ -104,6 +104,8 @@ CORE_REQUIRED = (
     "tools/archive-triage.py",
     "tools/mirror-launch-logs.py",
     "tools/housekeep.py",
+    "tools/housekeep_archive.py",
+    "tools/housekeep_archive_policy.py",
     "tools/mod-install.py",
     "tools/nexus.sh",
     "tools/nexus-render.py",
